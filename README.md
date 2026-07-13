@@ -2,7 +2,19 @@
 
 > Put your agent's memory on a shelf, hand it the index.
 
-**Status: design phase.** No code yet — the architecture, manifest, and
+```text
+                              _          _  __
+ _ __ ___   ___ _ __ ___  ___| |__   ___| |/ _|
+| '_ ` _ \ / _ \ '_ ` _ \/ __| '_ \ / _ \ | |_
+| | | | | |  __/ | | | | \__ \ | | |  __/ |  _|
+|_| |_| |_|\___|_| |_| |_|___/_| |_|\___|_|_|
+  ____________________________________________
+ | INDEX >> | E-01 | E-02 | E-03 | E-04 | ... |
+ |__________|______|______|______|______|_____|
+        memory shelves for AI agents
+```
+
+**Status: design phase → M0 validated.** No code yet — the architecture, manifest, and
 roadmap live in [`docs/`](docs/) and are the current deliverable. Sibling
 project of [docshelf-mcp](https://github.com/ignatenkofi/docshelf-mcp),
 which provides the storage/index layer.
