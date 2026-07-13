@@ -2,6 +2,11 @@
 
 > Put your agent's memory on a shelf, hand it the index.
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/status-design%20%E2%86%92%20M0%20validated-blue.svg)](docs/M0.md)
+[![MCP](https://img.shields.io/badge/MCP%20server-planned%20(M1)-purple.svg)](https://github.com/ignatenkofi/memshelf-mcp/issues)
+[![Sibling: docshelf](https://img.shields.io/badge/sibling-docshelf--mcp-green.svg)](https://github.com/ignatenkofi/docshelf-mcp)
+
 ```text
                               _          _  __
  _ __ ___   ___ _ __ ___  ___| |__   ___| |/ _|
@@ -59,6 +64,18 @@ Designed as RFC-0001 in the docshelf-mcp repo
 [#44](https://github.com/ignatenkofi/docshelf-mcp/pull/44)); this repo is the
 project's home from 2026-07-13 on. The docshelf copy is frozen as a
 historical snapshot.
+
+## Related projects
+
+- **[docshelf-mcp](https://github.com/ignatenkofi/docshelf-mcp)** — the
+  sibling project and storage layer: PDFs/Markdown → chat-project-friendly
+  document shelves with the same index-and-fetch economics
+  ([measured](https://github.com/ignatenkofi/docshelf-mcp/blob/main/docs/demo.md):
+  ~3.7K tokens vs 1.2M per question). memshelf was born as
+  [RFC-0001](https://github.com/ignatenkofi/docshelf-mcp/tree/main/docs/rfc/0001-memshelf)
+  in its repo and reuses its splitter/indexer/read/search verbatim.
+- The dogfood memory shelf is a private repo — by design (MANIFEST
+  principle 5): the tool is public, the memory never is.
 
 ## License
 
