@@ -56,6 +56,8 @@ conventions on top:
 memory-shelf/
 ├── .docshelf.json            # provider: none; memory.storage: git-local
 ├── INDEX.md                  # the ONLY file that lives in agent context
+├── POLICY.md                 # per-shelf PII/redaction rules (optional)
+├── ledger.tsv                # token accounting: one row per shelve
 └── docs/
     ├── topics/               # closed topics & investigations (the bulk)
     │   ├── .meta.json
@@ -200,11 +202,20 @@ prompt) injects the current `INDEX.md` — the entire standing memory cost.
 | `memshelf_recall` | `Shelf` read path | By id/path, optional `section` (H2 slug). Section-sized by default; whole episode only on request. |
 | `memshelf_search` | `Shelf.search` | Grep-level, returns addresses; embeddings later. |
 | `memshelf_index` | read `INDEX.md` | Session-start bootstrap and mid-session refresh. |
-| `memshelf_doctor` | `docshelf_doctor` + episode checks | Schema drift, missing digests, secret-shaped strings that slipped through. |
+| `memshelf_doctor` | `docshelf_doctor` + episode checks | Schema drift, missing digests, secret-shaped strings that slipped through, ledger consistency. |
+| `memshelf_stats` | `ledger.tsv` | Transparent token accounting: standing cost (INDEX + digests) vs shelved mass, compression ratio, per-episode and cumulative savings — same tokenizer methodology as docshelf's `benchmarks/token_savings.py`. |
+| `memshelf_import` (M1 candidate, pending M0) | segmentation + N× shelve | Retro-shelve an exported transcript: agent proposes episode cuts, then capture→digest→shelve per episode + one session digest. The raw transcript is input only — never stored. |
 
 Design rule: every memshelf tool is a thin layer over `docshelf_mcp.Shelf`;
 anything generic enough for documents gets upstreamed to docshelf instead of
 living here.
+
+**Accounting.** Every shelve appends to `ledger.tsv`
+(`date / episode_id / mode(live|import) / approx_tokens_in / digest_tokens /
+notes`). This makes the project's core claim — saved tokens — measurable on
+every real shelf, not just in benchmarks: standing cost of memory vs shelved
+mass vs recall cost per question. See `docs/M0.md → Measurement` for the
+derived numbers.
 
 ## Portability model
 

@@ -35,7 +35,9 @@ git repo with **no remote configured**.
 | [`docs/LANDSCAPE.md`](docs/LANDSCAPE.md) | Prior-art survey (2026-07), platform built-ins, positioning, risks |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Milestones M0–M3 with exit criteria |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Decision log |
+| [`docs/M0.md`](docs/M0.md) | M0 experiment protocol (running): cases, token ledger, recall test |
 | [`docs/examples/`](docs/examples/) | A worked episode file and a memory-shelf INDEX |
+| [`adapters/claude-code/`](adapters/claude-code/) | M0 prompt-only kit: `/shelve` skill (live + import modes), recall-rule snippet |
 
 ## Origin
 

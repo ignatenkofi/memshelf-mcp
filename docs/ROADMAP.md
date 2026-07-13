@@ -4,23 +4,25 @@ Milestones are deliberately thin. M0 validates the pattern with **zero new
 code**; every later milestone must justify itself against what M0 already
 achieves.
 
-## M0 — Pattern validation, no code
+## M0 — Pattern validation, no code — **running since 2026-07-13**
 
-Prove the loop works with docshelf as-is plus conventions.
+Prove the loop works with docshelf as-is plus conventions. Protocol, kit,
+and measurement methodology: [`docs/M0.md`](M0.md); the prompt-only skill and
+recall-rule snippet live in `adapters/claude-code/`.
 
-- Create one real memory shelf (private repo) for one real project.
-- A `/shelve` **skill** (prompt-only) that instructs the agent to: cut a
-  closed topic, write the episode in the RFC's format, call
-  `docshelf_add_document`, commit, and replace the topic with the digest.
-- Project prompt / CLAUDE.md snippet with the recall rule (INDEX first,
-  fetch section, don't guess about past decisions).
-- Manual measurement: token cost of answering 5 "what did we decide about X"
-  questions via recall vs keeping history in-window (reuse the methodology of
-  `benchmarks/token_savings.py`).
+- One real memory shelf (private repo — cloud sessions need a remote).
+- **Case A, retro-import**: the author's long sqst homework-review dialog,
+  segmented into depersonalized episodes + a session digest (import mode of
+  the skill; raw transcript never committed anywhere).
+- **Case B, live shelving**: recall rule + `/shelve` during ~a week of
+  normal work on a real project.
+- Measurement via the **token ledger** (`ledger.tsv`, see ARCHITECTURE →
+  Accounting): standing cost vs shelved mass vs recall cost per question,
+  docshelf-benchmark methodology.
 
-**Exit criteria:** the 5 questions answered correctly via recall; measured
-savings written down; a list of everything that was annoying enough to need
-actual tooling. That list *is* the M1 backlog.
+**Exit criteria:** 5 known-answer recall questions answered correctly from a
+fresh session via INDEX navigation; ledger numbers written down; the
+annoyance log filled. That log *is* the M1 backlog.
 
 ## M1 — `memshelf-mcp` thin server
 
@@ -38,6 +40,10 @@ Only what M0 proved annoying, expected:
 - Repo bootstrap: `memshelf init` → docshelf `init_shelf` with memory
   conventions (`provider: none`, fixed categories, `storage: git-local` —
   auto-commit, **no remote**; `plain` via flag).
+- `memshelf_stats` over the ledger (standing cost / shelved mass /
+  compression ratio) — the transparent-savings feature.
+- `memshelf_import` — tool-assisted whole-dialog backfill (M1 candidate;
+  confirm need from M0 Case A experience).
 
 **Exit criteria:** dogfooded on two real projects for two weeks; a full
 shelve→compact→recall cycle survives without manual repair; `doctor` clean.
