@@ -65,6 +65,13 @@ per-VLAN DHCP leases and inter-VLAN nmap scans.
 
 Points to notice:
 
+- **On disk this file starts with `# 2026-06-02-vlan-migration`, not the
+  frontmatter.** docshelf's `add_document` prepends `# {title}` when the
+  content doesn't begin with `#` (a `---` line doesn't), so stored episodes
+  are H1-first, frontmatter second. The skeleton above omits the H1 for
+  brevity. Parsers read the **first `---`-fenced YAML block, optionally
+  preceded by a single H1 and blank lines** (shelf-spec v0 § 5.1; see
+  ARCHITECTURE → Layer 2).
 - The **digest alone** answers the likely future questions ("why bridge
   filtering?", "why only two SSIDs?") without fetching the body.
 - `## Decisions` keeps rejected alternatives *with reasons* — the thing

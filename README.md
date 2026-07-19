@@ -3,7 +3,7 @@
 > Put your agent's memory on a shelf, hand it the index.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-design%20%E2%86%92%20M0%20validated-blue.svg)](docs/M0.md)
+[![Status](https://img.shields.io/badge/status-design%20%E2%86%92%20M0%3A%20Case%20A%20closed%2C%20B%20running-blue.svg)](docs/M0.md)
 [![MCP](https://img.shields.io/badge/MCP%20server-planned%20(M1)-purple.svg)](https://github.com/ignatenkofi/memshelf-mcp/issues)
 [![Sibling: docshelf](https://img.shields.io/badge/sibling-docshelf--mcp-green.svg)](https://github.com/ignatenkofi/docshelf-mcp)
 
@@ -19,7 +19,7 @@
         memory shelves for AI agents
 ```
 
-**Status: design phase → M0 validated.** No code yet — the architecture, manifest, and
+**Status: design phase → M0 in progress: Case A closed, Case B running.** No code yet — the architecture, manifest, and
 roadmap live in [`docs/`](docs/) and are the current deliverable. Sibling
 project of [docshelf-mcp](https://github.com/ignatenkofi/docshelf-mcp),
 which provides the storage/index layer.

@@ -21,5 +21,9 @@ Long-term working memory for this project lives on a shelf at
 - **Offer to shelve.** When a topic closes, or a dormant topic is visibly
   heavy (tens of KB doing nothing for a long stretch), offer `/shelve`.
   Before any compaction, shelve closed topics first.
-- **Shelf git rules:** commits only, never push; never write outside the
-  shelf directory.
+- **Shelf git rules:** commit after every shelve; never write outside the
+  shelf directory. Pushing depends on the environment — in an ephemeral cloud
+  session (web/remote Claude Code, a container that dies at session end) push
+  the shelf's `git-remote` immediately after the commit so the episode
+  survives the container; on a persistent host push stays manual (on your
+  confirmation). A `git-local` shelf has no remote and nothing to push.

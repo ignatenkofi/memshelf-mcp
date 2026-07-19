@@ -21,6 +21,20 @@ once code ships.
   log ×10 = the M1 backlog (issues #6–#20).
 - Community files, ASCII logo, MIT license.
 
+### Fixed
+- `/shelve` skill and recall snippet now push `git-remote` shelves in
+  ephemeral cloud sessions right after the commit; `docs/M0.md` states the
+  push is not optional in M0 (was: commit-only, so committed episodes could
+  die with the container) (#22).
+- `/shelve` Python fallback computes `category` from `kind` (`<kind-mapped>`)
+  instead of hardcoding `topics`, so `research`/`session` episodes no longer
+  misfile into `topics/` (#23).
+- README status softened from "M0 validated" to "M0 in progress: Case A
+  closed, Case B running", matching `docs/M0.md` and `docs/ROADMAP.md` (#24).
+- Documented the real on-disk episode shape (H1 title first, frontmatter
+  second, per docshelf `add_document`) and the frontmatter parser rule in
+  ARCHITECTURE Layer 2, the worked example, and the skill (#30).
+
 ### Notable design decisions (see `docs/DECISIONS.md`)
 - Storage is local-first: `plain` / `git-local` (default, no remote) /
   `git-remote` (opt-in, private-only).
