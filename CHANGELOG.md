@@ -34,6 +34,13 @@ once code ships.
 - Documented the real on-disk episode shape (H1 title first, frontmatter
   second, per docshelf `add_document`) and the frontmatter parser rule in
   ARCHITECTURE Layer 2, the worked example, and the skill (#30).
+- `docs/DECISIONS.md` now cites the three docshelf-mcp origin PRs as full
+  cross-repo refs (`ignatenkofi/docshelf-mcp#42`/`#43`/`#44`) instead of bare
+  `#42`/`#43`/`#44`, which GitHub auto-linked to this repo's own (wrong or
+  nonexistent) issues (#26).
+- `session:` frontmatter field is now produced by the M0 kit: added to the
+  `/shelve` SKILL.md template and the worked example, aligning them with the
+  ARCHITECTURE episode schema that already defined it as optional (#27).
 
 ### Notable design decisions (see `docs/DECISIONS.md`)
 - Storage is local-first: `plain` / `git-local` (default, no remote) /

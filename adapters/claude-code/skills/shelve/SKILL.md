@@ -29,6 +29,7 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
    ---
    id: YYYY-MM-DD-<slug>            # today's date + short latin slug
    kind: topic                      # topic | research | session
+   session: <ref>                   # optional: opaque ref for the session that produced this
    span: YYYY-MM-DD..YYYY-MM-DD     # when the work actually happened
    tags: [..]
    approx_tokens: <estimate>        # what this cost in-window (chars/4)
