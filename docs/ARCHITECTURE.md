@@ -149,6 +149,22 @@ Empty sections are omitted. `## Digest` and `## Decisions` are mandatory for
 section; `kind: session` requires `## Digest`, `## Timeline`, `## Open
 threads`.
 
+**On-disk placement (docshelf `add_document`).** The skeleton above shows
+frontmatter at byte 0, but the M0 write path prepends an H1 title: docshelf's
+`add_document` inserts `# {title}` whenever the content doesn't already start
+with `#`, and a `---` fence doesn't. So every episode stored through the kit
+is **H1-first** — `# 2026-07-10-unevie-auth-refactor`, a blank line, then the
+`---`-fenced frontmatter — not frontmatter-at-byte-0. Both placements are
+normative: shelf-spec v0 (openshelf, ADR-0005) § 5.1 "frontmatter placement"
+legalized this after the drift was found and requires parsers to accept both.
+
+**Parser rule** (for `memshelf_doctor` (#13) and `memshelf_stats` (#8), which
+read frontmatter): the frontmatter is the **first `---`-fenced YAML block,
+optionally preceded by a single H1 and blank lines**. A byte-0-only parser
+(python-frontmatter's default — "YAML block starting at byte 0") finds zero
+frontmatter in real episodes; it must be configured or wrapped to skip a
+leading H1.
+
 **Redaction pass.** Before write, capture runs a configurable regex pass over
 the body: common credential shapes (AWS keys, `squ_…`, bearer/`ghp_` tokens,
 `.env`-style assignments) are replaced with `«redacted:<kind>»`. User-defined

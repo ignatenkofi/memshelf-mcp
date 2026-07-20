@@ -46,6 +46,11 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
    `research` needs Digest + one body section;
    `session` needs Digest + Timeline + Open threads.
 
+   Write the skeleton frontmatter-first as above, but note the **stored** file
+   differs: docshelf `add_document` prepends `# <id>` when the content doesn't
+   start with `#`, so on disk the episode is H1-first (`# <id>`, a blank line,
+   then this frontmatter). See ARCHITECTURE → Layer 2 (shelf-spec v0 § 5.1).
+
 3. **Redaction & PII pass — before anything touches disk.**
    - Replace credential-shaped strings (tokens, keys, `.env` assignments,
      bearer headers) with `«redacted:<kind>»`.
@@ -68,7 +73,7 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
    python3 -c "
    from docshelf_mcp import Shelf
    s = Shelf('$MEMSHELF_ROOT')
-   s.add_document('<temp .md>', category='topics', title='<id>',
+   s.add_document('<temp .md>', category='<kind-mapped>', title='<id>',
                   description='<digest first sentence>')"
    ```
 
@@ -84,9 +89,20 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
 
    `mode` = `live` or `import`; `digest_tokens` = digest chars/4.
 
-7. **Commit — shelf repo only.** `git add -A && git commit` inside the shelf
-   with message `shelve: <id>`. **Never `git push` from this skill.** Never
-   write outside the shelf directory.
+7. **Commit, then push if the container is ephemeral — shelf repo only.**
+   `git add -A && git commit` inside the shelf with message `shelve: <id>`;
+   never write outside the shelf directory. Whether to push depends on the
+   shelf's storage mode and the session:
+   - `git-local` / `plain` (no remote): nothing to push — the commit is the
+     durable record.
+   - `git-remote` in an **ephemeral cloud session** (web/remote Claude Code,
+     a Cowork container reclaimed at session end): `git push` **immediately
+     after the commit**. A committed-but-unpushed episode dies with the
+     container — the exact loss mode M0 exists to prevent (`docs/M0.md`).
+     Until the M1 `SessionEnd`/`PreCompact` hooks (#11) automate it, this
+     push is a required manual step of every shelve.
+   - `git-remote` on a **persistent host** (durable local clone): push stays
+     deliberate — on the user's confirmation, not automatic.
 
 8. **Replace in context.** End your reply with the digest and the episode's
    shelf path. From this point on refer to the topic ONLY by that address;
