@@ -12,6 +12,7 @@ section files with a SUBINDEX.
 ---
 id: 2026-06-02-vlan-migration
 kind: topic
+session: cowork-2026-06-02-a
 span: 2026-06-01..2026-06-02
 tags: [homelab, mikrotik, vlan, networking]
 approx_tokens: 38000
@@ -81,3 +82,7 @@ Points to notice:
 - Frontmatter `approx_tokens: 38000` records what this episode was costing
   per-turn while it lived in context; the whole file is ~600 tokens, the
   digest ~130.
+- `session: cowork-2026-06-02-a` is the optional provenance field
+  (ARCHITECTURE → Layer 2): an opaque ref for the working session that
+  produced the episode, useful for disambiguating concurrent sessions. Omit
+  it when provenance doesn't matter.
