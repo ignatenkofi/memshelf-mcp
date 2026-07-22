@@ -67,3 +67,17 @@ def test_scan_reports_without_rewriting():
     report = scan("squ_" + "f" * 40)
     assert not report.clean
     assert report.counts["sonar-token"] == 1
+
+
+def test_env_secret_redaction_is_idempotent():
+    # shelve() stores `KEY=«redacted:env-secret»`; a re-scan (doctor) must not
+    # flag it again, and a second redact() pass must change nothing.
+    once, first = redact("SONAR_TOKEN=squ_livevalue")
+    assert first.counts["env-secret"] == 1
+    twice, second = redact(once)
+    assert twice == once
+    assert second.clean
+
+
+def test_scan_ignores_already_redacted_values():
+    assert scan("SONAR_TOKEN=«redacted:env-secret» in the runbook").clean

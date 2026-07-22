@@ -49,7 +49,11 @@ _BUILTIN: tuple[_Rule, ...] = (
         re.compile(
             r"(?P<key>\b[A-Za-z0-9_]*"
             r"(?:TOKEN|SECRET|PASSWORD|PASSWD|PWD|API[_-]?KEY|ACCESS[_-]?KEY)"
-            r"[A-Za-z0-9_]*)\s*=\s*(?P<val>\S+)",
+            # A value that is already a redaction marker must not re-match:
+            # shelve() stores `KEY=«redacted:env-secret»`, and without the
+            # lookahead scan()/doctor would flag every correctly-redacted
+            # episode forever (and redact() wouldn't be idempotent).
+            r"[A-Za-z0-9_]*)\s*=\s*(?P<val>(?!«redacted:)\S+)",
             re.IGNORECASE,
         ),
         rewrite=_env_secret_rewrite,
