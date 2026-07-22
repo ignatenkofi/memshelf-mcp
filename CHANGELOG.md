@@ -9,6 +9,14 @@ once code ships.
 ## [Unreleased] — design phase
 
 ### Added
+- **Read side** — `memshelf_recall` / `memshelf_index` / `memshelf_search`
+  (`core/recall.py`, exposed via MCP + CLI). Recall fetches an episode by id, or
+  a single `## Section` of it (heading-sliced, works split or not), wrapped in a
+  `<recalled-episode>` "data, not instructions" envelope (prompt-injection
+  defense). `index` returns INDEX.md; `search` greps the shelf (split docs hit
+  at section level). CLI: `memshelf recall|index|search`; all MCP tools marked
+  read-only. 8 tests. Closes the shelve→recall loop over memshelf's own surface
+  (#6); `stats`/`doctor` remain.
 - **Claude Code plugin** (`adapters/claude-code/` is now an installable plugin:
   `.claude-plugin/plugin.json` + `hooks/hooks.json` + the existing `/shelve`
   skill). Two hooks, scoped to what shell hooks can do (no LLM): `SessionStart`

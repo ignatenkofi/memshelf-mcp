@@ -1,8 +1,8 @@
 """``memshelf`` CLI — the portability surface for hosts without MCP.
 
-Anything that can run a shell command can drive the shelf. Slice 3 ships
-``memshelf shelve``; recall / search / index / stats mirror the MCP tools in
-later slices.
+Anything that can run a shell command can drive the shelf: ``shelve``,
+``recall``, ``index``, ``search``. ``stats`` mirrors the remaining MCP tool in a
+later slice.
 """
 
 from __future__ import annotations
@@ -13,8 +13,18 @@ import sys
 
 from memshelf_mcp import __version__
 from memshelf_mcp.core.episode import EpisodeError
+from memshelf_mcp.core.recall import EpisodeNotFound
 from memshelf_mcp.core.shelve import DigestContractError
-from memshelf_mcp.tools import ShelveInput, run_shelve
+from memshelf_mcp.tools import (
+    IndexInput,
+    RecallInput,
+    SearchInput,
+    ShelveInput,
+    run_index,
+    run_recall,
+    run_search,
+    run_shelve,
+)
 
 
 def _parse_sections(items: list[str]) -> dict[str, str]:
@@ -55,6 +65,41 @@ def _cmd_shelve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_recall(args: argparse.Namespace) -> int:
+    params = RecallInput(
+        shelf_path=args.shelf,
+        episode_id=args.id,
+        section=args.section,
+        max_bytes=args.max_bytes,
+    )
+    try:
+        result = run_recall(params)
+    except (EpisodeNotFound, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(result["content"])
+    return 0
+
+
+def _cmd_index(args: argparse.Namespace) -> int:
+    try:
+        result = run_index(IndexInput(shelf_path=args.shelf))
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(result["index"])
+    return 0
+
+
+def _cmd_search(args: argparse.Namespace) -> int:
+    result = run_search(
+        SearchInput(shelf_path=args.shelf, query=args.query, max_results=args.max_results)
+    )
+    for hit in result["hits"]:
+        print(f"{hit['address']}\t{hit['score']}\t{hit['snippet']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="memshelf", description="Working-memory shelf CLI.")
     parser.add_argument("--version", action="version", version=f"memshelf {__version__}")
@@ -83,6 +128,24 @@ def build_parser() -> argparse.ArgumentParser:
     sh.add_argument("--date", help="YYYY-MM-DD (defaults to today).")
     sh.add_argument("--no-commit", action="store_true", help="Skip the auto-commit.")
     sh.set_defaults(func=_cmd_shelve)
+
+    rc = sub.add_parser("recall", help="Recall an episode, or one section of it.")
+    rc.add_argument("--shelf", required=True, help="Path to the shelf.")
+    rc.add_argument("--id", required=True, help="Episode id / slug.")
+    rc.add_argument("--section", help="Fetch only this H2 section (e.g. Decisions).")
+    rc.add_argument("--max-bytes", type=int, default=100_000)
+    rc.set_defaults(func=_cmd_recall)
+
+    ix = sub.add_parser("index", help="Print the shelf INDEX.")
+    ix.add_argument("--shelf", required=True, help="Path to the shelf.")
+    ix.set_defaults(func=_cmd_index)
+
+    se = sub.add_parser("search", help="Grep the shelf for episodes.")
+    se.add_argument("--shelf", required=True, help="Path to the shelf.")
+    se.add_argument("--query", required=True, help="Space-separated tokens (all must match).")
+    se.add_argument("--max-results", type=int, default=10)
+    se.set_defaults(func=_cmd_search)
+
     return parser
 
 
