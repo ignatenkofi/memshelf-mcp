@@ -9,6 +9,15 @@ once code ships.
 ## [Unreleased] — design phase
 
 ### Added
+- **`shelve()` orchestration** (`core/shelve.py` + `core/episode.py`) — one
+  call turns an in-context topic into a durable episode: redact → validate the
+  digest contract → compose the H1-first episode → write through docshelf →
+  append the ledger row → auto-commit (commit only, never push). `display_title`
+  keeps a latin slug filename while giving INDEX a free-form (e.g. Cyrillic)
+  title via a `.meta.json` override. Closes M0 annoyances #1 (slug↔title) and
+  #2 (ledger by hand); reuses the #3 validator. 12 tests (7 pure + 5 integration
+  against a temp docshelf shelf + git). `docshelf-mcp>=0.2` is now a runtime
+  dependency; the Layer-2/3 modules stay import-light (#6).
 - **First M1 code** — host-agnostic enforcement core (`src/memshelf_mcp/core/`):
   Layer-2 redaction (`redact.py` — masks credential shapes to
   `«redacted:<kind>»` with a per-kind report, pluggable per-shelf patterns)
