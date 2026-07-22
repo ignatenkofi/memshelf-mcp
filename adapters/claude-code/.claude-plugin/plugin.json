@@ -1,0 +1,10 @@
+{
+  "name": "memshelf",
+  "description": "Working-memory shelf for Claude Code: the /shelve skill plus a SessionStart hook that injects the shelf INDEX (recall bootstrap) and a SessionEnd/PreCompact hook that pushes the shelf so episodes survive an ephemeral container.",
+  "version": "0.1.0",
+  "author": { "name": "Filipp Ignatenko", "email": "ignatenkofi@gmail.com" },
+  "homepage": "https://github.com/ignatenkofi/memshelf-mcp",
+  "license": "MIT",
+  "keywords": ["memory", "context", "shelve", "recall", "docshelf"],
+  "hooks": "./hooks/hooks.json"
+}

@@ -9,6 +9,15 @@ once code ships.
 ## [Unreleased] — design phase
 
 ### Added
+- **Claude Code plugin** (`adapters/claude-code/` is now an installable plugin:
+  `.claude-plugin/plugin.json` + `hooks/hooks.json` + the existing `/shelve`
+  skill). Two hooks, scoped to what shell hooks can do (no LLM): `SessionStart`
+  injects the shelf `INDEX.md` as context (recall bootstrap), and
+  `SessionEnd`/`PreCompact` push the shelf for durability (`autopush.sh`, opt-in
+  via `MEMSHELF_AUTOPUSH`). Shelving-before-compaction and session digests stay
+  agent-driven (skill + recall rule) — `PreCompact` can't inject context and
+  `SessionEnd` runs after the agent stops. 4 hook tests; README install docs;
+  DECISIONS + ROADMAP updated (#11).
 - **MCP server + CLI** exposing `memshelf_shelve` (`server.py`, `cli.py`,
   `tools.py`) — the protocol ring over the core. FastMCP stdio server (mirrors
   docshelf's style) and a `memshelf shelve` command for hosts without MCP, both
