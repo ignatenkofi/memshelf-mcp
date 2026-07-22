@@ -12,6 +12,10 @@ shelves, a memory shelf is private by design, so you can't clone this one — bu
 every number below comes from `memshelf stats` / `memshelf doctor`, which you
 can [point at your own shelf](#reproduce-it) unchanged.
 
+> **Visual version:** the same numbers as a one-page infographic —
+> [`assets/case-b-week-report.html`](assets/case-b-week-report.html)
+> (self-contained, no external resources, light + dark).
+
 ## The numbers
 
 | Shelf state | Episodes | `INDEX.md` | Standing cost (INDEX + digests) | Shelved mass | Ratio |
