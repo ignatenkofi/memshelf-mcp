@@ -27,11 +27,13 @@ classifiers = [
     "Topic :: Text Processing :: Markup :: Markdown",
 ]
 
-# Runtime deps are added per slice as the surfaces land. The Layer-2/3 core
-# (redaction, digest contract) is pure stdlib — nothing to install to use or
-# test it. `docshelf-mcp` + `mcp` arrive with the shelve orchestration and the
-# server (slices 2–3).
-dependencies = []
+# The shelve orchestration (slice 2) wraps docshelf's Shelf. The pure Layer-2/3
+# core (redaction, digest contract) stays import-light — it needs none of this,
+# so those modules and their tests run without docshelf installed. `mcp` arrives
+# with the server surface (slice 3).
+dependencies = [
+    "docshelf-mcp>=0.2",
+]
 
 [project.optional-dependencies]
 dev = [
