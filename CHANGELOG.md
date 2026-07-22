@@ -9,6 +9,14 @@ once code ships.
 ## [Unreleased] — design phase
 
 ### Added
+- **First M1 code** — host-agnostic enforcement core (`src/memshelf_mcp/core/`):
+  Layer-2 redaction (`redact.py` — masks credential shapes to
+  `«redacted:<kind>»` with a per-kind report, pluggable per-shelf patterns)
+  and the Layer-3 digest-contract validator (`digest.py` — ≤120 words,
+  first-person-referent reject EN+RU, secret scan, actionable errors). Package
+  scaffold mirrors docshelf (hatchling/ruff/pytest, `src` layout); pure stdlib,
+  18 tests. Closes the first toil from the M0 annoyance log (#3, digests
+  "validated by agent honor") (#6).
 - Design package seeded from docshelf-mcp RFC-0001: manifest, architecture
   (episode format, digest contract, storage modes, portability model),
   prior-art landscape, roadmap M0–M3, decision log, worked examples.
