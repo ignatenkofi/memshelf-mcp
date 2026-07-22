@@ -9,6 +9,16 @@ once code ships.
 ## [Unreleased] — design phase
 
 ### Added
+- **`memshelf_doctor`** (`core/doctor.py` + `core/frontmatter.py`, MCP + CLI) —
+  shelf integrity check. Wraps docshelf's structural `doctor` and adds
+  memshelf checks per episode: schema (id↔filename, valid kind, required
+  sections by kind), the digest contract at rest, and secret-shaped strings
+  that slipped onto disk; plus ledger consistency (episode↔row both ways) and
+  the INDEX injection budget (~2500 tokens). New H1-first-aware frontmatter
+  parser (no YAML dep) that ARCHITECTURE mandates for doctor/stats. `memshelf
+  doctor` exits non-zero on error-level findings (CI / pre-commit friendly);
+  read-only, reports and fixes nothing. Completes the M1 tool surface (shelve /
+  recall / index / search / stats / doctor). 7 tests (#6).
 - **`memshelf_stats` + realized-economy metric** (`core/stats.py`, MCP + CLI).
   Reads `ledger.tsv` for **claimed** economy (standing cost = INDEX + digests;
   shelved mass = Σ approx_tokens_in; compression ratio) and, when recall logging

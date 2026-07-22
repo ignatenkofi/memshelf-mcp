@@ -3,8 +3,8 @@
 A thin wrapper: each tool validates its input (pydantic), calls the typed entry
 point in ``tools.py``, and serializes the result. Tools: ``memshelf_shelve``
 (write), ``memshelf_recall`` / ``memshelf_index`` / ``memshelf_search`` (read),
-and ``memshelf_stats`` (accounting). ``memshelf_doctor`` lands in a later slice.
-See ``docs/ARCHITECTURE.md`` → MCP tool surface.
+``memshelf_stats`` (accounting), and ``memshelf_doctor`` (integrity). See
+``docs/ARCHITECTURE.md`` → MCP tool surface.
 """
 
 from __future__ import annotations
@@ -18,11 +18,13 @@ from mcp.server.fastmcp import FastMCP
 
 from memshelf_mcp import __version__
 from memshelf_mcp.tools import (
+    DoctorInput,
     IndexInput,
     RecallInput,
     SearchInput,
     ShelveInput,
     StatsInput,
+    run_doctor,
     run_index,
     run_recall,
     run_search,
@@ -131,6 +133,20 @@ def memshelf_stats(params: StatsInput) -> str:
         return _serialize(run_stats(params))
     except Exception as exc:
         return _error_response(exc, "memshelf_stats")
+
+
+@mcp.tool(
+    name="memshelf_doctor",
+    annotations={"title": "Check shelf integrity", **_READ_ONLY},
+)
+def memshelf_doctor(params: DoctorInput) -> str:
+    """Diagnose the shelf: episode schema, the digest contract at rest, secrets
+    that slipped onto disk, ledger consistency, and the INDEX budget — plus
+    docshelf's structural checks. Read-only; reports findings, fixes nothing."""
+    try:
+        return _serialize(run_doctor(params))
+    except Exception as exc:
+        return _error_response(exc, "memshelf_doctor")
 
 
 def main(argv: list[str] | None = None) -> None:
