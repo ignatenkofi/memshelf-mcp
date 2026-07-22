@@ -26,6 +26,11 @@ _REQUIRED_SECTIONS: dict[str, tuple[str, ...]] = {
 _SECTION_ORDER = ("Decisions", "Timeline", "Artifacts", "Open threads", "Raw excerpts")
 
 
+def required_sections(kind: str) -> tuple[str, ...]:
+    """The named H2 sections a given kind must carry besides Digest."""
+    return _REQUIRED_SECTIONS.get(kind, ())
+
+
 class EpisodeError(ValueError):
     """The episode's parts don't satisfy the format contract."""
 

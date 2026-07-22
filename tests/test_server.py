@@ -16,5 +16,6 @@ def test_server_module_imports_and_registers_tool():
         "memshelf_index",
         "memshelf_search",
         "memshelf_stats",
+        "memshelf_doctor",
     ):
         assert callable(getattr(server, tool))

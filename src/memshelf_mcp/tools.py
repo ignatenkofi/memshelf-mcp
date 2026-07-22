@@ -12,6 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from memshelf_mcp.core.doctor import check_shelf
 from memshelf_mcp.core.recall import read_index, recall, search
 from memshelf_mcp.core.shelve import shelve
 from memshelf_mcp.core.stats import compute_stats
@@ -147,3 +148,13 @@ def run_stats(params: StatsInput) -> dict:
             "recall with log=true (CLI: --log) to accumulate them."
         )
     return payload
+
+
+class DoctorInput(BaseModel):
+    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+
+
+def run_doctor(params: DoctorInput) -> dict:
+    """Check shelf integrity: schema, digest contract, secrets at rest, ledger,
+    INDEX budget, plus docshelf's structural checks."""
+    return check_shelf(params.shelf_path).as_dict()

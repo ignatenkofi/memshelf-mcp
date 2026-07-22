@@ -1,8 +1,7 @@
 """``memshelf`` CLI — the portability surface for hosts without MCP.
 
 Anything that can run a shell command can drive the shelf: ``shelve``,
-``recall``, ``index``, ``search``, ``stats``. (``doctor`` is the remaining tool,
-a later slice.)
+``recall``, ``index``, ``search``, ``stats``, ``doctor``.
 """
 
 from __future__ import annotations
@@ -16,11 +15,13 @@ from memshelf_mcp.core.episode import EpisodeError
 from memshelf_mcp.core.recall import EpisodeNotFound
 from memshelf_mcp.core.shelve import DigestContractError
 from memshelf_mcp.tools import (
+    DoctorInput,
     IndexInput,
     RecallInput,
     SearchInput,
     ShelveInput,
     StatsInput,
+    run_doctor,
     run_index,
     run_recall,
     run_search,
@@ -109,6 +110,12 @@ def _cmd_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    result = run_doctor(DoctorInput(shelf_path=args.shelf))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result["errors"] == 0 else 1  # non-zero on errors, for CI / hooks
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="memshelf", description="Working-memory shelf CLI.")
     parser.add_argument("--version", action="version", version=f"memshelf {__version__}")
@@ -161,6 +168,10 @@ def build_parser() -> argparse.ArgumentParser:
     st = sub.add_parser("stats", help="Token accounting for the shelf.")
     st.add_argument("--shelf", required=True, help="Path to the shelf.")
     st.set_defaults(func=_cmd_stats)
+
+    dc = sub.add_parser("doctor", help="Check shelf integrity (exit 1 on errors).")
+    dc.add_argument("--shelf", required=True, help="Path to the shelf.")
+    dc.set_defaults(func=_cmd_doctor)
 
     return parser
 
