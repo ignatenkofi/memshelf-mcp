@@ -42,10 +42,36 @@ only from attached repos (path 1) or plugins (path 3).
 
 ## 3. Plugin (the M1 answer)
 
-The proper "install into all of Claude at once" is a **plugin**: skill +
-hooks (`SessionStart` inject INDEX, `PreCompact` shelve, `SessionEnd`
-session digest) packaged and installed once. That's exactly M1's Claude
-Code adapter deliverable — tracked in [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md).
+This directory **is** an installable Claude Code plugin (`memshelf`). It bundles
+the `/shelve` skill plus two hooks:
+
+- **`SessionStart`** → injects the shelf `INDEX.md` as context, so recall works
+  from the first turn (`hooks/session-start-index.sh`).
+- **`SessionEnd` + `PreCompact`** → push the shelf so committed episodes survive
+  an ephemeral container (`hooks/autopush.sh`) — **opt-in** via
+  `MEMSHELF_AUTOPUSH=1`.
+
+Install (local):
+
+```bash
+claude --plugin-dir /path/to/memshelf-mcp/adapters/claude-code
+```
+
+Configure via env:
+
+- `MEMSHELF_ROOT` — path to the shelf (else the hooks fall back to the cwd when
+  it looks like a shelf: `INDEX.md` + `ledger.tsv`).
+- `MEMSHELF_AUTOPUSH=1` — enable the durability push. Set it in ephemeral cloud
+  sessions; leave it unset on a persistent host, where you push manually.
+
+**What the hooks deliberately do NOT do.** A hook is a shell command — it can't
+run the model. So "shelve closed topics before compaction" and "write a session
+digest" are **not** hooks: they need the LLM and stay the agent's job (the
+`/shelve` skill + the recall rule in [`CLAUDE-md-snippet.md`](CLAUDE-md-snippet.md)).
+`PreCompact` can't inject context and `SessionEnd` runs after the agent stops,
+so those hooks are limited to the mechanical push. See
+[`../../docs/DECISIONS.md`](../../docs/DECISIONS.md) and
+[`../../docs/ROADMAP.md`](../../docs/ROADMAP.md).
 
 ## Chat projects (Claude Desktop / web)
 
