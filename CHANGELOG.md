@@ -9,6 +9,11 @@ once code ships.
 ## [Unreleased] — design phase
 
 ### Added
+- **`docs/assets/case-b-week-report.html`** — the Case B numbers as a one-page
+  infographic (English; self-contained, both themes, ledger-styled): the
+  236.9:1 closing entry, the week-in-tokens chart, the cost-of-one-question
+  comparison, claimed-vs-realized tiles, the doctor's first findings, and the
+  M1-in-a-day table. Linked from `docs/demo.md` (#19 follow-up).
 - **`docs/demo.md`** — the measured write-up after M0 Case B (mirrors
   docshelf's demo): Case A numbers (recall 5/5; INDEX 1,370 tok; query 1,765 —
   77.9% vs shelf dump, ~97% vs source), live `memshelf stats` on the 34-episode
