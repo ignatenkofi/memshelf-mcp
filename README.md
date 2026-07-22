@@ -3,8 +3,8 @@
 > Put your agent's memory on a shelf, hand it the index.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-design%20%E2%86%92%20M0%3A%20Case%20A%20closed%2C%20B%20running-blue.svg)](docs/M0.md)
-[![MCP](https://img.shields.io/badge/MCP%20server-planned%20(M1)-purple.svg)](https://github.com/ignatenkofi/memshelf-mcp/issues)
+[![Status](https://img.shields.io/badge/status-M0%20complete%20%E2%86%92%20M1%20tools%20shipped-blue.svg)](docs/demo.md)
+[![MCP](https://img.shields.io/badge/MCP%20server-shelve%20%C2%B7%20recall%20%C2%B7%20index%20%C2%B7%20search%20%C2%B7%20stats%20%C2%B7%20doctor-purple.svg)](src/memshelf_mcp/server.py)
 [![Sibling: docshelf](https://img.shields.io/badge/sibling-docshelf--mcp-green.svg)](https://github.com/ignatenkofi/docshelf-mcp)
 
 ```text
@@ -19,12 +19,15 @@
         memory shelves for AI agents
 ```
 
-**Status: design phase → M0 in progress: Case A closed, Case B running.** No code yet — the architecture, manifest, and
-roadmap live in [`docs/`](docs/) and are the current deliverable. Sibling
+**Status: M0 complete (Cases A + B), M1 tool surface shipped.** The pattern
+was validated with zero code on a live shelf — measured numbers in
+[`docs/demo.md`](docs/demo.md) — and the M1 server/CLI now enforces it:
+`memshelf_shelve` / `recall` / `index` / `search` / `stats` / `doctor`, plus a
+Claude Code plugin ([`adapters/claude-code/`](adapters/claude-code/)). Sibling
 project of [docshelf-mcp](https://github.com/ignatenkofi/docshelf-mcp),
 which provides the storage/index layer.
 
-## What this will be
+## What this is
 
 Long-running agent sessions burn tokens re-sending history and lose detail
 to lossy auto-compaction. **memshelf** applies the
@@ -52,9 +55,10 @@ git repo with **no remote configured**.
 | [`docs/LANDSCAPE.md`](docs/LANDSCAPE.md) | Prior-art survey (2026-07), platform built-ins, positioning, risks |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Milestones M0–M3 with exit criteria |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Decision log |
-| [`docs/M0.md`](docs/M0.md) | M0 experiment protocol (running): cases, token ledger, recall test |
+| [`docs/M0.md`](docs/M0.md) | M0 experiment protocol and results (complete): cases, token ledger, recall test |
+| [`docs/demo.md`](docs/demo.md) | Measured numbers from the dogfood shelf: compression, recall test, doctor findings |
 | [`docs/examples/`](docs/examples/) | A worked episode file and a memory-shelf INDEX |
-| [`adapters/claude-code/`](adapters/claude-code/) | M0 prompt-only kit: `/shelve` skill (live + import modes), recall-rule snippet |
+| [`adapters/claude-code/`](adapters/claude-code/) | Claude Code plugin: `/shelve` skill + SessionStart/SessionEnd/PreCompact hooks |
 
 ## Origin
 
