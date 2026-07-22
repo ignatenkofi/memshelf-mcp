@@ -9,6 +9,14 @@ once code ships.
 ## [Unreleased] — design phase
 
 ### Added
+- **MCP server + CLI** exposing `memshelf_shelve` (`server.py`, `cli.py`,
+  `tools.py`) — the protocol ring over the core. FastMCP stdio server (mirrors
+  docshelf's style) and a `memshelf shelve` command for hosts without MCP, both
+  driving the same typed `ShelveInput` → `run_shelve` path. Console scripts:
+  `memshelf`, `memshelf-mcp`. A contract violation returns an actionable error
+  (CLI exit 1) without writing. `mcp>=1.2.0` + `pydantic>=2.6` added as deps.
+  6 tests (tools validation + CLI end-to-end + server import). Recall / index /
+  search / stats land in later slices (#6).
 - **`shelve()` orchestration** (`core/shelve.py` + `core/episode.py`) — one
   call turns an in-context topic into a durable episode: redact → validate the
   digest contract → compose the H1-first episode → write through docshelf →

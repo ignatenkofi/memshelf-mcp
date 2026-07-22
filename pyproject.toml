@@ -27,12 +27,13 @@ classifiers = [
     "Topic :: Text Processing :: Markup :: Markdown",
 ]
 
-# The shelve orchestration (slice 2) wraps docshelf's Shelf. The pure Layer-2/3
-# core (redaction, digest contract) stays import-light — it needs none of this,
-# so those modules and their tests run without docshelf installed. `mcp` arrives
-# with the server surface (slice 3).
+# The shelve orchestration wraps docshelf's Shelf; the server/CLI surface adds
+# mcp + pydantic. The pure Layer-2/3 core (redaction, digest contract) still
+# needs none of these, so those modules and their tests run stdlib-only.
 dependencies = [
     "docshelf-mcp>=0.2",
+    "mcp>=1.2.0",
+    "pydantic>=2.6",
 ]
 
 [project.optional-dependencies]
@@ -40,6 +41,10 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.5.0",
 ]
+
+[project.scripts]
+memshelf = "memshelf_mcp.cli:main"
+memshelf-mcp = "memshelf_mcp.server:main"
 
 [project.urls]
 Homepage = "https://github.com/ignatenkofi/memshelf-mcp"
