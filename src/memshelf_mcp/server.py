@@ -1,9 +1,10 @@
 """FastMCP server exposing memshelf's tools over stdio.
 
 A thin wrapper: each tool validates its input (pydantic), calls the typed entry
-point in ``tools.py``, and serializes the result. Tools: ``memshelf_shelve``
-(write), ``memshelf_recall`` / ``memshelf_index`` / ``memshelf_search`` (read),
-``memshelf_stats`` (accounting), and ``memshelf_doctor`` (integrity). See
+point in ``tools.py``, and serializes the result. Tools: ``memshelf_init``
+(bootstrap), ``memshelf_shelve`` (write), ``memshelf_recall`` /
+``memshelf_index`` / ``memshelf_search`` (read), ``memshelf_stats``
+(accounting), and ``memshelf_doctor`` (integrity). See
 ``docs/ARCHITECTURE.md`` → MCP tool surface.
 """
 
@@ -20,12 +21,14 @@ from memshelf_mcp import __version__
 from memshelf_mcp.tools import (
     DoctorInput,
     IndexInput,
+    InitInput,
     RecallInput,
     SearchInput,
     ShelveInput,
     StatsInput,
     run_doctor,
     run_index,
+    run_init,
     run_recall,
     run_search,
     run_shelve,
@@ -133,6 +136,27 @@ def memshelf_stats(params: StatsInput) -> str:
         return _serialize(run_stats(params))
     except Exception as exc:
         return _error_response(exc, "memshelf_stats")
+
+
+@mcp.tool(
+    name="memshelf_init",
+    annotations={
+        "title": "Bootstrap a memory shelf",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+def memshelf_init(params: InitInput) -> str:
+    """Create (or top up) a memory shelf: docshelf layout with fixed categories,
+    the recall-rule INDEX preamble, a POLICY.md template, the ledger header, and
+    a spec-conformant shelf.yml. Storage: git-local (default, no remote), plain,
+    or git-remote (private only). Idempotent — never overwrites existing files."""
+    try:
+        return _serialize(run_init(params))
+    except Exception as exc:
+        return _error_response(exc, "memshelf_init")
 
 
 @mcp.tool(

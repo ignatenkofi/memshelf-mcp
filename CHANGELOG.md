@@ -9,6 +9,16 @@ once code ships.
 ## [Unreleased] — design phase
 
 ### Added
+- **`memshelf init`** (`core/init.py`, MCP `memshelf_init` + CLI) — the shelf
+  bootstrap (#9): docshelf layout with fixed `topics`/`research`/`sessions`,
+  the recall-rule INDEX preamble instead of docshelf's raw-URL default (M0
+  annoyance #5), a `POLICY.md` template, the `ledger.tsv` header, and a
+  shelf-spec v0 `shelf.yml` (`profile: memory` — the #31 init item). Storage
+  modes: `git-local` default (git init + one initial commit, **no remote**),
+  `plain`, `git-remote` (wires `origin`; private-visibility enforcement stays
+  doctor territory). Idempotent — never overwrites existing files. 7 tests
+  incl. the full init→shelve→doctor loop. DECISIONS: server topology recorded
+  as "separate MCP process" (closes open question 3 / #28).
 - **`docs/assets/case-b-week-report.html`** — the Case B numbers as a one-page
   infographic (English; self-contained, both themes, ledger-styled): the
   236.9:1 closing entry, the week-in-tokens chart, the cost-of-one-question

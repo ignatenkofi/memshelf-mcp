@@ -1,7 +1,7 @@
 """``memshelf`` CLI — the portability surface for hosts without MCP.
 
-Anything that can run a shell command can drive the shelf: ``shelve``,
-``recall``, ``index``, ``search``, ``stats``, ``doctor``.
+Anything that can run a shell command can drive the shelf: ``init``,
+``shelve``, ``recall``, ``index``, ``search``, ``stats``, ``doctor``.
 """
 
 from __future__ import annotations
@@ -12,17 +12,20 @@ import sys
 
 from memshelf_mcp import __version__
 from memshelf_mcp.core.episode import EpisodeError
+from memshelf_mcp.core.init import InitError
 from memshelf_mcp.core.recall import EpisodeNotFound
 from memshelf_mcp.core.shelve import DigestContractError
 from memshelf_mcp.tools import (
     DoctorInput,
     IndexInput,
+    InitInput,
     RecallInput,
     SearchInput,
     ShelveInput,
     StatsInput,
     run_doctor,
     run_index,
+    run_init,
     run_recall,
     run_search,
     run_shelve,
@@ -110,6 +113,20 @@ def _cmd_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_init(args: argparse.Namespace) -> int:
+    try:
+        result = run_init(
+            InitInput(
+                shelf_path=args.shelf, name=args.name, storage=args.storage, remote=args.remote
+            )
+        )
+    except InitError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _cmd_doctor(args: argparse.Namespace) -> int:
     result = run_doctor(DoctorInput(shelf_path=args.shelf))
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -168,6 +185,13 @@ def build_parser() -> argparse.ArgumentParser:
     st = sub.add_parser("stats", help="Token accounting for the shelf.")
     st.add_argument("--shelf", required=True, help="Path to the shelf.")
     st.set_defaults(func=_cmd_stats)
+
+    it = sub.add_parser("init", help="Bootstrap a memory shelf (idempotent).")
+    it.add_argument("--shelf", required=True, help="Directory for the shelf.")
+    it.add_argument("--name", default="Memory shelf")
+    it.add_argument("--storage", choices=["plain", "git-local", "git-remote"], default="git-local")
+    it.add_argument("--remote", help="Remote URL (git-remote mode only; private repos).")
+    it.set_defaults(func=_cmd_init)
 
     dc = sub.add_parser("doctor", help="Check shelf integrity (exit 1 on errors).")
     dc.add_argument("--shelf", required=True, help="Path to the shelf.")
