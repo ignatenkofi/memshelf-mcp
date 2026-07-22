@@ -97,6 +97,10 @@ once code ships.
 - Community files, ASCII logo, MIT license.
 
 ### Fixed
+- digest referent-lint: the Russian possessive check now enumerates exact
+  forms (`наш/наша/наших/…`) instead of the open prefix `наш\w*`, which also
+  rejected the unrelated verb «нашёл» — a false positive hit on the first
+  dogfooded CLI shelve (#45).
 - `redact`/`scan`: the `env-secret` rule no longer re-matches already-redacted
   values (`KEY=«redacted:env-secret»`) — without the lookahead, doctor flagged
   every correctly-redacted episode as `secret-at-rest` forever and `redact()`

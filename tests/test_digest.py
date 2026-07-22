@@ -53,6 +53,22 @@ def test_thin_digest_warns_but_passes():
     assert any(f.code == "thin" for f in result.warnings)
 
 
+def test_russian_verb_nashel_is_not_a_referent():
+    # «нашёл» ("found") shares a prefix with «наш» ("our") but is a verb; the
+    # open prefix `наш\w*` used to reject it (#45).
+    result = validate_digest(
+        "Doctor нашёл реальный дрейф полки; решение зафиксировано, хвостов нет."
+    )
+    assert result.ok, result.report()
+    assert not any(f.code == "referent-we" for f in result.findings)
+
+
+def test_russian_possessives_still_rejected():
+    for text in ("наш план выбран.", "Итог наших решений открыт.", "Наша схема отклонена."):
+        result = validate_digest(text)
+        assert any(f.code == "referent-we" for f in result.errors), text
+
+
 def test_russian_digest_passes():
     ru = (
         "Полка закрыта 2026-07-22. Итог: 33 эпизода, сжатие 334:1, потерь ноль. "
