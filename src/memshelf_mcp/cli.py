@@ -1,8 +1,8 @@
 """``memshelf`` CLI — the portability surface for hosts without MCP.
 
 Anything that can run a shell command can drive the shelf: ``shelve``,
-``recall``, ``index``, ``search``. ``stats`` mirrors the remaining MCP tool in a
-later slice.
+``recall``, ``index``, ``search``, ``stats``. (``doctor`` is the remaining tool,
+a later slice.)
 """
 
 from __future__ import annotations
@@ -20,10 +20,12 @@ from memshelf_mcp.tools import (
     RecallInput,
     SearchInput,
     ShelveInput,
+    StatsInput,
     run_index,
     run_recall,
     run_search,
     run_shelve,
+    run_stats,
 )
 
 
@@ -71,6 +73,7 @@ def _cmd_recall(args: argparse.Namespace) -> int:
         episode_id=args.id,
         section=args.section,
         max_bytes=args.max_bytes,
+        log=args.log,
     )
     try:
         result = run_recall(params)
@@ -97,6 +100,12 @@ def _cmd_search(args: argparse.Namespace) -> int:
     )
     for hit in result["hits"]:
         print(f"{hit['address']}\t{hit['score']}\t{hit['snippet']}")
+    return 0
+
+
+def _cmd_stats(args: argparse.Namespace) -> int:
+    result = run_stats(StatsInput(shelf_path=args.shelf))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -134,6 +143,9 @@ def build_parser() -> argparse.ArgumentParser:
     rc.add_argument("--id", required=True, help="Episode id / slug.")
     rc.add_argument("--section", help="Fetch only this H2 section (e.g. Decisions).")
     rc.add_argument("--max-bytes", type=int, default=100_000)
+    rc.add_argument(
+        "--log", action="store_true", help="Log this recall (feeds realized-economy stats)."
+    )
     rc.set_defaults(func=_cmd_recall)
 
     ix = sub.add_parser("index", help="Print the shelf INDEX.")
@@ -145,6 +157,10 @@ def build_parser() -> argparse.ArgumentParser:
     se.add_argument("--query", required=True, help="Space-separated tokens (all must match).")
     se.add_argument("--max-results", type=int, default=10)
     se.set_defaults(func=_cmd_search)
+
+    st = sub.add_parser("stats", help="Token accounting for the shelf.")
+    st.add_argument("--shelf", required=True, help="Path to the shelf.")
+    st.set_defaults(func=_cmd_stats)
 
     return parser
 

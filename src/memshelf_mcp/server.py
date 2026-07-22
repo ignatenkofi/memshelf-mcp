@@ -2,9 +2,9 @@
 
 A thin wrapper: each tool validates its input (pydantic), calls the typed entry
 point in ``tools.py``, and serializes the result. Tools: ``memshelf_shelve``
-(write) plus ``memshelf_recall`` / ``memshelf_index`` / ``memshelf_search``
-(read). ``memshelf_stats`` / ``memshelf_doctor`` land in later slices. See
-``docs/ARCHITECTURE.md`` → MCP tool surface.
+(write), ``memshelf_recall`` / ``memshelf_index`` / ``memshelf_search`` (read),
+and ``memshelf_stats`` (accounting). ``memshelf_doctor`` lands in a later slice.
+See ``docs/ARCHITECTURE.md`` → MCP tool surface.
 """
 
 from __future__ import annotations
@@ -22,10 +22,12 @@ from memshelf_mcp.tools import (
     RecallInput,
     SearchInput,
     ShelveInput,
+    StatsInput,
     run_index,
     run_recall,
     run_search,
     run_shelve,
+    run_stats,
 )
 
 _READ_ONLY = {
@@ -115,6 +117,20 @@ def memshelf_search(params: SearchInput) -> str:
         return _serialize(run_search(params))
     except Exception as exc:
         return _error_response(exc, "memshelf_search")
+
+
+@mcp.tool(
+    name="memshelf_stats",
+    annotations={"title": "Token accounting for the shelf", **_READ_ONLY},
+)
+def memshelf_stats(params: StatsInput) -> str:
+    """Report the shelf's token economy: standing cost (INDEX + digests) vs
+    shelved mass and compression ratio (claimed), plus realized savings from
+    logged recalls when present. The transparent-savings number."""
+    try:
+        return _serialize(run_stats(params))
+    except Exception as exc:
+        return _error_response(exc, "memshelf_stats")
 
 
 def main(argv: list[str] | None = None) -> None:
