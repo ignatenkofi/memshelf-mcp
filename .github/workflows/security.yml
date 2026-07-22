@@ -1,0 +1,14 @@
+name: security
+# Файл-адаптер публичного DevSecOps-конвейера
+# (ignatenkofi/devsecops-pipeline-public). Публичный репо → публичный
+# reusable workflow (public→public). Состав стадий и fail-политика — в
+# профиле класса на стороне конвейера.
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  pipeline:
+    uses: ignatenkofi/devsecops-pipeline-public/.github/workflows/pipeline-light.yml@v1
+    with:
+      repo-class: library
