@@ -10,5 +10,11 @@ def test_server_module_imports_and_registers_tool():
 
     assert server.mcp is not None
     assert callable(server.main)
-    for tool in ("memshelf_shelve", "memshelf_recall", "memshelf_index", "memshelf_search"):
+    for tool in (
+        "memshelf_shelve",
+        "memshelf_recall",
+        "memshelf_index",
+        "memshelf_search",
+        "memshelf_stats",
+    ):
         assert callable(getattr(server, tool))

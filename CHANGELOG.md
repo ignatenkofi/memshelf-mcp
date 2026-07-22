@@ -9,6 +9,15 @@ once code ships.
 ## [Unreleased] — design phase
 
 ### Added
+- **`memshelf_stats` + realized-economy metric** (`core/stats.py`, MCP + CLI).
+  Reads `ledger.tsv` for **claimed** economy (standing cost = INDEX + digests;
+  shelved mass = Σ approx_tokens_in; compression ratio) and, when recall logging
+  is on, `recall-log.tsv` for **realized** economy (per fetch, savings = the
+  episode's original mass − tokens fetched). `recall --log` (tool: `log=true`)
+  appends the recall log. chars/4 methodology, no tokenizer dep. Closes the Case
+  B verdict's gap — the ledger measured what *would* be saved; the recall log
+  measures what *was*. The true fetch-hit *rate* needs an un-capturable
+  denominator, so stats reports the measurable side and says so (#6).
 - **Read side** — `memshelf_recall` / `memshelf_index` / `memshelf_search`
   (`core/recall.py`, exposed via MCP + CLI). Recall fetches an episode by id, or
   a single `## Section` of it (heading-sliced, works split or not), wrapped in a

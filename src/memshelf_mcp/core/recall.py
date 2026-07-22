@@ -76,14 +76,30 @@ def _envelope(body: str) -> str:
     return f"{_ENVELOPE_OPEN}\n{body}\n{_ENVELOPE_CLOSE}"
 
 
+RECALL_LOG_HEADER = "episode_id\tsection\tfetched_tokens\n"
+
+
+def _append_recall_log(log_path: Path, episode_id: str, section: str, fetched_tokens: int) -> None:
+    # One row per successful recall — the raw data for realized-economy stats.
+    if not log_path.exists():
+        log_path.write_text(RECALL_LOG_HEADER, encoding="utf-8")
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(f"{episode_id}\t{section}\t{fetched_tokens}\n")
+
+
 def recall(
     shelf_root: str | Path,
     episode_id: str,
     *,
     section: str | None = None,
     max_bytes: int = 100_000,
+    log_path: str | Path | None = None,
 ) -> RecallResult:
-    """Recall an episode by id — or one ``## Section`` of it — enveloped as data."""
+    """Recall an episode by id — or one ``## Section`` of it — enveloped as data.
+
+    With ``log_path`` set, append a row (episode, section, fetched tokens) to that
+    recall log so ``memshelf_stats`` can report realized economy.
+    """
     from docshelf_mcp.core.shelf import Shelf
 
     shelf = Shelf(Path(shelf_root).expanduser().resolve())
@@ -92,6 +108,10 @@ def recall(
     content = result.content
     if section is not None:
         content = _slice_section(content, section)
+    if log_path is not None:
+        _append_recall_log(
+            Path(log_path).expanduser(), Path(address).stem, section or "", len(content) // 4
+        )
     return RecallResult(
         address=address,
         section=section,

@@ -7,12 +7,14 @@ lets the CLI and the tests reuse it without importing the MCP SDK.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from memshelf_mcp.core.recall import read_index, recall, search
 from memshelf_mcp.core.shelve import shelve
+from memshelf_mcp.core.stats import compute_stats
 
 
 class ShelveInput(BaseModel):
@@ -81,6 +83,10 @@ class RecallInput(BaseModel):
         default=None, description="Optional H2 section to fetch alone, e.g. 'Decisions'."
     )
     max_bytes: int = 100_000
+    log: bool = Field(
+        default=False,
+        description="Append this recall to recall-log.tsv (feeds realized-economy stats).",
+    )
 
 
 class IndexInput(BaseModel):
@@ -95,11 +101,13 @@ class SearchInput(BaseModel):
 
 def run_recall(params: RecallInput) -> dict:
     """Recall an episode (or one section) enveloped as data, not instructions."""
+    log_path = str(Path(params.shelf_path) / "recall-log.tsv") if params.log else None
     result = recall(
         params.shelf_path,
         params.episode_id,
         section=params.section,
         max_bytes=params.max_bytes,
+        log_path=log_path,
     )
     return {
         "status": "ok",
@@ -122,3 +130,20 @@ def run_search(params: SearchInput) -> dict:
         "status": "ok",
         "hits": [{"address": h.address, "score": h.score, "snippet": h.snippet} for h in hits],
     }
+
+
+class StatsInput(BaseModel):
+    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+
+
+def run_stats(params: StatsInput) -> dict:
+    """Token accounting over the shelf: claimed economy (ledger) and, if any
+    recalls are logged, realized economy (recall log)."""
+    stats = compute_stats(params.shelf_path)
+    payload = {"status": "ok", **stats.as_dict()}
+    if stats.recalls == 0:
+        payload["note"] = (
+            "realized metrics are zero because no recalls are logged; "
+            "recall with log=true (CLI: --log) to accumulate them."
+        )
+    return payload
