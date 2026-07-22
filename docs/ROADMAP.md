@@ -4,7 +4,11 @@ Milestones are deliberately thin. M0 validates the pattern with **zero new
 code**; every later milestone must justify itself against what M0 already
 achieves.
 
-## M0 — Pattern validation, no code — **running since 2026-07-13**
+## M0 — Pattern validation, no code — **complete (2026-07-13 → 2026-07-22)**
+
+Exit criteria met: recall test 5/5, ledger + recall-cost numbers written down
+([`demo.md`](demo.md)), and the annoyance log became the M1 backlog verbatim.
+Case B closed 2026-07-22 (33 episodes, zero loss; verdict episode on the shelf).
 
 Prove the loop works with docshelf as-is plus conventions. Protocol, kit,
 and measurement methodology: [`docs/M0.md`](M0.md); the prompt-only skill and

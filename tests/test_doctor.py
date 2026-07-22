@@ -73,6 +73,23 @@ def test_missing_required_section_flagged(tmp_path):
     assert "missing-section" in _codes(report)
 
 
+def test_tool_shelved_env_secret_stays_healthy(tmp_path):
+    # An env-secret goes in, shelve() masks the value, and doctor must NOT
+    # re-flag the stored `KEY=«redacted:env-secret»` (idempotence).
+    root = _init(tmp_path)
+    shelve(
+        root,
+        slug="2026-07-22-env",
+        kind="topic",
+        digest="The runbook decision: keep tokens in env files. Open: nothing.",
+        sections={"Decisions": "SONAR_TOKEN=squ_someval moved to ~/.sqst-env"},
+        date="2026-07-22",
+    )
+    report = check_shelf(root)
+    assert report.ok, [f.code for f in report.findings]
+    assert "secret-at-rest" not in _codes(report)
+
+
 def test_orphan_ledger_row_flagged(tmp_path):
     root = _init(tmp_path)
     shelve(

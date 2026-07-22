@@ -9,6 +9,15 @@ once code ships.
 ## [Unreleased] — design phase
 
 ### Added
+- **`docs/demo.md`** — the measured write-up after M0 Case B (mirrors
+  docshelf's demo): Case A numbers (recall 5/5; INDEX 1,370 tok; query 1,765 —
+  77.9% vs shelf dump, ~97% vs source), live `memshelf stats` on the 34-episode
+  dogfood shelf (standing cost 8,638 tok vs 1.92M shelved mass, 222.8:1), the
+  doctor's first real findings (two hand-era over-cap digests, one
+  dummy-credential shape, index-bloat), the claimed-vs-realized distinction,
+  and a reproducible path (`stats`/`doctor` + a scratch-shelf loop). README /
+  ROADMAP / M0.md statuses updated: **M0 complete**, Case B closed 2026-07-22
+  (33 episodes, 1.91M→5.7K tok, zero loss) (#19).
 - **`memshelf_doctor`** (`core/doctor.py` + `core/frontmatter.py`, MCP + CLI) —
   shelf integrity check. Wraps docshelf's structural `doctor` and adds
   memshelf checks per episode: schema (id↔filename, valid kind, required
@@ -83,6 +92,11 @@ once code ships.
 - Community files, ASCII logo, MIT license.
 
 ### Fixed
+- `redact`/`scan`: the `env-secret` rule no longer re-matches already-redacted
+  values (`KEY=«redacted:env-secret»`) — without the lookahead, doctor flagged
+  every correctly-redacted episode as `secret-at-rest` forever and `redact()`
+  was not idempotent. Found by running doctor against the live shelf for the
+  demo (#19).
 - `/shelve` skill and recall snippet now push `git-remote` shelves in
   ephemeral cloud sessions right after the commit; `docs/M0.md` states the
   push is not optional in M0 (was: commit-only, so committed episodes could
