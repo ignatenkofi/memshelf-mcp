@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memshelf-mcp"
+dynamic = ["version"]
+description = "Working-memory shelf for AI agents — offload closed topics to a docshelf shelf as digest-indexed episodes, recall by index."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Filipp Ignatenko", email = "ignatenkofi@gmail.com" }
+]
+keywords = ["mcp", "model-context-protocol", "claude", "memory", "agent", "llm", "docshelf"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+
+# Runtime deps are added per slice as the surfaces land. The Layer-2/3 core
+# (redaction, digest contract) is pure stdlib — nothing to install to use or
+# test it. `docshelf-mcp` + `mcp` arrive with the shelve orchestration and the
+# server (slices 2–3).
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/ignatenkofi/memshelf-mcp"
+Repository = "https://github.com/ignatenkofi/memshelf-mcp"
+Issues = "https://github.com/ignatenkofi/memshelf-mcp/issues"
+
+[tool.hatch.version]
+path = "src/memshelf_mcp/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memshelf_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/",
+    "tests/",
+    "docs/",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "UP", # pyupgrade
+]
+ignore = ["E501"]  # line length handled by the formatter
+
+[tool.ruff.lint.isort]
+known-first-party = ["memshelf_mcp"]
