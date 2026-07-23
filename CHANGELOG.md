@@ -9,6 +9,43 @@ once code ships.
 ## [Unreleased] — design phase
 
 ### Added
+- **`memshelf_import`** (`core/importer.py`, MCP `memshelf_import` + CLI
+  `memshelf import discover|extract`) — the transcript backfill tool (#12,
+  M0 annoyances #6/#8/#10). Takes a file **path** (an 87 MB export never rides
+  in context or MCP transfer); `discover` finds the target conversation by
+  **content markers, not title**; `extract` cleans one conversation —
+  **stripping tool_use/tool_result blocks** — to a working file outside any
+  shelf and returns its path + the noise ratio. Formats: claude.ai
+  `conversations.json` and Claude Code session JSONL (streamed). Pure stdlib;
+  the raw transcript is input-only, never shelved. 14 tests.
+- **Pre-commit PII/secret guard** (`adapters/claude-code/hooks/pre-commit`,
+  #32). Closes the gap where a hand edit / stray write reaches git unchecked:
+  layer 1 built-in shapes (email/phone/token/env-secret) over staged content,
+  extended by the shelf's `POLICY.patterns` and `MEMSHELF_PII_PACK_DIR`;
+  layer 2 pluggable name-PII scanner (`pii-mcp`) that **fails loud (exit 2) if
+  absent** rather than passing silently — with a conscious
+  `MEMSHELF_PII_BUILTIN_ONLY` downgrade and a `MEMSHELF_PII_SKIP` one-off.
+  Redaction markers pass. bash-3.2 + BSD-grep safe, shellcheck-clean; exit
+  0/1/2. README install line + env table. 8 hook tests.
+- **Machine-readable POLICY pattern packs** (`core/policy.py`, #16). A flat
+  `POLICY.patterns` file (`<kind> <regex>`, `#` comments) makes a shelf's
+  PII/secret rules machine-readable and is consumed by **both** the shelve
+  redaction pass and `doctor` (and shares its format with the pre-commit
+  guard — one pack, three consumers). `shelve()` auto-layers it onto the
+  builtin shapes (malformed pack → warning, never blocks); `doctor` flags
+  `policy-pattern-at-rest` (error) and `policy-pattern-invalid` (warning);
+  `init` scaffolds an all-comments template and references it from `shelf.yml`.
+  9 tests.
+- **`memshelf_doctor` — remaining #13 slices**: (1) the **remote-visibility
+  gate** (`core/remote.py`) — opt-in (`--check-remote` / `check_remote`),
+  provider-agnostic probe of a shelf's git remotes via the unauthenticated git
+  smart-HTTP endpoint (public → `public-remote` error; unverifiable →
+  `remote-unverified` warning, never a hard block), all network I/O behind one
+  injectable seam so doctor stays offline by default (MANIFEST principle 8);
+  (2) **digest/body mismatch sampling** — flags an episode whose digest shares
+  almost no content vocabulary with its body (write-only-memory guard),
+  mechanical + bilingual, warning-level, abstaining on episodes too small to
+  judge. 15 tests.
 - **Ambient savings visibility** (#49): (1) the plugin's SessionStart hook
   prepends a one-line banner from `memshelf stats --banner` to the injected
   INDEX — every session opens with the number (best-effort: no CLI on PATH →
