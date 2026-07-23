@@ -69,6 +69,35 @@ def test_cli_contract_violation_exits_1(tmp_path, capsys):
     assert not (tmp_path / "docs" / "topics" / "2026-07-22-bad.md").exists()
 
 
+def test_cli_stats_banner_one_line(tmp_path, capsys):
+    _init(tmp_path)
+    main(
+        [
+            "shelve",
+            "--shelf",
+            str(tmp_path),
+            "--slug",
+            "2026-07-23-b",
+            "--kind",
+            "research",
+            "--digest",
+            "A note; the approach was chosen. Open: none.",
+            "--section",
+            "Findings=f",
+            "--approx-tokens",
+            "40000",
+            "--date",
+            "2026-07-23",
+        ]
+    )
+    capsys.readouterr()
+    code = main(["stats", "--shelf", str(tmp_path), "--banner"])
+    assert code == 0
+    out = capsys.readouterr().out.strip()
+    assert out.startswith("memshelf: 1 episodes")
+    assert "\n" not in out
+
+
 def test_cli_section_without_equals_errors(tmp_path):
     with pytest.raises(SystemExit):
         main(

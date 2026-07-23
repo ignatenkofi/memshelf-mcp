@@ -16,7 +16,7 @@ from memshelf_mcp.core.doctor import check_shelf
 from memshelf_mcp.core.init import init_shelf
 from memshelf_mcp.core.recall import read_index, recall, search
 from memshelf_mcp.core.shelve import shelve
-from memshelf_mcp.core.stats import compute_stats
+from memshelf_mcp.core.stats import banner, compute_stats, episode_mass
 
 
 class ShelveInput(BaseModel):
@@ -62,6 +62,7 @@ def run_shelve(params: ShelveInput) -> dict:
         date=params.date,
         autocommit=params.autocommit,
     )
+    totals = compute_stats(params.shelf_path)
     return {
         "status": "ok",
         "address": result.address,
@@ -74,7 +75,15 @@ def run_shelve(params: ShelveInput) -> dict:
             "summary": result.redaction.summary(),
         },
         "digest_warnings": [f.code for f in result.validation.warnings],
+        "warnings": result.warnings,
         "ledger_row": result.ledger_row,
+        "shelf_totals": {
+            "episodes": totals.episodes,
+            "shelved_mass": totals.shelved_mass,
+            "standing_cost": totals.standing_cost,
+            "compression_ratio": totals.compression_ratio,
+        },
+        "summary": f"+{params.approx_tokens:,} tok shelved · {banner(totals)}",
     }
 
 
@@ -111,13 +120,23 @@ def run_recall(params: RecallInput) -> dict:
         max_bytes=params.max_bytes,
         log_path=log_path,
     )
-    return {
+    payload = {
         "status": "ok",
         "address": result.address,
         "section": result.section,
         "truncated": result.truncated,
         "content": result.content,
     }
+    if params.log:
+        fetched = len(result.content) // 4
+        mass = episode_mass(params.shelf_path, params.episode_id)
+        if mass:
+            saved = max(mass - fetched, 0)
+            payload["saved_tokens"] = saved
+            payload["summary"] = (
+                f"fetched ~{fetched:,} tok vs the episode's {mass:,} — saved ~{saved:,}"
+            )
+    return payload
 
 
 def run_index(params: IndexInput) -> dict:
@@ -142,7 +161,7 @@ def run_stats(params: StatsInput) -> dict:
     """Token accounting over the shelf: claimed economy (ledger) and, if any
     recalls are logged, realized economy (recall log)."""
     stats = compute_stats(params.shelf_path)
-    payload = {"status": "ok", **stats.as_dict()}
+    payload = {"status": "ok", "banner": banner(stats), **stats.as_dict()}
     if stats.recalls == 0:
         payload["note"] = (
             "realized metrics are zero because no recalls are logged; "

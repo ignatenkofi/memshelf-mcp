@@ -9,6 +9,17 @@ once code ships.
 ## [Unreleased] — design phase
 
 ### Added
+- **Ambient savings visibility** (#49): (1) the plugin's SessionStart hook
+  prepends a one-line banner from `memshelf stats --banner` to the injected
+  INDEX — every session opens with the number (best-effort: no CLI on PATH →
+  no banner); (2) per-action deltas — `memshelf_shelve` returns
+  `shelf_totals` + a `summary` line, and a logged `memshelf_recall` returns
+  `saved_tokens` + `summary` (CLI prints it to stderr, keeping stdout
+  pipeable); (3) **the shelf's living chart** — `core/chart.py` renders
+  `stats.svg` at the shelf root (cumulative "without memshelf" vs "on the
+  shelf" by ledger date, log scale, pure-stdlib SVG) and `shelve()` redraws it
+  into the same commit as each episode; `memshelf stats --chart` redraws on
+  demand. A chart failure never fails a shelve (degrades to a warning).
 - **Release & distribution wiring** (first public release, `0.1.0`): version
   bump; `server.json` (official MCP Registry manifest,
   `io.github.ignatenkofi/memshelf-mcp`, PyPI package, stdio);
