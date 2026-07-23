@@ -95,6 +95,40 @@ def test_redaction_scrubs_secret_from_stored_episode(tmp_path):
     assert result.redaction.counts["github-token"] == 1
 
 
+def test_policy_pattern_pack_redacts_domain_pii(tmp_path):
+    # A per-shelf POLICY.patterns (#16) is consumed by the redaction pass: a
+    # course shelf masking student ids gets them scrubbed from the stored file.
+    root = _init_shelf(tmp_path)
+    (root / "POLICY.patterns").write_text("student-id  S[0-9]{1,2}\n", encoding="utf-8")
+    result = shelve(
+        root,
+        slug="2026-07-22-review",
+        kind="topic",
+        digest="The review batch chose to defer S7's rework; the rushed-fix path was rejected. Open: regrade.",
+        sections={"Decisions": "Submission from S7 deferred to next batch."},
+        date="2026-07-22",
+    )
+    stored = (tmp_path / "docs" / "topics" / "2026-07-22-review.md").read_text(encoding="utf-8")
+    assert "S7" not in stored
+    assert "«redacted:student-id»" in stored
+    assert result.redaction.counts["student-id"] >= 1
+
+
+def test_malformed_policy_pack_warns_but_still_shelves(tmp_path):
+    root = _init_shelf(tmp_path)
+    (root / "POLICY.patterns").write_text("broken  [unterminated\n", encoding="utf-8")
+    result = shelve(
+        root,
+        slug="2026-07-22-ok",
+        kind="topic",
+        digest="The plan chose X; the Y alternative was rejected. Open: nothing.",
+        sections={"Decisions": "X over Y"},
+        date="2026-07-22",
+    )
+    assert (tmp_path / "docs" / "topics" / "2026-07-22-ok.md").is_file()
+    assert any("POLICY.patterns" in w for w in result.warnings)
+
+
 def test_plain_dir_skips_git_cleanly(tmp_path):
     result = shelve(
         _init_shelf(tmp_path, git=False),

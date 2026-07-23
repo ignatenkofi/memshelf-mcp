@@ -12,8 +12,19 @@ from memshelf_mcp.core.shelve import shelve  # noqa: E402
 def test_git_local_default_creates_everything(tmp_path):
     result = init_shelf(tmp_path, name="test memory")
     assert result.storage == "git-local"
-    for rel in ("INDEX.md", "POLICY.md", "ledger.tsv", "shelf.yml", ".docshelf.json"):
+    for rel in (
+        "INDEX.md",
+        "POLICY.md",
+        "POLICY.patterns",
+        "ledger.tsv",
+        "shelf.yml",
+        ".docshelf.json",
+    ):
         assert (tmp_path / rel).is_file(), rel
+    # a fresh pack is all-comments: it parses to zero active rules
+    from memshelf_mcp.core.policy import load_pattern_pack
+
+    assert load_pattern_pack(tmp_path).patterns == []
     assert (tmp_path / ".git").is_dir()
     assert result.committed and result.commit
     # no remote in git-local mode — nothing to accidentally push to

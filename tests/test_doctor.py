@@ -161,6 +161,46 @@ def test_no_remote_is_info(tmp_path):
     assert "no-remote" in _codes(report)
 
 
+# --- machine-readable POLICY pattern packs (#16) ----------------------------
+
+
+def test_policy_pattern_at_rest_flagged(tmp_path):
+    root = _init(tmp_path)
+    (root / "POLICY.patterns").write_text("student-id  S[0-9]{1,2}\n", encoding="utf-8")
+    _write_raw(
+        root,
+        "topics",
+        "2026-07-22-leak",
+        "# 2026-07-22-leak\n\n---\nid: 2026-07-22-leak\nkind: topic\n---\n\n"
+        "## Digest\nA decided change; nothing open.\n\n"
+        "## Decisions\nhand-written note mentioning S7 by id\n",
+    )
+    report = check_shelf(root)
+    assert not report.ok
+    assert "policy-pattern-at-rest" in _codes(report)
+
+
+def test_no_policy_pack_means_no_policy_findings(tmp_path):
+    root = _init(tmp_path)
+    _write_raw(
+        root,
+        "topics",
+        "2026-07-22-plain",
+        "# 2026-07-22-plain\n\n---\nid: 2026-07-22-plain\nkind: topic\n---\n\n"
+        "## Digest\nA decided change; nothing open.\n\n## Decisions\nmentions S7 freely\n",
+    )
+    report = check_shelf(root)
+    assert "policy-pattern-at-rest" not in _codes(report)
+
+
+def test_malformed_policy_pack_is_a_warning(tmp_path):
+    root = _init(tmp_path)
+    (root / "POLICY.patterns").write_text("broken  [unterminated\n", encoding="utf-8")
+    report = check_shelf(root)
+    assert "policy-pattern-invalid" in _codes(report)
+    assert report.ok  # a broken pack warns; it does not hard-fail the shelf
+
+
 # --- digest/body mismatch sampling (write-only-memory guard) ----------------
 
 

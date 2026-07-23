@@ -121,3 +121,17 @@ def scan(text: str, *, extra_patterns: Iterable[tuple[str, str]] | None = None) 
     """
     _, report = redact(text, extra_patterns=extra_patterns)
     return report
+
+
+def scan_patterns(text: str, patterns: Iterable[tuple[str, str]]) -> RedactionReport:
+    """Report matches of ONLY the given ``(kind, regex)`` patterns — no builtins.
+
+    ``doctor`` uses this to attribute at-rest findings to a shelf's own policy
+    pack (#16) separately from the built-in credential shapes.
+    """
+    counts: dict[str, int] = {}
+    for kind, pattern in patterns:
+        n = sum(1 for _ in re.finditer(pattern, text))
+        if n:
+            counts[kind] = counts.get(kind, 0) + n
+    return RedactionReport(counts)

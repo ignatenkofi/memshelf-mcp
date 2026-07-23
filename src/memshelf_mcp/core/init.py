@@ -53,7 +53,28 @@ this shelf:
    referenced generically, never stored verbatim.
 
 `memshelf doctor` scans for secret shapes at rest; a finding blocks the push
-until resolved.
+until resolved. Machine-readable domain rules go in `POLICY.patterns`.
+"""
+
+# Machine-readable pattern pack (#16). All-comments by default so a fresh shelf
+# redacts nothing unexpected; the format is documented inline and shared with
+# the pre-commit guard and doctor.
+POLICY_PATTERNS_TEMPLATE = """\
+# POLICY.patterns — machine-readable redaction rules for this shelf (issue #16).
+#
+# One rule per line:  <kind><whitespace><regex>
+#   - lines starting with # and blank lines are ignored;
+#   - the FIRST whitespace run splits the kind from the regex, so the regex may
+#     contain spaces; it is an extended regular expression (grep -E / Python re);
+#   - a match is masked «redacted:<kind>» by the shelve redaction pass (fixed
+#     mask, no length leak), flagged at rest by `memshelf doctor`, and blocked
+#     by the pre-commit guard. Write both Cyrillic and Latin forms for homograph
+#     safety.
+#
+# Uncomment / adapt to your shelf's domain, e.g.:
+# email        [A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}
+# For a course shelf enforcing "codes only, no student identifiers":
+# student-id   S[0-9]{1,2}
 """
 
 
@@ -74,6 +95,7 @@ def _shelf_yaml(name: str) -> str:
         "  path: ledger.tsv\n"
         "policy:\n"
         "  path: POLICY.md\n"
+        "  patterns: POLICY.patterns\n"
     )
 
 
@@ -133,6 +155,7 @@ def init_shelf(
     shelf.rebuild_index()
 
     _write_if_missing(root, "POLICY.md", POLICY_TEMPLATE, created)
+    _write_if_missing(root, "POLICY.patterns", POLICY_PATTERNS_TEMPLATE, created)
     _write_if_missing(root, "ledger.tsv", LEDGER_HEADER, created)
     _write_if_missing(root, "shelf.yml", _shelf_yaml(name), created)
 

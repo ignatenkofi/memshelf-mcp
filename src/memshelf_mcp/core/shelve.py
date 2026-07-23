@@ -24,6 +24,7 @@ from pathlib import Path
 
 from memshelf_mcp.core.digest import ValidationResult, validate_digest
 from memshelf_mcp.core.episode import CATEGORY_BY_KIND, Frontmatter, compose_episode
+from memshelf_mcp.core.policy import load_pattern_pack
 from memshelf_mcp.core.redact import RedactionReport, redact
 
 LEDGER_HEADER = "date\tepisode_id\tmode\tapprox_tokens_in\tdigest_tokens\tnotes\n"
@@ -131,12 +132,21 @@ def shelve(
 
     root = Path(shelf_root).expanduser().resolve()
     sections = dict(sections or {})
+    warnings: list[str] = []
+
+    # The shelf's own machine-readable POLICY pack (#16) layers onto the builtin
+    # credential shapes and any caller-supplied patterns. A malformed pack does
+    # not block a shelve — the valid rules still apply and the errors surface as
+    # warnings (and doctor flags them loudly).
+    pack = load_pattern_pack(root)
+    warnings += [f"POLICY.patterns: {e}" for e in pack.errors]
+    combined_patterns = list(pack.patterns) + list(extra_patterns or [])
 
     # Layer 2 — redact digest + body before validation or any write.
     counts: dict[str, int] = {}
 
     def _scrub(text: str) -> str:
-        out, rep = redact(text, extra_patterns=extra_patterns)
+        out, rep = redact(text, extra_patterns=combined_patterns)
         for k, n in rep.counts.items():
             counts[k] = counts.get(k, 0) + n
         return out
@@ -210,7 +220,6 @@ def shelve(
     # Redraw the shelf's living savings chart (stats.svg) so it travels in the
     # same commit as the episode. Cosmetic: a chart failure must never fail a
     # shelve — it degrades to a warning on the result.
-    warnings: list[str] = []
     try:
         from memshelf_mcp.core.chart import write_chart
 

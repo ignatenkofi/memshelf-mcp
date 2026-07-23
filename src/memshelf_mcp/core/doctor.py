@@ -18,7 +18,8 @@ from pathlib import Path
 from memshelf_mcp.core.digest import validate_digest
 from memshelf_mcp.core.episode import CATEGORY_BY_KIND, required_sections
 from memshelf_mcp.core.frontmatter import parse_frontmatter
-from memshelf_mcp.core.redact import scan
+from memshelf_mcp.core.policy import load_pattern_pack
+from memshelf_mcp.core.redact import scan, scan_patterns
 from memshelf_mcp.core.remote import PRIVATE, PUBLIC, configured_remotes, remote_visibility
 
 # ROADMAP M2 keeps INDEX under ~10 KB; at chars/4 that is ~2500 tokens injected
@@ -132,7 +133,9 @@ def _ledger_ids(path: Path) -> set[str]:
     return ids
 
 
-def _check_episode(root: Path, rel: str) -> list[Finding]:
+def _check_episode(
+    root: Path, rel: str, pack_patterns: list[tuple[str, str]] | None = None
+) -> list[Finding]:
     out: list[Finding] = []
     text = (root / rel).read_text(encoding="utf-8")
     fields, body = parse_frontmatter(text)
@@ -207,6 +210,19 @@ def _check_episode(root: Path, rel: str) -> list[Finding]:
                 "redact and re-shelve the episode",
             )
         )
+
+    if pack_patterns:
+        policy_hits = scan_patterns(text, pack_patterns)
+        if not policy_hits.clean:
+            out.append(
+                Finding(
+                    "error",
+                    "policy-pattern-at-rest",
+                    rel,
+                    f"POLICY.patterns-forbidden strings on disk ({policy_hits.summary()})",
+                    "redact per the shelf's POLICY.patterns and re-shelve",
+                )
+            )
     return out
 
 
@@ -234,6 +250,21 @@ def check_shelf(
     for f in shelf.doctor():
         findings.append(Finding(f.severity, f.rule, f.path, f.detail, f.suggested_fix))
 
+    # The shelf's machine-readable POLICY pack (#16). A malformed pack is a
+    # warning — its good rules still run at rest, but the broken ones silently
+    # aren't guarding, so surface them.
+    pack = load_pattern_pack(root)
+    for err in pack.errors:
+        findings.append(
+            Finding(
+                "warning",
+                "policy-pattern-invalid",
+                "POLICY.patterns",
+                err,
+                "fix the rule; until then it does not guard this shelf",
+            )
+        )
+
     ledger_ids = _ledger_ids(root / "ledger.tsv")
     seen: set[str] = set()
     episodes = 0
@@ -242,7 +273,7 @@ def check_shelf(
         rel = entry.relative_path
         stem = Path(rel).stem
         seen.add(stem)
-        findings.extend(_check_episode(root, rel))
+        findings.extend(_check_episode(root, rel, pack.patterns))
         if stem not in ledger_ids:
             findings.append(
                 Finding(
