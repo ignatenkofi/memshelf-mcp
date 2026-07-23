@@ -46,6 +46,41 @@ navigation* — episodic memory you can grep, diff, review, and carry between
 hosts. Private and local by default: the standard storage mode is a local
 git repo with **no remote configured**.
 
+## Quick start
+
+As an **MCP server** (tools `memshelf_init` / `shelve` / `recall` / `index` /
+`search` / `stats` / `doctor`):
+
+```bash
+# Claude Code
+claude mcp add memshelf -- uvx memshelf-mcp
+```
+
+```jsonc
+// Claude Desktop (claude_desktop_config.json)
+{
+  "mcpServers": {
+    "memshelf": { "command": "uvx", "args": ["memshelf-mcp"] }
+  }
+}
+```
+
+Or from the **shell** (`pip install memshelf-mcp`) — the same loop, no MCP:
+
+```bash
+memshelf init   --shelf ~/my-shelf --name "My working memory"
+memshelf shelve --shelf ~/my-shelf --slug 2026-07-23-topic --kind topic \
+  --digest "What was decided, what was rejected and why, what stays open." \
+  --section "Decisions=..."
+memshelf recall --shelf ~/my-shelf --id 2026-07-23-topic --section Decisions --log
+memshelf stats  --shelf ~/my-shelf   # claimed + realized savings
+memshelf doctor --shelf ~/my-shelf   # exit 1 on integrity errors
+```
+
+A rejected digest is a feature: the tool prints exactly what to fix and
+writes nothing. Measured results from a week of dogfooding are in
+[`docs/demo.md`](docs/demo.md).
+
 ## Documents
 
 | Doc | What it covers |
@@ -84,3 +119,7 @@ historical snapshot.
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
+
+---
+
+mcp-name: io.github.ignatenkofi/memshelf-mcp

@@ -1,0 +1,74 @@
+name: release
+# Tag v* -> gate (tests+lint) -> PyPI (Trusted Publishing) -> MCP Registry
+# (GitHub OIDC). No stored secrets anywhere:
+# - PyPI: configure a Trusted Publisher for project `memshelf-mcp`
+#   (owner ignatenkofi, repo memshelf-mcp, workflow release.yml) at
+#   https://pypi.org/manage/account/publishing/ — one-time manual step.
+# - MCP Registry: the io.github.ignatenkofi/* namespace authenticates via
+#   GitHub Actions OIDC (`mcp-publisher login github-oidc`), nothing to set up.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package + dev tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Tag matches package version
+        run: |
+          PKG=$(python -c "import memshelf_mcp; print(memshelf_mcp.__version__)")
+          TAG="${GITHUB_REF_NAME#v}"
+          test "$PKG" = "$TAG" || { echo "tag v$TAG != __version__ $PKG"; exit 1; }
+          python -c "import json; m=json.load(open('server.json')); \
+            assert m['version']=='$TAG' and m['packages'][0]['version']=='$TAG', \
+            'server.json version out of sync'"
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Tests
+        run: pytest -q
+
+  pypi:
+    needs: gate
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # PyPI Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  mcp-registry:
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # MCP Registry GitHub OIDC login
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mcp-publisher
+        run: |
+          curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" \
+            | tar xz mcp-publisher
+      - name: Publish to the MCP Registry
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish

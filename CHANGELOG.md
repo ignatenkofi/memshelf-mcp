@@ -9,6 +9,14 @@ once code ships.
 ## [Unreleased] — design phase
 
 ### Added
+- **Release & distribution wiring** (first public release, `0.1.0`): version
+  bump; `server.json` (official MCP Registry manifest,
+  `io.github.ignatenkofi/memshelf-mcp`, PyPI package, stdio);
+  `.github/workflows/release.yml` — tag `v*` → gate (version-sync check, ruff,
+  pytest) → PyPI via Trusted Publishing (OIDC, no stored secrets) → MCP
+  Registry via `mcp-publisher login github-oidc`; `glama.json` +
+  `smithery.yaml` directory manifests; README quick-start (Claude Code /
+  Claude Desktop / CLI) + the `mcp-name` PyPI-validation marker.
 - **`memshelf init`** (`core/init.py`, MCP `memshelf_init` + CLI) — the shelf
   bootstrap (#9): docshelf layout with fixed `topics`/`research`/`sessions`,
   the recall-rule INDEX preamble instead of docshelf's raw-URL default (M0
