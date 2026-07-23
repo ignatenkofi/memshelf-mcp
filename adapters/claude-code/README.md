@@ -73,6 +73,45 @@ so those hooks are limited to the mechanical push. See
 [`../../docs/DECISIONS.md`](../../docs/DECISIONS.md) and
 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md).
 
+## PII/secret pre-commit guard (recommended for every shelf)
+
+The shelve tool redacts on its own write path, but a **hand edit, a stray agent
+write, or a fix-up commit** reaches git with no check at all — on a repo whose
+entire content is conversation memory, where git history makes a leak sticky.
+`hooks/pre-commit` closes that gap: nothing lands in a commit without a scan.
+
+Install it into a shelf (one line, from the shelf root):
+
+```bash
+# self-instrumenting shelf (the kit is vendored under <shelf>/hooks/):
+ln -sf ../../hooks/pre-commit .git/hooks/pre-commit
+# or point straight at the plugin checkout:
+ln -sf /path/to/memshelf-mcp/adapters/claude-code/hooks/pre-commit .git/hooks/pre-commit
+```
+
+After that a commit is **refused** if a staged file carries a token- or
+email-shaped string — whether it was written via `/shelve` or by hand (the
+issue-#32 acceptance test). Two layers:
+
+1. **Built-in shapes** (always on, no dependency): email / phone / token /
+   env-secret, plus your shelf's `POLICY.patterns` (the same machine-readable
+   pack the redaction pass and `doctor` read) and any `MEMSHELF_PII_PACK_DIR`.
+2. **Name PII** via a pluggable scanner (`pii-mcp`). Names can't be caught by
+   shapes, so if `pii-mcp` is **not installed the hook fails loud** rather than
+   passing silently — it never depends on `pii-mcp` being deployed to be safe.
+
+| Env var | Effect |
+|---|---|
+| `MEMSHELF_PII_SKIP=1` | Skip the guard once (git's `--no-verify` also works) |
+| `MEMSHELF_PII_BUILTIN_ONLY=1` | Ephemeral-session downgrade: shapes only, names unchecked (loud) |
+| `MEMSHELF_PII_PACK_DIR=DIR` | Load extra `*.patterns` packs (`kind<ws>regex`) |
+| `MEMSHELF_PII_CMD="pii-mcp verify"` | Override the layer-2 scanner invocation |
+
+Exit contract: `0` clean · `1` findings · `2` config error / scanner missing.
+bash-3.2 compatible (macOS). Scaffolding this into `memshelf init` (a
+`--with-hook` flag that installs it and sets `core.hooksPath`) is a planned
+follow-up — it needs the adapter files shipped as package data.
+
 ## Chat projects (Claude Desktop / web)
 
 No hooks there: paste the block from
