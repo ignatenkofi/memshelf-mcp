@@ -143,7 +143,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
-    result = run_doctor(DoctorInput(shelf_path=args.shelf))
+    result = run_doctor(DoctorInput(shelf_path=args.shelf, check_remote=args.check_remote))
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["errors"] == 0 else 1  # non-zero on errors, for CI / hooks
 
@@ -214,6 +214,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     dc = sub.add_parser("doctor", help="Check shelf integrity (exit 1 on errors).")
     dc.add_argument("--shelf", required=True, help="Path to the shelf.")
+    dc.add_argument(
+        "--check-remote",
+        action="store_true",
+        help="Probe git remotes; fail on a publicly visible one (needs network).",
+    )
     dc.set_defaults(func=_cmd_doctor)
 
     return parser

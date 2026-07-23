@@ -196,9 +196,15 @@ def run_init(params: InitInput) -> dict:
 
 class DoctorInput(BaseModel):
     shelf_path: str = Field(description="Path to an initialized memory shelf.")
+    check_remote: bool = Field(
+        default=False,
+        description="Also probe git remotes and fail the shelf if any is publicly "
+        "visible (MANIFEST principle 8). Off by default because it hits the network.",
+    )
 
 
 def run_doctor(params: DoctorInput) -> dict:
     """Check shelf integrity: schema, digest contract, secrets at rest, ledger,
-    INDEX budget, plus docshelf's structural checks."""
-    return check_shelf(params.shelf_path).as_dict()
+    INDEX budget, plus docshelf's structural checks. Optionally (``check_remote``)
+    gate on remote visibility."""
+    return check_shelf(params.shelf_path, check_remote=params.check_remote).as_dict()

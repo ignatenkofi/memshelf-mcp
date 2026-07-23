@@ -161,12 +161,19 @@ def memshelf_init(params: InitInput) -> str:
 
 @mcp.tool(
     name="memshelf_doctor",
-    annotations={"title": "Check shelf integrity", **_READ_ONLY},
+    annotations={
+        "title": "Check shelf integrity",
+        **_READ_ONLY,
+        # check_remote=true probes git remotes over the network (opt-in).
+        "openWorldHint": True,
+    },
 )
 def memshelf_doctor(params: DoctorInput) -> str:
     """Diagnose the shelf: episode schema, the digest contract at rest, secrets
     that slipped onto disk, ledger consistency, and the INDEX budget — plus
-    docshelf's structural checks. Read-only; reports findings, fixes nothing."""
+    docshelf's structural checks. With ``check_remote`` it also fails a shelf
+    whose git remote is publicly visible. Read-only; reports findings, fixes
+    nothing."""
     try:
         return _serialize(run_doctor(params))
     except Exception as exc:
