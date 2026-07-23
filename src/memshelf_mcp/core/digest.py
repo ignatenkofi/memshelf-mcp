@@ -19,9 +19,13 @@ from memshelf_mcp.core.redact import scan
 MAX_WORDS = 120
 
 # First-person-plural pronouns assume the reader shared the session — exactly
-# what a digest must not do. Hard reject.
+# what a digest must not do. Hard reject. The Russian possessives are
+# enumerated as exact forms rather than the open prefix `наш\w*`, which also
+# matched the unrelated verb «нашёл/нашла/нашли» ("found") — a false positive
+# hit on the very first dogfooded shelve (#45).
 _WE = re.compile(
-    r"\b(we|we're|we've|we'd|our|ours|us|мы|нам|нас|наш\w*)\b",
+    r"\b(we|we're|we've|we'd|our|ours|us|мы|нам|нас"
+    r"|наш(?:его|ему|ими|их|ем|ею|ей|им|а|е|и|у)?)\b",
     re.IGNORECASE,
 )
 

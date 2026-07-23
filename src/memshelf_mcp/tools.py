@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from memshelf_mcp.core.doctor import check_shelf
+from memshelf_mcp.core.init import init_shelf
 from memshelf_mcp.core.recall import read_index, recall, search
 from memshelf_mcp.core.shelve import shelve
 from memshelf_mcp.core.stats import compute_stats
@@ -148,6 +149,30 @@ def run_stats(params: StatsInput) -> dict:
             "recall with log=true (CLI: --log) to accumulate them."
         )
     return payload
+
+
+class InitInput(BaseModel):
+    shelf_path: str = Field(description="Directory to create (or top up) the shelf in.")
+    name: str = "Memory shelf"
+    storage: Literal["plain", "git-local", "git-remote"] = "git-local"
+    remote: str | None = Field(
+        default=None, description="Remote URL; only with storage=git-remote (private repos only)."
+    )
+
+
+def run_init(params: InitInput) -> dict:
+    """Bootstrap a memory shelf with the memory conventions. Idempotent."""
+    result = init_shelf(
+        params.shelf_path, name=params.name, storage=params.storage, remote=params.remote
+    )
+    return {
+        "status": "ok",
+        "root": result.root,
+        "storage": result.storage,
+        "created": result.created,
+        "committed": result.committed,
+        "commit": result.commit,
+    }
 
 
 class DoctorInput(BaseModel):
