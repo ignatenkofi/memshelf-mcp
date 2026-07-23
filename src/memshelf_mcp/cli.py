@@ -85,6 +85,9 @@ def _cmd_recall(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
     print(result["content"])
+    if "summary" in result:
+        # stdout stays pipeable content; the savings note goes to stderr.
+        print(result["summary"], file=sys.stderr)
     return 0
 
 
@@ -108,7 +111,19 @@ def _cmd_search(args: argparse.Namespace) -> int:
 
 
 def _cmd_stats(args: argparse.Namespace) -> int:
+    if args.chart:
+        from memshelf_mcp.core.chart import write_chart
+
+        rel = write_chart(args.shelf)
+        if rel is None:
+            print("no ledger rows yet — nothing to chart", file=sys.stderr)
+            return 1
+        print(rel)
+        return 0
     result = run_stats(StatsInput(shelf_path=args.shelf))
+    if args.banner:
+        print(result["banner"])
+        return 0
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
@@ -184,6 +199,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     st = sub.add_parser("stats", help="Token accounting for the shelf.")
     st.add_argument("--shelf", required=True, help="Path to the shelf.")
+    st.add_argument("--banner", action="store_true", help="Print the one-line summary only.")
+    st.add_argument(
+        "--chart", action="store_true", help="(Re)draw stats.svg at the shelf root and exit."
+    )
     st.set_defaults(func=_cmd_stats)
 
     it = sub.add_parser("init", help="Bootstrap a memory shelf (idempotent).")

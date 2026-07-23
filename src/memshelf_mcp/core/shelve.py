@@ -207,6 +207,17 @@ def shelve(
     )
     _append_ledger(root / "ledger.tsv", row)
 
+    # Redraw the shelf's living savings chart (stats.svg) so it travels in the
+    # same commit as the episode. Cosmetic: a chart failure must never fail a
+    # shelve — it degrades to a warning on the result.
+    warnings: list[str] = []
+    try:
+        from memshelf_mcp.core.chart import write_chart
+
+        write_chart(root)
+    except Exception as exc:  # noqa: BLE001 — cosmetic layer
+        warnings.append(f"stats.svg not redrawn: {exc}")
+
     # Auto-commit (design decision 3) — commit only, push stays configurable.
     committed, sha = False, None
     if autocommit and (root / ".git").exists():
@@ -221,4 +232,5 @@ def shelve(
         ledger_row=row,
         committed=committed,
         commit=sha,
+        warnings=warnings,
     )

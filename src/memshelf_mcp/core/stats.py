@@ -55,6 +55,34 @@ def _int(value: str) -> int | None:
         return None
 
 
+def banner(stats: Stats) -> str:
+    """One ambient line for session starts and tool output."""
+    line = (
+        f"memshelf: {stats.episodes} episodes · standing {_human(stats.standing_cost)} tok "
+        f"· holds {_human(stats.shelved_mass)} ({stats.compression_ratio}:1)"
+    )
+    if stats.realized_savings:
+        line += f" · realized saved {_human(stats.realized_savings)}"
+    return line
+
+
+def _human(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.2f}M".rstrip("0").rstrip(".")
+    if n >= 1_000:
+        return f"{round(n / 1_000)}K"
+    return str(n)
+
+
+def episode_mass(shelf_root: str | Path, episode_id: str) -> int | None:
+    """Latest ledger ``approx_tokens_in`` for one episode (None if unledgered)."""
+    mass: int | None = None
+    for cols in _rows(Path(shelf_root).expanduser().resolve() / "ledger.tsv"):
+        if len(cols) >= 4 and cols[1] == episode_id:
+            mass = _int(cols[3]) or mass
+    return mass
+
+
 def compute_stats(shelf_root: str | Path) -> Stats:
     root = Path(shelf_root).expanduser().resolve()
 

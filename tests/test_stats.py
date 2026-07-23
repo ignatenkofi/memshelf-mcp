@@ -57,6 +57,28 @@ def test_realized_economy_from_recall_log(tmp_path):
     assert s.realized_savings == (10000 - 150) + (10000 - 500)
 
 
+def test_banner_line(tmp_path):
+    from memshelf_mcp.core.stats import banner
+
+    _write_shelf(tmp_path, "2026-07-22\tep-a\tlive\t100000\t200\t\n", index="x" * 800)
+    s = compute_stats(tmp_path)
+    line = banner(s)
+    assert line.startswith("memshelf: 1 episodes")
+    assert "holds 100K" in line
+    assert "realized" not in line  # no recalls logged
+
+
+def test_episode_mass_latest_row_wins(tmp_path):
+    from memshelf_mcp.core.stats import episode_mass
+
+    _write_shelf(
+        tmp_path,
+        "2026-07-22\tep-a\tlive\t10000\t200\t\n2026-07-23\tep-a\tlive\t12000\t210\t\n",
+    )
+    assert episode_mass(tmp_path, "ep-a") == 12000
+    assert episode_mass(tmp_path, "ep-missing") is None
+
+
 def test_missing_ledger_is_empty(tmp_path):
     s = compute_stats(tmp_path)
     assert s.episodes == 0
@@ -94,11 +116,17 @@ def test_shelve_recall_stats_end_to_end(tmp_path):
     assert s0["recalls"] == 0
     assert "note" in s0  # nudges toward --log
 
-    run_recall(RecallInput(shelf_path=str(tmp_path), episode_id="2026-07-22-x", log=True))
+    recall_out = run_recall(
+        RecallInput(shelf_path=str(tmp_path), episode_id="2026-07-22-x", log=True)
+    )
     assert (tmp_path / "recall-log.tsv").is_file()
+    # per-action delta (issue #49 idea 2)
+    assert recall_out["saved_tokens"] > 0
+    assert "saved" in recall_out["summary"]
 
     s1 = run_stats(StatsInput(shelf_path=str(tmp_path)))
     assert s1["recalls"] == 1
     assert s1["episodes_recalled"] == 1
     assert s1["realized_savings"] > 0
     assert "note" not in s1
+    assert s1["banner"].startswith("memshelf: 1 episodes")
