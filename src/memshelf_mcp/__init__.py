@@ -5,4 +5,4 @@ Markdown episodes, then recall them by index instead of re-deriving. See
 ``docs/`` for the design (MANIFEST, ARCHITECTURE, ROADMAP).
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"

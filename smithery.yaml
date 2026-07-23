@@ -1,0 +1,18 @@
+# Smithery configuration for memshelf-mcp
+# Docs: https://smithery.ai/docs
+#
+# memshelf-mcp is a stdio MCP server. Smithery installs it from PyPI and
+# launches it locally; every tool takes an explicit shelf_path, so no
+# environment configuration is required.
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required: []
+    properties: {}
+  commandFunction: |-
+    (config) => ({
+      command: "memshelf-mcp",
+      args: []
+    })
