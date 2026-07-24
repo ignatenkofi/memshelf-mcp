@@ -104,3 +104,152 @@ def test_orphan_ledger_row_flagged(tmp_path):
         fh.write("2026-07-22\t2026-07-22-ghost\tlive\t100\t20\t\n")
     report = check_shelf(root)
     assert "orphan-ledger-row" in _codes(report)
+
+
+# --- remote-visibility gate (MANIFEST principle 8) --------------------------
+
+
+def test_remote_check_off_by_default(tmp_path):
+    # A public remote is not probed unless the caller opts in.
+    root = _init(tmp_path)
+    subprocess.run(
+        ["git", "-C", str(root), "remote", "add", "origin", "https://github.com/o/pub.git"],
+        check=True,
+    )
+    report = check_shelf(root)  # no check_remote
+    assert "public-remote" not in _codes(report)
+    assert "no-remote" not in _codes(report)
+
+
+def test_public_remote_fails_the_shelf(tmp_path):
+    root = _init(tmp_path)
+    subprocess.run(
+        ["git", "-C", str(root), "remote", "add", "origin", "https://github.com/o/pub.git"],
+        check=True,
+    )
+    report = check_shelf(root, check_remote=True, remote_prober=lambda url: ("public", "is public"))
+    assert not report.ok
+    assert "public-remote" in _codes(report)
+
+
+def test_private_remote_passes(tmp_path):
+    root = _init(tmp_path)
+    subprocess.run(
+        ["git", "-C", str(root), "remote", "add", "origin", "git@github.com:o/priv.git"],
+        check=True,
+    )
+    report = check_shelf(root, check_remote=True, remote_prober=lambda url: ("private", "401"))
+    assert report.ok
+    assert "remote-private" in _codes(report)
+
+
+def test_unverifiable_remote_warns_not_errors(tmp_path):
+    root = _init(tmp_path)
+    subprocess.run(
+        ["git", "-C", str(root), "remote", "add", "origin", "https://host/o/r.git"],
+        check=True,
+    )
+    report = check_shelf(root, check_remote=True, remote_prober=lambda url: ("unknown", "dns down"))
+    assert report.ok  # a flaky network must not block the shelf
+    assert "remote-unverified" in _codes(report)
+
+
+def test_no_remote_is_info(tmp_path):
+    root = _init(tmp_path)
+    report = check_shelf(root, check_remote=True)
+    assert report.ok
+    assert "no-remote" in _codes(report)
+
+
+# --- machine-readable POLICY pattern packs (#16) ----------------------------
+
+
+def test_policy_pattern_at_rest_flagged(tmp_path):
+    root = _init(tmp_path)
+    (root / "POLICY.patterns").write_text("student-id  S[0-9]{1,2}\n", encoding="utf-8")
+    _write_raw(
+        root,
+        "topics",
+        "2026-07-22-leak",
+        "# 2026-07-22-leak\n\n---\nid: 2026-07-22-leak\nkind: topic\n---\n\n"
+        "## Digest\nA decided change; nothing open.\n\n"
+        "## Decisions\nhand-written note mentioning S7 by id\n",
+    )
+    report = check_shelf(root)
+    assert not report.ok
+    assert "policy-pattern-at-rest" in _codes(report)
+
+
+def test_no_policy_pack_means_no_policy_findings(tmp_path):
+    root = _init(tmp_path)
+    _write_raw(
+        root,
+        "topics",
+        "2026-07-22-plain",
+        "# 2026-07-22-plain\n\n---\nid: 2026-07-22-plain\nkind: topic\n---\n\n"
+        "## Digest\nA decided change; nothing open.\n\n## Decisions\nmentions S7 freely\n",
+    )
+    report = check_shelf(root)
+    assert "policy-pattern-at-rest" not in _codes(report)
+
+
+def test_malformed_policy_pack_is_a_warning(tmp_path):
+    root = _init(tmp_path)
+    (root / "POLICY.patterns").write_text("broken  [unterminated\n", encoding="utf-8")
+    report = check_shelf(root)
+    assert "policy-pattern-invalid" in _codes(report)
+    assert report.ok  # a broken pack warns; it does not hard-fail the shelf
+
+
+# --- digest/body mismatch sampling (write-only-memory guard) ----------------
+
+
+def test_digest_body_mismatch_flagged(tmp_path):
+    # A body rich in distinct content words that the digest never touches.
+    root = _init(tmp_path)
+    body = (
+        "Billing migration reshaped invoices, refunds, chargebacks, dunning, webhooks, "
+        "reconciliation, ledger, postgres, replication, decoding, slots, scheduler, batches, "
+        "cutover, throughput, latency, indexes, vacuum, partitions, sharding, failover, replica, "
+        "primary, checkpoint, backpressure, worker, retries, idempotency, deadlock, isolation, "
+        "serializable, snapshot, rollback, savepoint, cursor, pagination, throttling, quotas, "
+        "metrics, dashboards, alerting, oncall, telemetry."
+    )
+    _write_raw(
+        root,
+        "topics",
+        "2026-07-22-drift",
+        "# 2026-07-22-drift\n\n---\nid: 2026-07-22-drift\nkind: topic\n---\n\n"
+        "## Digest\nThe committee chose lunch options; sandwiches beat salads "
+        "after tasting; dessert stays undecided; catering vendor picks Friday.\n\n"
+        f"## Decisions\n{body}\n",
+    )
+    report = check_shelf(root)
+    assert "digest-body-mismatch" in _codes(report)
+    # a heuristic guard is a warning, never a hard failure
+    assert report.ok
+
+
+def test_grounded_digest_not_flagged(tmp_path):
+    root = _init(tmp_path)
+    shelve(
+        root,
+        slug="2026-07-22-grounded",
+        kind="topic",
+        digest=(
+            "The billing migration chose logical decoding slots over trigger "
+            "replication; reconciliation of invoices, refunds, and chargebacks was "
+            "reworked; the overnight scheduler drains before cutover. Open: dunning webhooks."
+        ),
+        sections={
+            "Decisions": (
+                "Billing migration: logical decoding slots replaced trigger replication "
+                "because replication lag broke reconciliation. Invoices, refunds, and "
+                "chargebacks reconcile nightly; the scheduler drains overnight batches "
+                "before the cutover window. Dunning webhooks stay open."
+            )
+        },
+        date="2026-07-22",
+    )
+    report = check_shelf(root)
+    assert "digest-body-mismatch" not in _codes(report)

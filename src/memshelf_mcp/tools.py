@@ -13,6 +13,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from memshelf_mcp.core.doctor import check_shelf
+from memshelf_mcp.core.importer import discover as import_discover
+from memshelf_mcp.core.importer import extract as import_extract
 from memshelf_mcp.core.init import init_shelf
 from memshelf_mcp.core.recall import read_index, recall, search
 from memshelf_mcp.core.shelve import shelve
@@ -196,9 +198,61 @@ def run_init(params: InitInput) -> dict:
 
 class DoctorInput(BaseModel):
     shelf_path: str = Field(description="Path to an initialized memory shelf.")
+    check_remote: bool = Field(
+        default=False,
+        description="Also probe git remotes and fail the shelf if any is publicly "
+        "visible (MANIFEST principle 8). Off by default because it hits the network.",
+    )
 
 
 def run_doctor(params: DoctorInput) -> dict:
     """Check shelf integrity: schema, digest contract, secrets at rest, ledger,
-    INDEX budget, plus docshelf's structural checks."""
-    return check_shelf(params.shelf_path).as_dict()
+    INDEX budget, plus docshelf's structural checks. Optionally (``check_remote``)
+    gate on remote visibility."""
+    return check_shelf(params.shelf_path, check_remote=params.check_remote).as_dict()
+
+
+class ImportInput(BaseModel):
+    method: Literal["discover", "extract"] = Field(
+        description="'discover' lists conversations by content marker; 'extract' cleans "
+        "one to a working file for shelving."
+    )
+    path: str = Field(description="Path to the transcript FILE — content never rides in-context.")
+    format: Literal["auto", "claude-json", "claude-code-jsonl"] = "auto"
+    markers: list[str] = Field(
+        default_factory=list,
+        description="Content substrings that must ALL appear in a conversation's body "
+        "(discovery is by content, not title).",
+    )
+    limit: int = Field(default=50, description="discover: max conversations to return.")
+    select: str | None = Field(
+        default=None, description="extract: conversation id / title / index to clean."
+    )
+    out: str | None = Field(
+        default=None,
+        description="extract: output file for the cleaned transcript (default: a temp "
+        "working file). Never write it inside a shelf.",
+    )
+
+
+def run_import(params: ImportInput) -> dict:
+    """Prepare an exported dialog for shelving without pulling it through context.
+
+    ``discover`` returns conversation metadata matched by content markers;
+    ``extract`` writes one cleaned, tool-block-stripped conversation to a working
+    file and returns its path plus the noise ratio. The raw transcript is input
+    only — never stored on a shelf.
+    """
+    if params.method == "discover":
+        result = import_discover(
+            params.path, markers=params.markers, fmt=params.format, limit=params.limit
+        )
+    else:
+        result = import_extract(
+            params.path,
+            select=params.select,
+            markers=params.markers,
+            fmt=params.format,
+            out=params.out,
+        )
+    return {"status": "ok", **result}

@@ -20,6 +20,7 @@ from mcp.server.fastmcp import FastMCP
 from memshelf_mcp import __version__
 from memshelf_mcp.tools import (
     DoctorInput,
+    ImportInput,
     IndexInput,
     InitInput,
     RecallInput,
@@ -27,6 +28,7 @@ from memshelf_mcp.tools import (
     ShelveInput,
     StatsInput,
     run_doctor,
+    run_import,
     run_index,
     run_init,
     run_recall,
@@ -161,16 +163,50 @@ def memshelf_init(params: InitInput) -> str:
 
 @mcp.tool(
     name="memshelf_doctor",
-    annotations={"title": "Check shelf integrity", **_READ_ONLY},
+    annotations={
+        "title": "Check shelf integrity",
+        **_READ_ONLY,
+        # check_remote=true probes git remotes over the network (opt-in).
+        "openWorldHint": True,
+    },
 )
 def memshelf_doctor(params: DoctorInput) -> str:
     """Diagnose the shelf: episode schema, the digest contract at rest, secrets
     that slipped onto disk, ledger consistency, and the INDEX budget — plus
-    docshelf's structural checks. Read-only; reports findings, fixes nothing."""
+    docshelf's structural checks. With ``check_remote`` it also fails a shelf
+    whose git remote is publicly visible. Read-only; reports findings, fixes
+    nothing."""
     try:
         return _serialize(run_doctor(params))
     except Exception as exc:
         return _error_response(exc, "memshelf_doctor")
+
+
+@mcp.tool(
+    name="memshelf_import",
+    annotations={
+        "title": "Import an exported transcript for shelving",
+        "readOnlyHint": False,  # extract writes a cleaned working file (never a shelf)
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+def memshelf_import(params: ImportInput) -> str:
+    """Retro-shelve a whole exported dialog without pulling it through context.
+
+    Two methods. ``discover`` lists the conversations in a claude.ai
+    ``conversations.json`` or Claude Code session JSONL, matched by content
+    ``markers`` (not title), returning metadata only. ``extract`` cleans one
+    conversation — dropping tool_use/tool_result blocks — to a working file and
+    returns its path plus the noise ratio. The raw transcript stays a file on
+    disk: it never enters context or a shelf. Then read the cleaned file, segment
+    it, and shelve each segment (``mode=import``).
+    """
+    try:
+        return _serialize(run_import(params))
+    except Exception as exc:
+        return _error_response(exc, "memshelf_import")
 
 
 def main(argv: list[str] | None = None) -> None:

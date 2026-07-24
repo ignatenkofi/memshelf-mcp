@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# memshelf pre-commit PII/secret guard (issue #32).
+#
+# Why this exists: a memory shelf's entire content is conversation memory, and
+# git history makes a leak sticky (only a deliberate filter-repo removes it).
+# The shelve tool redacts on its own write path, but a HAND edit, a stray agent
+# write, or a fix-up commit reaches git with no check at all. This hook closes
+# that gap: nothing lands in a commit without a scan.
+#
+# Two layers:
+#   1. Built-in shape scan (always on, no dependency): email / phone / token /
+#      env-secret regexes over the STAGED content. bash-3.2 + BSD-grep safe.
+#   2. Pluggable name-PII scanner: `pii-mcp verify` when present. Names can't be
+#      caught by shapes, so if the scanner is MISSING the hook FAILS LOUD rather
+#      than passing silently — unless you consciously downgrade for an ephemeral
+#      session (MEMSHELF_PII_BUILTIN_ONLY=1).
+#
+# Escape hatches (all opt-in, all loud):
+#   MEMSHELF_PII_SKIP=1          skip the whole guard once (git's --no-verify too)
+#   MEMSHELF_PII_BUILTIN_ONLY=1  run layer 1 only; accept that names go unchecked
+#   MEMSHELF_PII_PACK_DIR=DIR    extra pattern packs (kind<ws>regex, # comments)
+#   MEMSHELF_PII_CMD="pii-mcp verify"   override the layer-2 scanner invocation
+#
+# Exit contract: 0 clean · 1 findings · 2 config error / scanner missing.
+set -u
+
+say() { printf 'memshelf pre-commit: %s\n' "$1" >&2; }
+
+if [ "${MEMSHELF_PII_SKIP:-}" = "1" ]; then
+  say "SKIPPED by MEMSHELF_PII_SKIP=1 — nothing was scanned."
+  exit 0
+fi
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
+
+# Staged, still-present files (Added/Copied/Modified). No mapfile (bash 3.2).
+staged=""
+while IFS= read -r f; do
+  [ -n "$f" ] && staged="$staged$f
+"
+done <<EOF
+$(git diff --cached --name-only --diff-filter=ACM)
+EOF
+
+[ -n "$staged" ] || exit 0
+
+# ---- pattern table ---------------------------------------------------------
+# One flat table shared by the built-in shapes and any pattern pack: a
+# space-separated list of kinds (no spaces in a kind) parallel to newline-
+# separated regexes (regexes MAY contain spaces, e.g. `Bearer[ ]+`). No
+# associative arrays / eval (bash 3.2). Extended-regex, no \b (BSD grep lacks
+# it) — prefixes and separators anchor instead.
+pat_kinds=""
+pat_res=""
+_add() { pat_kinds="$pat_kinds $1"; pat_res="$pat_res
+$2"; }
+
+_add email        '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+_add token-github 'gh[pousr]_[A-Za-z0-9]{36,}'
+_add token-sonar  'squ_[0-9a-f]{40}'
+_add token-aws    'AKIA[0-9A-Z]{16}'
+_add bearer       'Bearer[ ]+[A-Za-z0-9._-]{16,}'
+_add env-secret   '[A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|PWD|API[_-]?KEY|ACCESS[_-]?KEY)[A-Za-z0-9_]*[ ]*=[ ]*[^ ]'
+_add phone        '(\+[0-9]{7,15}|[0-9]{3}[ .-][0-9]{3}[ .-][0-9]{4})'
+
+# Pattern packs extend the table. `kind<whitespace>regex`, # comments ignored;
+# only the FIRST whitespace run splits kind from regex, so a regex keeps its
+# own internal spaces.
+_load_pack() {
+  packfile="$1"
+  [ -f "$packfile" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      '' | \#*) continue ;;
+    esac
+    kind=$(printf '%s' "$line" | awk '{print $1}')
+    rx=$(printf '%s' "$line" | sed 's/^[^[:space:]]*[[:space:]]*//')
+    [ -n "$kind" ] && [ -n "$rx" ] && _add "pack:$kind" "$rx"
+  done < "$packfile"
+}
+
+# The shelf's own POLICY.patterns (shared with the Python redaction pass, #16)
+# plus any dir given via env.
+_load_pack "$repo_root/POLICY.patterns"
+if [ -n "${MEMSHELF_PII_PACK_DIR:-}" ]; then
+  for pf in "$MEMSHELF_PII_PACK_DIR"/*.patterns; do
+    _load_pack "$pf"
+  done
+fi
+
+# Scan one staged blob for one regex; print `line: match`, redaction markers
+# («redacted:…») excluded so correctly-redacted episodes pass.
+_scan() {
+  git show ":$1" 2>/dev/null | grep -nE "$2" 2>/dev/null | grep -vF '«redacted:'
+}
+
+# ---- layer 1: run the table over every staged text blob --------------------
+findings=0
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  git show ":$file" 2>/dev/null | grep -Iq . || continue # skip binary blobs
+  n=0
+  for kind in $pat_kinds; do
+    n=$((n + 1))
+    rx=$(printf '%s\n' "$pat_res" | sed -n "$((n + 1))p")
+    [ -n "$rx" ] || continue
+    hits=$(_scan "$file" "$rx")
+    if [ -n "$hits" ]; then
+      findings=$((findings + 1))
+      say "[$kind] in $file:"
+      printf '%s\n' "$hits" | sed 's/^/    /' >&2
+    fi
+  done
+done <<EOF
+$staged
+EOF
+
+if [ "$findings" -gt 0 ]; then
+  say "$findings shape finding(s). Redact and re-stage, or (deliberately) MEMSHELF_PII_SKIP=1."
+  exit 1
+fi
+
+# ---- layer 2: pluggable name-PII scanner (pii-mcp) -------------------------
+pii_cmd="${MEMSHELF_PII_CMD:-pii-mcp verify}"
+pii_bin=$(printf '%s' "$pii_cmd" | awk '{print $1}')
+
+if command -v "$pii_bin" >/dev/null 2>&1; then
+  scan_files=""
+  while IFS= read -r file; do
+    [ -n "$file" ] && scan_files="$scan_files $file"
+  done <<EOF
+$staged
+EOF
+  # shellcheck disable=SC2086 # intentional word-split of the file list + argv
+  $pii_cmd $scan_files
+  rc=$?
+  if [ "$rc" -eq 1 ]; then
+    say "pii-mcp reported PII findings above — redact and re-stage."
+    exit 1
+  elif [ "$rc" -eq 2 ]; then
+    say "pii-mcp config error (exit 2) — fix the scanner config; not committing."
+    exit 2
+  fi
+  say "clean (built-in shapes + pii-mcp)."
+  exit 0
+fi
+
+# Scanner absent.
+if [ "${MEMSHELF_PII_BUILTIN_ONLY:-}" = "1" ]; then
+  say "WARNING: pii-mcp not found — running built-in shapes ONLY (names unchecked)."
+  say "clean (built-in shapes only)."
+  exit 0
+fi
+
+say "pii-mcp not found and MEMSHELF_PII_BUILTIN_ONLY is not set."
+say "The name-PII layer must not be silently skipped on a memory shelf."
+say "Install pii-mcp (pip install pii-mcp), or for an ephemeral session set"
+say "MEMSHELF_PII_BUILTIN_ONLY=1 to accept the built-in-shapes-only downgrade."
+exit 2

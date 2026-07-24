@@ -10,6 +10,42 @@ from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 from memshelf_mcp.cli import main  # noqa: E402
 
 
+def test_cli_import_discover_then_extract(tmp_path, capsys):
+    export = tmp_path / "conversations.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "uuid": "c1",
+                    "name": "misc",
+                    "chat_messages": [
+                        {"sender": "human", "content": [{"type": "text", "text": "reconcile Q3?"}]},
+                        {
+                            "sender": "assistant",
+                            "content": [
+                                {"type": "text", "text": "The quarterly reconciliation is done."},
+                                {"type": "tool_use", "name": "run", "input": {"c": "NOISE"}},
+                            ],
+                        },
+                    ],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert main(["import", "discover", "--path", str(export), "--marker", "reconciliation"]) == 0
+    assert json.loads(capsys.readouterr().out)["matched"] == 1
+
+    out_file = tmp_path / "clean.md"
+    code = main(
+        ["import", "extract", "--path", str(export), "--select", "c1", "--out", str(out_file)]
+    )
+    assert code == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["stripped_blocks"] == 1
+    assert "NOISE" not in out_file.read_text(encoding="utf-8")
+
+
 def _init(root):
     Shelf(root).init(name="t", default_categories=["topics", "research", "sessions"])
     subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)

@@ -12,11 +12,13 @@ import sys
 
 from memshelf_mcp import __version__
 from memshelf_mcp.core.episode import EpisodeError
+from memshelf_mcp.core.importer import TranscriptError
 from memshelf_mcp.core.init import InitError
 from memshelf_mcp.core.recall import EpisodeNotFound
 from memshelf_mcp.core.shelve import DigestContractError
 from memshelf_mcp.tools import (
     DoctorInput,
+    ImportInput,
     IndexInput,
     InitInput,
     RecallInput,
@@ -24,6 +26,7 @@ from memshelf_mcp.tools import (
     ShelveInput,
     StatsInput,
     run_doctor,
+    run_import,
     run_index,
     run_init,
     run_recall,
@@ -143,9 +146,28 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
-    result = run_doctor(DoctorInput(shelf_path=args.shelf))
+    result = run_doctor(DoctorInput(shelf_path=args.shelf, check_remote=args.check_remote))
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["errors"] == 0 else 1  # non-zero on errors, for CI / hooks
+
+
+def _cmd_import(args: argparse.Namespace) -> int:
+    params = ImportInput(
+        method=args.method,
+        path=args.path,
+        format=args.format,
+        markers=args.marker,
+        limit=args.limit,
+        select=args.select,
+        out=args.out,
+    )
+    try:
+        result = run_import(params)
+    except (TranscriptError, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -214,7 +236,29 @@ def build_parser() -> argparse.ArgumentParser:
 
     dc = sub.add_parser("doctor", help="Check shelf integrity (exit 1 on errors).")
     dc.add_argument("--shelf", required=True, help="Path to the shelf.")
+    dc.add_argument(
+        "--check-remote",
+        action="store_true",
+        help="Probe git remotes; fail on a publicly visible one (needs network).",
+    )
     dc.set_defaults(func=_cmd_doctor)
+
+    im = sub.add_parser("import", help="Prepare an exported transcript for shelving.")
+    im.add_argument("method", choices=["discover", "extract"])
+    im.add_argument("--path", required=True, help="Path to the transcript file.")
+    im.add_argument(
+        "--format", choices=["auto", "claude-json", "claude-code-jsonl"], default="auto"
+    )
+    im.add_argument(
+        "--marker",
+        action="append",
+        default=[],
+        help="A content substring the target must contain; repeatable (all must match).",
+    )
+    im.add_argument("--limit", type=int, default=50, help="discover: max conversations returned.")
+    im.add_argument("--select", help="extract: conversation id / title / index.")
+    im.add_argument("--out", help="extract: output file for the cleaned transcript.")
+    im.set_defaults(func=_cmd_import)
 
     return parser
 
