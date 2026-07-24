@@ -8,6 +8,23 @@ once code ships.
 
 ## [Unreleased] — design phase
 
+### Fixed
+- **Ledger `notes` can no longer corrupt `ledger.tsv`** (#31). shelf-spec v0
+  § 4.4 forbids tabs in `notes`, but nothing enforced it: the field is
+  caller-supplied free text joined straight into the TSV row, so a tab shifted
+  the column count for every reader and a newline forged an entire extra row —
+  silently, in the file that is the evidence base for the saved-tokens claim.
+  `shelve` now flattens tabs/newlines to spaces and reports a warning instead
+  of raising (a cosmetic field must not fail an otherwise-good shelve).
+
+### Documentation
+- shelf-spec v0 § 4.4 is now named as the **normative on-disk contract** for
+  `ledger.tsv` in `docs/ARCHITECTURE.md` (memshelf's columns being its
+  `profile: memory` instantiation), and the no-tab constraint is stated in
+  both places rows are appended by hand — `docs/M0.md` and the adapter's
+  `SKILL.md`. `memshelf_doctor`'s divergence from the spec's four finding
+  names is recorded as deliberate rather than left implicit. (#31)
+
 ### Added
 - **`memshelf_import`** (`core/importer.py`, MCP `memshelf_import` + CLI
   `memshelf import discover|extract`) — the transcript backfill tool (#12,
