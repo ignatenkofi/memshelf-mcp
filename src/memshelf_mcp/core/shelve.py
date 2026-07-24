@@ -30,6 +30,27 @@ from memshelf_mcp.core.redact import RedactionReport, redact
 LEDGER_HEADER = "date\tepisode_id\tmode\tapprox_tokens_in\tdigest_tokens\tnotes\n"
 
 
+def _flatten_notes(notes: str) -> tuple[str, str | None]:
+    """Make ``notes`` safe as the last TSV field.
+
+    ``notes`` is free text from the caller and is the only ledger field that
+    is not machine-generated. A tab in it silently shifts every later column
+    (there is no later column today, but a reader counting fields still sees
+    seven), and a newline forges an extra ledger row outright. shelf-spec v0
+    § 4.4 forbids tabs in this field for exactly that reason.
+
+    Returns the flattened text plus a warning when anything was replaced —
+    a cosmetic field must never fail an otherwise-good shelve.
+    """
+    flattened = notes.replace("\t", " ").replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    if flattened == notes:
+        return notes, None
+    return flattened, (
+        "ledger notes: tab/newline replaced with a space (shelf-spec v0 § 4.4 "
+        "forbids tabs in this field; a newline would forge a ledger row)"
+    )
+
+
 class DigestContractError(ValueError):
     """Raised when the digest fails the Layer-3 contract — carries the full
     validation result so the caller can show exactly what to fix."""
@@ -205,6 +226,9 @@ def shelve(
 
     # Ledger — one row per shelve (annoyance #2). digest_tokens = chars/4, the
     # M0 accounting methodology.
+    ledger_notes, notes_warning = _flatten_notes(notes)
+    if notes_warning:
+        warnings.append(notes_warning)
     row = "\t".join(
         [
             date or _date.today().isoformat(),
@@ -212,7 +236,7 @@ def shelve(
             mode,
             str(approx_tokens),
             str(len(digest) // 4),
-            notes,
+            ledger_notes,
         ]
     )
     _append_ledger(root / "ledger.tsv", row)
