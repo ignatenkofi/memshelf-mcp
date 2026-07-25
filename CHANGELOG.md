@@ -6,9 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project will adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 once code ships.
 
-## [Unreleased] — design phase
+## [Unreleased]
+
+## [0.1.0] — 2026-07-25
 
 ### Fixed
+- **A shelf no longer initialises silently non-durable on a host without a git
+  identity.** `init_shelf` ran a plain `git commit`, which refuses outright when
+  `user.name`/`user.email` are unset — a fresh machine, a container, an
+  ephemeral CI runner. The non-zero exit was discarded, so `git-local` returned
+  `committed=False` and a shelf that looked initialised but held no commit at
+  all: durability is the one thing that storage mode promises. Commit now falls
+  back to a `memshelf <memshelf@localhost>` identity passed via `-c` (never
+  written to the user's config, never shadowing a real identity) and raises if
+  it still fails. `shelve`'s auto-commit shares the same path, so an episode
+  can no longer fail to persist for this reason either.
 - **Ledger `notes` can no longer corrupt `ledger.tsv`** (#31). shelf-spec v0
   § 4.4 forbids tabs in `notes`, but nothing enforced it: the field is
   caller-supplied free text joined straight into the TSV row, so a tab shifted
