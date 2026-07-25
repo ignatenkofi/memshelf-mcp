@@ -22,7 +22,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from memshelf_mcp.core.shelve import LEDGER_HEADER
+from memshelf_mcp.core.shelve import LEDGER_HEADER, git_commit
 
 CATEGORIES = ("topics", "research", "sessions")
 
@@ -168,13 +168,11 @@ def init_shelf(
             _git(root, "remote", "add", "origin", str(remote))
             created.append(f"remote origin -> {remote}")
         # One initial commit so the shelf starts durable; push stays manual
-        # (autopush: false posture — design decision 3 scope).
-        _git(root, "add", "-A")
-        if _git(root, "diff", "--cached", "--quiet").returncode != 0:
-            result = _git(root, "commit", "-m", "memshelf: init shelf")
-            if result.returncode == 0:
-                committed = True
-                sha = _git(root, "rev-parse", "HEAD").stdout.strip()
+        # (autopush: false posture — design decision 3 scope). Failure raises
+        # instead of returning committed=False: a git-local shelf whose initial
+        # commit silently failed still looks initialised but is not durable,
+        # which is the one thing this storage mode exists to promise.
+        committed, sha = git_commit(root, "memshelf: init shelf")
 
     return InitResult(
         root=str(root), storage=storage, created=created, committed=committed, commit=sha

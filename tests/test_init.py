@@ -1,3 +1,4 @@
+import os
 import subprocess
 
 import pytest
@@ -39,6 +40,32 @@ def test_git_local_default_creates_everything(tmp_path):
     assert MEMORY_PREAMBLE.split(".")[0] in (tmp_path / ".docshelf.json").read_text(
         encoding="utf-8"
     )
+
+
+def test_git_local_commits_without_an_ambient_git_identity(tmp_path, monkeypatch):
+    # A fresh machine, a container, or a CI runner has no user.name/user.email,
+    # and `git commit` refuses outright there — which used to leave a shelf with
+    # a .git directory and no commit at all (silently non-durable, committed=False).
+    for var in (
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+        "EMAIL",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+
+    result = init_shelf(tmp_path, name="test memory")
+
+    assert result.committed and result.commit
+    author = subprocess.run(
+        ["git", "-C", str(tmp_path), "log", "-1", "--format=%an <%ae>"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert author == "memshelf <memshelf@localhost>"
 
 
 def test_shelf_yml_is_memory_profile(tmp_path):

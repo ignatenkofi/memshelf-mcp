@@ -110,11 +110,29 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
 
 
-def _git_commit(root: Path, message: str) -> tuple[bool, str | None]:
+# Only reached when the environment has no git identity of its own — a fresh
+# machine, a container, an ephemeral CI runner. Passed via `-c` so it never
+# lands in the user's config and never shadows a real identity.
+FALLBACK_IDENTITY = ("memshelf", "memshelf@localhost")
+
+
+def git_commit(root: Path, message: str) -> tuple[bool, str | None]:
+    """Commit everything staged under ``root``; return ``(committed, sha)``.
+
+    Durability rests on this commit, so a missing `user.name`/`user.email` must
+    not cost the caller their episode: `git commit` refuses outright on a host
+    without an identity, so retry once under ``FALLBACK_IDENTITY`` and raise
+    only if that fails too.
+    """
     _git(root, "add", "-A")
     if _git(root, "diff", "--cached", "--quiet").returncode == 0:
         return False, None  # nothing staged — nothing to commit
     commit = _git(root, "commit", "-m", message)
+    if commit.returncode != 0:
+        name, email = FALLBACK_IDENTITY
+        commit = _git(
+            root, "-c", f"user.name={name}", "-c", f"user.email={email}", "commit", "-m", message
+        )
     if commit.returncode != 0:
         raise RuntimeError(f"git commit failed: {commit.stderr.strip()}")
     return True, _git(root, "rev-parse", "HEAD").stdout.strip()
@@ -254,7 +272,7 @@ def shelve(
     # Auto-commit (design decision 3) — commit only, push stays configurable.
     committed, sha = False, None
     if autocommit and (root / ".git").exists():
-        committed, sha = _git_commit(root, f"shelve: {slug}")
+        committed, sha = git_commit(root, f"shelve: {slug}")
 
     return ShelveResult(
         address=address,
