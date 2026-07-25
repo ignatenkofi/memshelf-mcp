@@ -141,3 +141,57 @@ def test_plain_dir_skips_git_cleanly(tmp_path):
     assert result.committed is False
     assert result.commit is None
     assert (tmp_path / "docs" / "research" / "2026-07-22-plain.md").is_file()
+
+
+def test_ledger_notes_with_tab_cannot_shift_columns(tmp_path):
+    """shelf-spec v0 § 4.4: no tabs in `notes`. A tab used to land in the TSV
+    verbatim, so a reader counting fields saw seven columns instead of six."""
+    result = shelve(
+        _init_shelf(tmp_path),
+        slug="2026-07-22-tabbed-notes",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+        approx_tokens=4000,
+        date="2026-07-22",
+        notes="chat-1\tfragment",
+    )
+    row = (tmp_path / "ledger.tsv").read_text(encoding="utf-8").splitlines()[-1]
+    assert len(row.split("\t")) == 6
+    assert row.split("\t")[5] == "chat-1 fragment"
+    assert any("shelf-spec v0 § 4.4" in w for w in result.warnings)
+
+
+def test_ledger_notes_with_newline_cannot_forge_a_row(tmp_path):
+    """A newline in `notes` would otherwise append a second, bogus ledger row."""
+    _init_shelf(tmp_path)
+    shelve(
+        tmp_path,
+        slug="2026-07-22-newline-notes",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+        approx_tokens=4000,
+        date="2026-07-22",
+        notes="line one\nline two",
+    )
+    lines = (tmp_path / "ledger.tsv").read_text(encoding="utf-8").splitlines()
+    # header + exactly one row: the newline must not have forged a second one
+    assert len(lines) == 2
+    assert lines[-1].split("\t")[5] == "line one line two"
+
+
+def test_clean_notes_are_untouched(tmp_path):
+    result = shelve(
+        _init_shelf(tmp_path),
+        slug="2026-07-22-clean-notes",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+        approx_tokens=4000,
+        date="2026-07-22",
+        notes="chat-1 fragment",
+    )
+    row = (tmp_path / "ledger.tsv").read_text(encoding="utf-8").splitlines()[-1]
+    assert row.split("\t")[5] == "chat-1 fragment"
+    assert not any("§ 4.4" in w for w in result.warnings)

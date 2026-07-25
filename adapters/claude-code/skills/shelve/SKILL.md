@@ -90,6 +90,10 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
 
    `mode` = `live` or `import`; `digest_tokens` = digest chars/4.
 
+   `notes` must contain **no tab characters** (shelf-spec v0 § 4.4): it is the
+   last column, so a tab shifts the field count for every reader — and a
+   newline forges an entire bogus row. Keep it to one tab-free line.
+
 7. **Commit, then push if the container is ephemeral — shelf repo only.**
    `git add -A && git commit` inside the shelf with message `shelve: <id>`;
    never write outside the shelf directory. Whether to push depends on the

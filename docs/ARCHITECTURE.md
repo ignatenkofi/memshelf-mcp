@@ -233,6 +233,28 @@ every real shelf, not just in benchmarks: standing cost of memory vs shelved
 mass vs recall cost per question. See `docs/M0.md → Measurement` for the
 derived numbers.
 
+The normative on-disk contract for this file is shelf-spec v0 (openshelf,
+ADR-0005) § 4.4, not this document — the columns above are memshelf's
+`profile: memory` instantiation of it. One spec constraint is load-bearing
+and easy to violate by hand: **`notes` must not contain a tab**, because it
+is the last field and a tab there shifts the column count for any reader.
+`shelve` enforces it by flattening tabs (and newlines, which would forge an
+entire extra row) to spaces and reporting a warning; a cosmetic field must
+never fail an otherwise-good shelve.
+
+**Deliberate divergence — `memshelf_doctor` finding names.** The spec names
+four findings that overlap this tool's checks (`no-ledger`,
+`ledger-malformed`, `episode-frontmatter-missing`,
+`episode-frontmatter-invalid`). `doctor` keeps its own, more granular
+vocabulary instead (`no-ledger-row` and `orphan-ledger-row` for the two
+distinct ledger/episode mismatches; `bad-kind`, `id-mismatch`,
+`missing-section`, `digest-*` where the spec has one coarse
+`episode-frontmatter-invalid`). The spec's names are a strict generalization,
+so mapping memshelf → spec is lossless while the reverse is not. Renaming is
+therefore an open decision, not an oversight (#31): the codes are the tool's
+output contract, and collapsing them would cost detail that the M1 exit
+criteria rely on.
+
 ## Portability model
 
 v1 targets Claude Code / Cowork, but the design must not *belong* to it.
