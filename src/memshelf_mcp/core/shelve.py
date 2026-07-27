@@ -199,6 +199,11 @@ def shelve(
     if not validation.ok:
         raise DigestContractError(validation)
 
+    # SPEC 5.2 makes `span` REQUIRED; a live episode is almost always
+    # single-day, so default it to the episode date rather than reject (#56).
+    # An explicit span (multi-day, or import backfill) always wins.
+    span = span or date or _date.today().isoformat()
+
     # Compose (also enforces kind→required-sections via EpisodeError).
     frontmatter = Frontmatter(
         id=slug,

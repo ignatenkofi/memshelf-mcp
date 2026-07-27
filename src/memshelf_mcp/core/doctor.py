@@ -133,6 +133,13 @@ def _ledger_ids(path: Path) -> set[str]:
     return ids
 
 
+# Frontmatter fields shelf-spec v0 § 5.2 marks REQUIRED. An episode missing any
+# of them passes a naive read but fails the shelf's own advisory CI
+# (shelf_validate → episode-frontmatter-invalid), so doctor must catch them
+# first — "doctor clean" has to imply "validate green" (#56).
+_REQUIRED_FRONTMATTER = ("id", "kind", "span", "tags", "approx_tokens")
+
+
 def _check_episode(
     root: Path, rel: str, pack_patterns: list[tuple[str, str]] | None = None
 ) -> list[Finding]:
@@ -141,10 +148,46 @@ def _check_episode(
     fields, body = parse_frontmatter(text)
     stem = Path(rel).stem
 
+    if not fields:
+        out.append(
+            Finding(
+                "error",
+                "no-frontmatter",
+                rel,
+                "no '---'-fenced frontmatter block (shelf-spec v0 § 5.1)",
+                "add the frontmatter block; re-shelving via the tool writes a valid one",
+            )
+        )
+    else:
+        for field_name in _REQUIRED_FRONTMATTER:
+            if field_name not in fields:
+                out.append(
+                    Finding(
+                        "error",
+                        "frontmatter-missing-field",
+                        rel,
+                        f"missing required field {field_name!r} (shelf-spec v0 § 5.2)",
+                        f"add {field_name!r} to the frontmatter",
+                    )
+                )
+        approx = fields.get("approx_tokens")
+        if approx is not None and not approx.lstrip("-").isdigit():
+            out.append(
+                Finding(
+                    "error",
+                    "bad-approx-tokens",
+                    rel,
+                    f"approx_tokens {approx!r} is not an integer (shelf-spec v0 § 5.2)",
+                    "set approx_tokens to the in-window cost estimate (chars/4)",
+                )
+            )
+
+    # shelf_validate treats id != stem as an error, so a lower severity here
+    # would recreate the false "doctor clean, CI red" guarantee (#56).
     if fields.get("id") and fields["id"] != stem:
         out.append(
             Finding(
-                "warning",
+                "error",
                 "id-mismatch",
                 rel,
                 f"frontmatter id {fields['id']!r} != filename {stem!r}",
@@ -153,11 +196,11 @@ def _check_episode(
         )
 
     kind = fields.get("kind")
-    if kind not in CATEGORY_BY_KIND:
+    if kind is not None and kind not in CATEGORY_BY_KIND:
         out.append(
             Finding("error", "bad-kind", rel, f"kind {kind!r} is not valid", "set a valid kind")
         )
-    else:
+    elif kind is not None:
         for section in required_sections(kind):
             if _section_body(body, section) is None:
                 out.append(

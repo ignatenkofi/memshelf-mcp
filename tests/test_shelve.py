@@ -195,3 +195,51 @@ def test_clean_notes_are_untouched(tmp_path):
     row = (tmp_path / "ledger.tsv").read_text(encoding="utf-8").splitlines()[-1]
     assert row.split("\t")[5] == "chat-1 fragment"
     assert not any("§ 4.4" in w for w in result.warnings)
+
+
+# --- span defaults (SPEC 5.2 makes it REQUIRED; #56) -------------------------
+
+
+def test_span_defaults_to_the_episode_date(tmp_path):
+    # A shelve without --span must still produce a spec-valid episode: the
+    # shelf's advisory CI (shelf_validate) rejects a missing span outright.
+    shelve(
+        _init_shelf(tmp_path),
+        slug="2026-07-27-no-span",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+        date="2026-07-27",
+    )
+    text = (tmp_path / "docs" / "topics" / "2026-07-27-no-span.md").read_text(encoding="utf-8")
+    assert "span: 2026-07-27" in text
+
+
+def test_span_defaults_to_today_without_a_date(tmp_path):
+    from datetime import date as _date
+
+    shelve(
+        _init_shelf(tmp_path),
+        slug="2026-07-27-no-span-no-date",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+    )
+    text = (tmp_path / "docs" / "topics" / "2026-07-27-no-span-no-date.md").read_text(
+        encoding="utf-8"
+    )
+    assert f"span: {_date.today().isoformat()}" in text
+
+
+def test_explicit_span_wins_over_the_default(tmp_path):
+    shelve(
+        _init_shelf(tmp_path),
+        slug="2026-07-27-multi-day",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+        span="2026-07-24..2026-07-27",
+        date="2026-07-27",
+    )
+    text = (tmp_path / "docs" / "topics" / "2026-07-27-multi-day.md").read_text(encoding="utf-8")
+    assert "span: 2026-07-24..2026-07-27" in text

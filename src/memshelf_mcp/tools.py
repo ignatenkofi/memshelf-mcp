@@ -36,7 +36,10 @@ class ShelveInput(BaseModel):
     )
     description: str | None = None
     tags: list[str] = Field(default_factory=list)
-    span: str | None = None
+    span: str | None = Field(
+        default=None,
+        description="When the work happened, YYYY-MM-DD or A..B; defaults to date/today.",
+    )
     session: str | None = None
     approx_tokens: int = 0
     mode: Literal["live", "import"] = "live"
