@@ -81,6 +81,11 @@ A rejected digest is a feature: the tool prints exactly what to fix and
 writes nothing. Measured results from a week of dogfooding are in
 [`docs/demo.md`](docs/demo.md).
 
+The memory is **vendor-portable, and that is now a measured fact**, not a
+design intention: the same live shelf has been read and cross-written by
+Claude Code (Anthropic) and Gemini CLI (Google) through one `shelf-spec`
+server — protocol and field notes in [`docs/portability.md`](docs/portability.md).
+
 ## Documents
 
 | Doc | What it covers |
@@ -92,6 +97,7 @@ writes nothing. Measured results from a week of dogfooding are in
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Decision log |
 | [`docs/M0.md`](docs/M0.md) | M0 experiment protocol and results (complete): cases, token ledger, recall test |
 | [`docs/demo.md`](docs/demo.md) | Measured numbers from the dogfood shelf: compression, recall test, doctor findings |
+| [`docs/portability.md`](docs/portability.md) | **One memory, multiple AIs** — the 2026-07-27 experiment: the dogfood shelf read and written by Claude Code (Anthropic) and Gemini CLI (Google) through the same shelf-spec server |
 | [`docs/examples/`](docs/examples/) | A worked episode file and a memory-shelf INDEX |
 | [`adapters/claude-code/`](adapters/claude-code/) | Claude Code plugin: `/shelve` skill + SessionStart/SessionEnd/PreCompact hooks |
 
