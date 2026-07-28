@@ -247,13 +247,21 @@ four findings that overlap this tool's checks (`no-ledger`,
 `ledger-malformed`, `episode-frontmatter-missing`,
 `episode-frontmatter-invalid`). `doctor` keeps its own, more granular
 vocabulary instead (`no-ledger-row` and `orphan-ledger-row` for the two
-distinct ledger/episode mismatches; `bad-kind`, `id-mismatch`,
-`missing-section`, `digest-*` where the spec has one coarse
-`episode-frontmatter-invalid`). The spec's names are a strict generalization,
-so mapping memshelf → spec is lossless while the reverse is not. Renaming is
-therefore an open decision, not an oversight (#31): the codes are the tool's
-output contract, and collapsing them would cost detail that the M1 exit
-criteria rely on.
+distinct ledger/episode mismatches; `no-frontmatter`,
+`frontmatter-missing-field`, `bad-approx-tokens`, `bad-kind`, `id-mismatch`,
+`missing-section`, `digest-*` where the spec has the coarse
+`episode-frontmatter-missing`/`episode-frontmatter-invalid` pair). The spec's
+names are a strict generalization, so mapping memshelf → spec is lossless
+while the reverse is not. Renaming is therefore an open decision, not an
+oversight (#31): the codes are the tool's output contract, and collapsing
+them would cost detail that the M1 exit criteria rely on.
+
+Names diverge; **coverage and severity do not** (#56). Everything
+`shelf_validate` rejects as an `error`, doctor must also reject as an
+`error` — "doctor clean" has to imply "validate green", or the shelf rule
+«doctor чистый ⇒ можно пушить» hands out false guarantees. That is why the
+SPEC 5.2 required-field checks live in doctor and why `id-mismatch` is an
+error, not a warning.
 
 ## Portability model
 

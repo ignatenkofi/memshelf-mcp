@@ -8,6 +8,22 @@ once code ships.
 
 ## [Unreleased]
 
+### Fixed
+- **`shelve` can no longer produce an episode the spec validator rejects, and
+  `doctor` now catches the ones already on disk** (#56). shelf-spec v0 § 5.2
+  makes `span` REQUIRED, but the tool's `--span` was optional and passed the
+  omission straight through — the episode landed without the field, `doctor`
+  reported healthy, and the shelf's own advisory CI (`shelf_validate`) went
+  red: exactly the "manual fix" the M1 exit criterion forbids. Two changes:
+  `shelve` now defaults `span` to the episode date (`date`/today) — a live
+  episode is almost always single-day, and an explicit multi-day span still
+  wins; and `doctor` gained the SPEC 5.2 frontmatter checks
+  (`no-frontmatter`, `frontmatter-missing-field`, `bad-approx-tokens`), so a
+  spec-invalid episode fails the shelf at doctor time, not in CI. As part of
+  the same guarantee `id-mismatch` was raised from warning to error —
+  `shelf_validate` treats it as an error, and a doctor that stays green on it
+  would hand out the same false "safe to push".
+
 ## [0.1.0] — 2026-07-25
 
 ### Fixed

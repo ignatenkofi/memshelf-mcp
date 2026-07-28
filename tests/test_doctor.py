@@ -29,6 +29,21 @@ def _write_raw(root, category, name, text):
     Shelf(root).rebuild_index()
 
 
+def _fm(name, kind="topic", **overrides):
+    """A complete, SPEC-5.2-valid frontmatter block for raw fixtures, so tests
+    that target one specific finding don't trip the required-field checks."""
+    fields = {
+        "id": name,
+        "kind": kind,
+        "span": "2026-07-22",
+        "tags": "[]",
+        "approx_tokens": "100",
+    }
+    fields.update(overrides)
+    lines = "\n".join(f"{k}: {v}" for k, v in fields.items() if v is not None)
+    return f"# {name}\n\n---\n{lines}\n---\n"
+
+
 def test_clean_shelf_is_healthy(tmp_path):
     root = _init(tmp_path)
     shelve(
@@ -50,8 +65,7 @@ def test_secret_at_rest_flagged(tmp_path):
         root,
         "topics",
         "2026-07-22-leak",
-        "# 2026-07-22-leak\n\n---\nid: 2026-07-22-leak\nkind: topic\n---\n\n"
-        "## Digest\nA decided change; nothing open.\n\n"
+        _fm("2026-07-22-leak") + "\n## Digest\nA decided change; nothing open.\n\n"
         "## Decisions\npasted token ghp_" + "a" * 36 + "\n",
     )
     report = check_shelf(root)
@@ -65,8 +79,8 @@ def test_missing_required_section_flagged(tmp_path):
         root,
         "topics",
         "2026-07-22-bad",
-        "# 2026-07-22-bad\n\n---\nid: 2026-07-22-bad\nkind: topic\n---\n\n"
-        "## Digest\nA decided change; nothing open.\n",  # topic without ## Decisions
+        _fm("2026-07-22-bad")
+        + "\n## Digest\nA decided change; nothing open.\n",  # topic without ## Decisions
     )
     report = check_shelf(root)
     assert not report.ok
@@ -171,8 +185,7 @@ def test_policy_pattern_at_rest_flagged(tmp_path):
         root,
         "topics",
         "2026-07-22-leak",
-        "# 2026-07-22-leak\n\n---\nid: 2026-07-22-leak\nkind: topic\n---\n\n"
-        "## Digest\nA decided change; nothing open.\n\n"
+        _fm("2026-07-22-leak") + "\n## Digest\nA decided change; nothing open.\n\n"
         "## Decisions\nhand-written note mentioning S7 by id\n",
     )
     report = check_shelf(root)
@@ -186,8 +199,8 @@ def test_no_policy_pack_means_no_policy_findings(tmp_path):
         root,
         "topics",
         "2026-07-22-plain",
-        "# 2026-07-22-plain\n\n---\nid: 2026-07-22-plain\nkind: topic\n---\n\n"
-        "## Digest\nA decided change; nothing open.\n\n## Decisions\nmentions S7 freely\n",
+        _fm("2026-07-22-plain")
+        + "\n## Digest\nA decided change; nothing open.\n\n## Decisions\nmentions S7 freely\n",
     )
     report = check_shelf(root)
     assert "policy-pattern-at-rest" not in _codes(report)
@@ -219,8 +232,8 @@ def test_digest_body_mismatch_flagged(tmp_path):
         root,
         "topics",
         "2026-07-22-drift",
-        "# 2026-07-22-drift\n\n---\nid: 2026-07-22-drift\nkind: topic\n---\n\n"
-        "## Digest\nThe committee chose lunch options; sandwiches beat salads "
+        _fm("2026-07-22-drift")
+        + "\n## Digest\nThe committee chose lunch options; sandwiches beat salads "
         "after tasting; dessert stays undecided; catering vendor picks Friday.\n\n"
         f"## Decisions\n{body}\n",
     )
@@ -253,3 +266,84 @@ def test_grounded_digest_not_flagged(tmp_path):
     )
     report = check_shelf(root)
     assert "digest-body-mismatch" not in _codes(report)
+
+
+# --- frontmatter completeness per shelf-spec v0 § 5.2 (#56) ------------------
+
+
+def test_missing_span_fails_doctor(tmp_path):
+    # The #56 regression: an episode without `span` passed doctor as healthy
+    # while the shelf's advisory CI (shelf_validate) rejected it.
+    root = _init(tmp_path)
+    _write_raw(
+        root,
+        "topics",
+        "2026-07-27-no-span",
+        _fm("2026-07-27-no-span", span=None)
+        + "\n## Digest\nA decided change; nothing open.\n\n## Decisions\nX over Y\n",
+    )
+    report = check_shelf(root)
+    assert not report.ok
+    assert "frontmatter-missing-field" in _codes(report)
+    detail = next(f for f in report.findings if f.code == "frontmatter-missing-field").detail
+    assert "'span'" in detail
+
+
+def test_non_integer_approx_tokens_flagged(tmp_path):
+    root = _init(tmp_path)
+    _write_raw(
+        root,
+        "topics",
+        "2026-07-27-bad-tokens",
+        _fm("2026-07-27-bad-tokens", approx_tokens="a lot")
+        + "\n## Digest\nA decided change; nothing open.\n\n## Decisions\nX over Y\n",
+    )
+    report = check_shelf(root)
+    assert not report.ok
+    assert "bad-approx-tokens" in _codes(report)
+
+
+def test_no_frontmatter_flagged_once(tmp_path):
+    root = _init(tmp_path)
+    _write_raw(
+        root,
+        "topics",
+        "2026-07-27-bare",
+        "# 2026-07-27-bare\n\n## Digest\nA decided change; nothing open.\n\n## Decisions\nX\n",
+    )
+    report = check_shelf(root)
+    assert not report.ok
+    assert "no-frontmatter" in _codes(report)
+    # the block-level finding replaces five per-field ones
+    assert "frontmatter-missing-field" not in _codes(report)
+
+
+def test_id_mismatch_is_an_error(tmp_path):
+    # shelf_validate errors on id != stem, so doctor must too — a warning here
+    # would recreate the false "doctor clean, CI red" guarantee.
+    root = _init(tmp_path)
+    _write_raw(
+        root,
+        "topics",
+        "2026-07-27-actual-name",
+        _fm("2026-07-27-actual-name", id="2026-07-27-other-id")
+        + "\n## Digest\nA decided change; nothing open.\n\n## Decisions\nX over Y\n",
+    )
+    report = check_shelf(root)
+    assert not report.ok
+    assert "id-mismatch" in _codes(report)
+
+
+def test_tool_shelved_episode_without_span_passes_doctor(tmp_path):
+    # End-to-end guarantee for #56: the tool defaults span, doctor stays clean.
+    root = _init(tmp_path)
+    shelve(
+        root,
+        slug="2026-07-27-defaulted",
+        kind="topic",
+        digest="The plan chose X; the Y alternative was rejected. Open: nothing.",
+        sections={"Decisions": "X over Y"},
+        date="2026-07-27",
+    )
+    report = check_shelf(root)
+    assert report.ok, [f.code for f in report.findings]

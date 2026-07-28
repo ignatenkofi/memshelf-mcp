@@ -190,7 +190,10 @@ def build_parser() -> argparse.ArgumentParser:
     sh.add_argument("--display-title", help="Free-form INDEX title (defaults to slug).")
     sh.add_argument("--description")
     sh.add_argument("--tag", action="append", default=[], help="A tag; repeatable.")
-    sh.add_argument("--span")
+    sh.add_argument(
+        "--span",
+        help="When the work happened, YYYY-MM-DD or A..B (defaults to --date/today).",
+    )
     sh.add_argument("--session")
     sh.add_argument("--approx-tokens", type=int, default=0)
     sh.add_argument("--mode", choices=["live", "import"], default="live")
