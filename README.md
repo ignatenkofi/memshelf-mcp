@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-M0%20complete%20%E2%86%92%20M1%20tools%20shipped-blue.svg)](docs/demo.md)
-[![MCP](https://img.shields.io/badge/MCP%20server-shelve%20%C2%B7%20recall%20%C2%B7%20index%20%C2%B7%20search%20%C2%B7%20stats%20%C2%B7%20doctor-purple.svg)](src/memshelf_mcp/server.py)
+[![MCP](https://img.shields.io/badge/MCP%20server-shelve%20%C2%B7%20recall%20%C2%B7%20index%20%C2%B7%20search%20%C2%B7%20stats%20%C2%B7%20resolve%20%C2%B7%20doctor-purple.svg)](src/memshelf_mcp/server.py)
 [![Sibling: docshelf](https://img.shields.io/badge/sibling-docshelf--mcp-green.svg)](https://github.com/ignatenkofi/docshelf-mcp)
 
 ```text
@@ -49,7 +49,7 @@ git repo with **no remote configured**.
 ## Quick start
 
 As an **MCP server** (tools `memshelf_init` / `shelve` / `recall` / `index` /
-`search` / `stats` / `doctor`):
+`search` / `stats` / `resolve` / `doctor`):
 
 ```bash
 # Claude Code
@@ -76,6 +76,18 @@ memshelf recall --shelf ~/my-shelf --id 2026-07-23-topic --section Decisions --l
 memshelf stats  --shelf ~/my-shelf   # claimed + realized savings
 memshelf doctor --shelf ~/my-shelf   # exit 1 on integrity errors
 ```
+
+Two sessions shelved on parallel branches and the merge collides in
+`INDEX.md` / `ledger.tsv` / `.meta.json` / `stats.svg`? That is the
+multi-writer conflict class (#58) and it resolves mechanically:
+
+```bash
+memshelf resolve --shelf ~/my-shelf            # union appends, rebuild derived, doctor
+memshelf resolve --shelf ~/my-shelf --commit   # same + complete the merge commit
+```
+
+Conflicting *episodes* are content, not mechanics — `resolve` reports
+them and steps aside.
 
 A rejected digest is a feature: the tool prints exactly what to fix and
 writes nothing. Measured results from a week of dogfooding are in

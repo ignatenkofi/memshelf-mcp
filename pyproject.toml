@@ -32,7 +32,9 @@ classifiers = [
 # needs none of these, so those modules and their tests run stdlib-only.
 dependencies = [
     "docshelf-mcp>=0.2",
-    "mcp>=1.2.0",
+    # <2: the v2 SDK dropped mcp.server.fastmcp — server.py does not import
+    # on it (verified against mcp 2.0.0); revisit when migrating the server.
+    "mcp>=1.2.0,<2",
     "pydantic>=2.6",
 ]
 
