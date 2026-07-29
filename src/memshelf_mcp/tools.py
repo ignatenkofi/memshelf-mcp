@@ -17,6 +17,7 @@ from memshelf_mcp.core.importer import discover as import_discover
 from memshelf_mcp.core.importer import extract as import_extract
 from memshelf_mcp.core.init import init_shelf
 from memshelf_mcp.core.recall import read_index, recall, search
+from memshelf_mcp.core.resolve import resolve_shelf
 from memshelf_mcp.core.shelve import shelve
 from memshelf_mcp.core.stats import banner, compute_stats, episode_mass
 
@@ -213,6 +214,22 @@ def run_doctor(params: DoctorInput) -> dict:
     INDEX budget, plus docshelf's structural checks. Optionally (``check_remote``)
     gate on remote visibility."""
     return check_shelf(params.shelf_path, check_remote=params.check_remote).as_dict()
+
+
+class ResolveInput(BaseModel):
+    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+    commit: bool = Field(
+        default=False,
+        description="Commit the resolution (inside a merge this completes the "
+        "merge with git's prepared message). Default: leave changes staged.",
+    )
+
+
+def run_resolve(params: ResolveInput) -> dict:
+    """Resolve the multi-writer conflict class (#58): union ledger/recall-log
+    rows and .meta.json keys from both branches, rebuild INDEX/stats from
+    docs/, run doctor. Conflicting episodes are reported, never auto-merged."""
+    return resolve_shelf(params.shelf_path, commit=params.commit).as_dict()
 
 
 class ImportInput(BaseModel):

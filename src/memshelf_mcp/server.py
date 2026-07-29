@@ -4,8 +4,9 @@ A thin wrapper: each tool validates its input (pydantic), calls the typed entry
 point in ``tools.py``, and serializes the result. Tools: ``memshelf_init``
 (bootstrap), ``memshelf_shelve`` (write), ``memshelf_recall`` /
 ``memshelf_index`` / ``memshelf_search`` (read), ``memshelf_stats``
-(accounting), and ``memshelf_doctor`` (integrity). See
-``docs/ARCHITECTURE.md`` → MCP tool surface.
+(accounting), ``memshelf_resolve`` (multi-writer conflicts), and
+``memshelf_doctor`` (integrity). See ``docs/ARCHITECTURE.md`` → MCP tool
+surface.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from memshelf_mcp.tools import (
     IndexInput,
     InitInput,
     RecallInput,
+    ResolveInput,
     SearchInput,
     ShelveInput,
     StatsInput,
@@ -32,6 +34,7 @@ from memshelf_mcp.tools import (
     run_index,
     run_init,
     run_recall,
+    run_resolve,
     run_search,
     run_shelve,
     run_stats,
@@ -159,6 +162,28 @@ def memshelf_init(params: InitInput) -> str:
         return _serialize(run_init(params))
     except Exception as exc:
         return _error_response(exc, "memshelf_init")
+
+
+@mcp.tool(
+    name="memshelf_resolve",
+    annotations={
+        "title": "Resolve multi-writer shelf conflicts",
+        "readOnlyHint": False,
+        "destructiveHint": False,  # unions never drop rows; episodes untouched
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+def memshelf_resolve(params: ResolveInput) -> str:
+    """Resolve the multi-writer conflict class (two sessions shelved on
+    parallel branches): union ledger/recall-log rows and .meta.json keys from
+    both sides, rebuild INDEX.md and stats.svg from docs/, then run doctor.
+    Conflicting episode files are reported as unresolved, never auto-merged.
+    Also safe outside a conflict — degrades to a derived-files rebuild."""
+    try:
+        return _serialize(run_resolve(params))
+    except Exception as exc:
+        return _error_response(exc, "memshelf_resolve")
 
 
 @mcp.tool(

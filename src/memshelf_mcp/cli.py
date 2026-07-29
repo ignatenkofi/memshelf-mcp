@@ -1,7 +1,8 @@
 """``memshelf`` CLI — the portability surface for hosts without MCP.
 
 Anything that can run a shell command can drive the shelf: ``init``,
-``shelve``, ``recall``, ``index``, ``search``, ``stats``, ``doctor``.
+``shelve``, ``recall``, ``index``, ``search``, ``stats``, ``resolve``,
+``doctor``.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from memshelf_mcp.tools import (
     IndexInput,
     InitInput,
     RecallInput,
+    ResolveInput,
     SearchInput,
     ShelveInput,
     StatsInput,
@@ -30,6 +32,7 @@ from memshelf_mcp.tools import (
     run_index,
     run_init,
     run_recall,
+    run_resolve,
     run_search,
     run_shelve,
     run_stats,
@@ -151,6 +154,14 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return 0 if result["errors"] == 0 else 1  # non-zero on errors, for CI / hooks
 
 
+def _cmd_resolve(args: argparse.Namespace) -> int:
+    result = run_resolve(ResolveInput(shelf_path=args.shelf, commit=args.commit))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if result["in_merge"] and not result["committed"] and not result["unresolved"]:
+        print("merge resolved and staged — `git commit` completes it", file=sys.stderr)
+    return 0 if result["status"] == "ok" else 1
+
+
 def _cmd_import(args: argparse.Namespace) -> int:
     params = ImportInput(
         method=args.method,
@@ -236,6 +247,18 @@ def build_parser() -> argparse.ArgumentParser:
     it.add_argument("--storage", choices=["plain", "git-local", "git-remote"], default="git-local")
     it.add_argument("--remote", help="Remote URL (git-remote mode only; private repos).")
     it.set_defaults(func=_cmd_init)
+
+    rv = sub.add_parser(
+        "resolve",
+        help="Resolve multi-writer merge conflicts: union appends, rebuild derived, doctor.",
+    )
+    rv.add_argument("--shelf", required=True, help="Path to the shelf.")
+    rv.add_argument(
+        "--commit",
+        action="store_true",
+        help="Commit the resolution (inside a merge: completes the merge).",
+    )
+    rv.set_defaults(func=_cmd_resolve)
 
     dc = sub.add_parser("doctor", help="Check shelf integrity (exit 1 on errors).")
     dc.add_argument("--shelf", required=True, help="Path to the shelf.")
