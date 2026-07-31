@@ -35,8 +35,29 @@ class EpisodeError(ValueError):
     """The episode's parts don't satisfy the format contract."""
 
 
+def flatten(text: str) -> str:
+    """Collapse a value to one line — the frontmatter block is flat ``key: value``.
+
+    A newline in a value would end the field and, past the closing ``---``,
+    silently turn the rest into body text. Callers pass free-form strings
+    (display titles, ledger notes), so flattening belongs here rather than in
+    each caller.
+    """
+    return " ".join(text.split())
+
+
 @dataclass(frozen=True)
 class Frontmatter:
+    """The episode's frontmatter — and, since #58, the single source for every
+    derived file on the shelf.
+
+    ``date``, ``notes``, ``display_title`` and ``description`` are here because
+    ``ledger.tsv`` and ``.meta.json`` are regenerated from the episodes: a
+    column that lives only in the derived file cannot be regenerated, and the
+    file stops being derived. ``date`` is the shelve date, deliberately
+    distinct from ``span`` (what the conversation covered).
+    """
+
     id: str
     kind: str
     span: str | None = None
@@ -44,6 +65,10 @@ class Frontmatter:
     approx_tokens: int = 0
     mode: str = "live"
     session: str | None = None
+    date: str | None = None
+    display_title: str | None = None
+    description: str | None = None
+    notes: str = ""
 
     def to_yaml(self) -> str:
         lines = [f"id: {self.id}", f"kind: {self.kind}"]
@@ -51,9 +76,17 @@ class Frontmatter:
             lines.append(f"session: {self.session}")
         if self.span:
             lines.append(f"span: {self.span}")
+        if self.date:
+            lines.append(f"date: {self.date}")
+        if self.display_title:
+            lines.append(f"display_title: {flatten(self.display_title)}")
+        if self.description:
+            lines.append(f"description: {flatten(self.description)}")
         lines.append(f"tags: [{', '.join(self.tags)}]")
         lines.append(f"approx_tokens: {self.approx_tokens}")
         lines.append(f"mode: {self.mode}")
+        if self.notes:
+            lines.append(f"notes: {flatten(self.notes)}")
         return "\n".join(lines)
 
 

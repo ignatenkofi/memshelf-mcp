@@ -7,6 +7,7 @@ pytest.importorskip("docshelf_mcp")
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
 from memshelf_mcp.cli import main  # noqa: E402
+from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.recall import EpisodeNotFound  # noqa: E402
 from memshelf_mcp.core.shelve import shelve  # noqa: E402
 from memshelf_mcp.tools import (  # noqa: E402
@@ -35,6 +36,7 @@ def _shelf_with_episode(root):
         },
         date="2026-07-22",
     )
+    rebuild(root)  # INDEX/ledger are derived since #58
     return root
 
 

@@ -7,6 +7,7 @@ pytest.importorskip("docshelf_mcp")
 
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
+from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.shelve import DigestContractError, shelve  # noqa: E402
 
 GOOD_DIGEST = (
@@ -25,9 +26,11 @@ def _init_shelf(root, *, git=True):
     return root
 
 
-def test_shelve_writes_episode_ledger_and_commit(tmp_path):
+def test_shelve_writes_the_episode_and_commits_only_it(tmp_path):
+    """#58: the episode is the whole write. Derived files are the bot's job."""
+    root = _init_shelf(tmp_path)
     result = shelve(
-        _init_shelf(tmp_path),
+        root,
         slug="2026-07-22-auth-refactor",
         kind="topic",
         digest=GOOD_DIGEST,
@@ -38,14 +41,41 @@ def test_shelve_writes_episode_ledger_and_commit(tmp_path):
     episode = tmp_path / "docs" / "topics" / "2026-07-22-auth-refactor.md"
     assert episode.is_file()
     assert episode.read_text(encoding="utf-8").startswith("# 2026-07-22-auth-refactor")
-    assert "2026-07-22-auth-refactor" in (tmp_path / "INDEX.md").read_text(encoding="utf-8")
 
-    ledger = (tmp_path / "ledger.tsv").read_text(encoding="utf-8").splitlines()
-    assert ledger[0].startswith("date\t")
-    assert ledger[-1].split("\t")[:3] == ["2026-07-22", "2026-07-22-auth-refactor", "live"]
+    # Everything the ledger row needs now rides in the frontmatter.
+    text = episode.read_text(encoding="utf-8")
+    assert "date: 2026-07-22" in text
+    assert "approx_tokens: 4000" in text
 
     assert result.committed and result.commit
     assert result.address == "docs/topics/2026-07-22-auth-refactor.md"
+    committed = subprocess.run(
+        ["git", "-C", str(root), "show", "--name-only", "--format=", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert committed == ["docs/topics/2026-07-22-auth-refactor.md"]
+
+
+def test_rebuild_renders_the_ledger_row_shelve_no_longer_writes(tmp_path):
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-07-22-auth-refactor",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+        approx_tokens=4000,
+        date="2026-07-22",
+    )
+    assert not (tmp_path / "ledger.tsv").exists()  # shelve wrote no derived file
+
+    rebuild(root)
+    ledger = (tmp_path / "ledger.tsv").read_text(encoding="utf-8").splitlines()
+    assert ledger[0].startswith("date\t")
+    assert ledger[-1].split("\t")[:3] == ["2026-07-22", "2026-07-22-auth-refactor", "live"]
+    assert "2026-07-22-auth-refactor" in (tmp_path / "INDEX.md").read_text(encoding="utf-8")
 
 
 def test_display_title_override_keeps_latin_filename(tmp_path):
@@ -58,8 +88,13 @@ def test_display_title_override_keeps_latin_filename(tmp_path):
         display_title="Основание memshelf",
         date="2026-07-22",
     )
-    # file keeps the latin slug; the display title lands in .meta.json + INDEX
-    assert (tmp_path / "docs" / "research" / "2026-07-22-founding.md").is_file()
+    # The file keeps the latin slug and the display title now travels in the
+    # episode's frontmatter; .meta.json and INDEX are rendered from it.
+    episode = tmp_path / "docs" / "research" / "2026-07-22-founding.md"
+    assert episode.is_file()
+    assert "display_title: Основание memshelf" in episode.read_text(encoding="utf-8")
+
+    rebuild(tmp_path)
     meta = json.loads((tmp_path / "docs" / "research" / ".meta.json").read_text(encoding="utf-8"))
     assert meta["2026-07-22-founding.md"]["title"] == "Основание memshelf"
     assert "Основание memshelf" in (tmp_path / "INDEX.md").read_text(encoding="utf-8")
@@ -156,6 +191,7 @@ def test_ledger_notes_with_tab_cannot_shift_columns(tmp_path):
         date="2026-07-22",
         notes="chat-1\tfragment",
     )
+    rebuild(tmp_path)
     row = (tmp_path / "ledger.tsv").read_text(encoding="utf-8").splitlines()[-1]
     assert len(row.split("\t")) == 6
     assert row.split("\t")[5] == "chat-1 fragment"
@@ -175,6 +211,7 @@ def test_ledger_notes_with_newline_cannot_forge_a_row(tmp_path):
         date="2026-07-22",
         notes="line one\nline two",
     )
+    rebuild(tmp_path)
     lines = (tmp_path / "ledger.tsv").read_text(encoding="utf-8").splitlines()
     # header + exactly one row: the newline must not have forged a second one
     assert len(lines) == 2
@@ -192,6 +229,7 @@ def test_clean_notes_are_untouched(tmp_path):
         date="2026-07-22",
         notes="chat-1 fragment",
     )
+    rebuild(tmp_path)
     row = (tmp_path / "ledger.tsv").read_text(encoding="utf-8").splitlines()[-1]
     assert row.split("\t")[5] == "chat-1 fragment"
     assert not any("§ 4.4" in w for w in result.warnings)

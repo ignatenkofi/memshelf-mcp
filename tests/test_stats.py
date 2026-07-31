@@ -2,6 +2,7 @@ import subprocess
 
 import pytest
 
+from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.stats import compute_stats
 
 _HEADER = "date\tepisode_id\tmode\tapprox_tokens_in\tdigest_tokens\tnotes\n"
@@ -110,6 +111,7 @@ def test_shelve_recall_stats_end_to_end(tmp_path):
         date="2026-07-22",
     )
 
+    rebuild(tmp_path)  # the ledger is derived now (#58)
     s0 = run_stats(StatsInput(shelf_path=str(tmp_path)))
     assert s0["episodes"] == 1
     assert s0["shelved_mass"] == 5000

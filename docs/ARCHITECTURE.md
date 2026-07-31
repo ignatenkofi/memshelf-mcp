@@ -57,7 +57,7 @@ memory-shelf/
 ├── .docshelf.json            # provider: none; memory.storage: git-local
 ├── INDEX.md                  # the ONLY file that lives in agent context
 ├── POLICY.md                 # per-shelf PII/redaction rules (optional)
-├── ledger.tsv                # token accounting: one row per shelve
+├── ledger.tsv                # token accounting: one row per episode (derived)
 └── docs/
     ├── topics/               # closed topics & investigations (the bulk)
     │   ├── .meta.json
@@ -220,18 +220,27 @@ prompt) injects the current `INDEX.md` — the entire standing memory cost.
 | `memshelf_index` | read `INDEX.md` | Session-start bootstrap and mid-session refresh. |
 | `memshelf_doctor` | `docshelf_doctor` + episode checks | Schema drift, missing digests, secret-shaped strings that slipped through, ledger consistency. |
 | `memshelf_stats` | `ledger.tsv` | Transparent token accounting: standing cost (INDEX + digests) vs shelved mass, compression ratio, per-episode and cumulative savings — same tokenizer methodology as docshelf's `benchmarks/token_savings.py`. |
+| `memshelf_rebuild` | episodes → derived files | Render `ledger.tsv`, `INDEX.md`, `stats.svg` and each `.meta.json` from `docs/` (#58). `check=true` verifies instead of writing — the shelf's PR guard. |
 | `memshelf_import` (M1 candidate, pending M0) | segmentation + N× shelve | Retro-shelve an exported transcript: agent proposes episode cuts, then capture→digest→shelve per episode + one session digest. The raw transcript is input only — never stored. |
 
 Design rule: every memshelf tool is a thin layer over `docshelf_mcp.Shelf`;
 anything generic enough for documents gets upstreamed to docshelf instead of
 living here.
 
-**Accounting.** Every shelve appends to `ledger.tsv`
-(`date / episode_id / mode(live|import) / approx_tokens_in / digest_tokens /
-notes`). This makes the project's core claim — saved tokens — measurable on
-every real shelf, not just in benchmarks: standing cost of memory vs shelved
-mass vs recall cost per question. See `docs/M0.md → Measurement` for the
-derived numbers.
+**Accounting.** `ledger.tsv` carries one row per episode (`date / episode_id /
+mode(live|import) / approx_tokens_in / digest_tokens / notes`). This makes the
+project's core claim — saved tokens — measurable on every real shelf, not just
+in benchmarks: standing cost of memory vs shelved mass vs recall cost per
+question. See `docs/M0.md → Measurement` for the derived numbers.
+
+Since #58 the ledger is **rendered, not appended**: every column lives in the
+episode's frontmatter (`date`, `mode`, `approx_tokens`, `notes`) except
+`digest_tokens`, which is computed from the digest in the file, and
+`memshelf rebuild` regenerates the whole table from `docs/`. Same for
+`INDEX.md`, `stats.svg` and each category's `.meta.json` — four derived files
+that a shelf's bot owns on `main` while PRs carry episodes. An append-only
+ledger written by every shelve was the multi-writer conflict class: two
+sessions, two topics, one unmergeable line.
 
 The normative on-disk contract for this file is shelf-spec v0 (openshelf,
 ADR-0005) § 4.4, not this document — the columns above are memshelf's

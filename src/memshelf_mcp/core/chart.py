@@ -133,7 +133,7 @@ def render_chart_svg(shelf_root: str | Path) -> str | None:
   <text x="{PLOT["right"] + 8}" y="{y(last_a) + 4:.1f}" font-size="12" fill="{_BLUE}">on the shelf: {_fmt(last_a)}</text>
   <text x="{PLOT["right"] + 8}" y="{(y(last_e) + y(last_a)) / 2 + 4:.1f}" font-size="12" font-weight="600" fill="{_INK}">saved {ratio}:1</text>
   {"".join(xlabels)}
-  <text x="{PLOT["left"]}" y="{H - 10}" font-size="10" fill="{_GRAY}">digests only; INDEX adds a small flat cost per session · chars/4 estimate · redrawn on every shelve · as of {last_date}</text>
+  <text x="{PLOT["left"]}" y="{H - 10}" font-size="10" fill="{_GRAY}">digests only; INDEX adds a small flat cost per session · chars/4 estimate · redrawn by memshelf rebuild · as of {last_date}</text>
 </svg>
 """
 

@@ -127,6 +127,9 @@ def test_cli_stats_banner_one_line(tmp_path, capsys):
         ]
     )
     capsys.readouterr()
+    # The ledger the banner reads is derived now (#58) — the CLI renders it.
+    assert main(["rebuild", "--shelf", str(tmp_path)]) == 0
+    capsys.readouterr()
     code = main(["stats", "--shelf", str(tmp_path), "--banner"])
     assert code == 0
     out = capsys.readouterr().out.strip()

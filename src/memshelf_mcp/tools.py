@@ -16,6 +16,8 @@ from memshelf_mcp.core.doctor import check_shelf
 from memshelf_mcp.core.importer import discover as import_discover
 from memshelf_mcp.core.importer import extract as import_extract
 from memshelf_mcp.core.init import init_shelf
+from memshelf_mcp.core.rebuild import adopt as adopt_shelf
+from memshelf_mcp.core.rebuild import rebuild
 from memshelf_mcp.core.recall import read_index, recall, search
 from memshelf_mcp.core.resolve import resolve_shelf
 from memshelf_mcp.core.shelve import shelve
@@ -230,6 +232,36 @@ def run_resolve(params: ResolveInput) -> dict:
     rows and .meta.json keys from both branches, rebuild INDEX/stats from
     docs/, run doctor. Conflicting episodes are reported, never auto-merged."""
     return resolve_shelf(params.shelf_path, commit=params.commit).as_dict()
+
+
+class RebuildInput(BaseModel):
+    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+    check: bool = Field(
+        default=False,
+        description="Verify instead of write: report which derived files would "
+        "change and exit non-zero if any would. The shelf's PR guard runs this.",
+    )
+    adopt: bool = Field(
+        default=False,
+        description="One-shot migration for a shelf written before #58: copy the "
+        "shelve date, ledger notes and display title out of ledger.tsv/.meta.json "
+        "into each episode's frontmatter, so regenerating cannot drop them.",
+    )
+
+
+def run_rebuild(params: RebuildInput) -> dict:
+    """Regenerate every derived file from the episodes (#58): ledger.tsv,
+    each category's .meta.json, INDEX.md, stats.svg. The episode is the source;
+    these four are output, and a bot on `main` owns them. With check=True
+    nothing is written — the same code path answers 'do the committed
+    artifacts still match the episodes?'."""
+    if params.adopt and params.check:
+        raise ValueError("adopt writes to the episodes — it cannot be combined with check")
+    payload = {}
+    if params.adopt:
+        payload["adoption"] = adopt_shelf(params.shelf_path)
+    payload.update(rebuild(params.shelf_path, check=params.check).as_dict())
+    return payload
 
 
 class ImportInput(BaseModel):

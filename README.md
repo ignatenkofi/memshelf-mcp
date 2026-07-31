@@ -49,7 +49,7 @@ git repo with **no remote configured**.
 ## Quick start
 
 As an **MCP server** (tools `memshelf_init` / `shelve` / `recall` / `index` /
-`search` / `stats` / `resolve` / `doctor`):
+`search` / `stats` / `rebuild` / `resolve` / `doctor`):
 
 ```bash
 # Claude Code
@@ -72,14 +72,33 @@ memshelf init   --shelf ~/my-shelf --name "My working memory"
 memshelf shelve --shelf ~/my-shelf --slug 2026-07-23-topic --kind topic \
   --digest "What was decided, what was rejected and why, what stays open." \
   --section "Decisions=..."
-memshelf recall --shelf ~/my-shelf --id 2026-07-23-topic --section Decisions --log
-memshelf stats  --shelf ~/my-shelf   # claimed + realized savings
-memshelf doctor --shelf ~/my-shelf   # exit 1 on integrity errors
+memshelf recall  --shelf ~/my-shelf --id 2026-07-23-topic --section Decisions --log
+memshelf rebuild --shelf ~/my-shelf  # render the derived files from the episodes
+memshelf stats   --shelf ~/my-shelf  # claimed + realized savings
+memshelf doctor  --shelf ~/my-shelf  # exit 1 on integrity errors
 ```
 
-Two sessions shelved on parallel branches and the merge collides in
-`INDEX.md` / `ledger.tsv` / `.meta.json` / `stats.svg`? That is the
-multi-writer conflict class (#58) and it resolves mechanically:
+### The episode is the source; everything else is output
+
+`ledger.tsv`, `INDEX.md`, `stats.svg` and each category's `.meta.json` are
+**derived** (#58): `shelve` writes and commits the episode alone, and
+`memshelf rebuild` renders the four from `docs/`. That is what makes two
+sessions shelving in parallel a non-event — they no longer touch the same four
+files in the same places, so the merge is clean by construction. Delete all
+four and `rebuild` restores them byte-identically.
+
+On a shared shelf, let a bot own them on `main` and guard PRs against touching
+derived paths — ready-to-copy workflows are in
+[`adapters/shelf-repo/`](adapters/shelf-repo/). A shelf written before this
+split adopts it once:
+
+```bash
+memshelf rebuild --shelf ~/my-shelf --adopt   # move date/notes/title into the episodes
+memshelf rebuild --shelf ~/my-shelf --check   # the guard: exit 1 if anything drifted
+```
+
+`resolve` stays for what remains genuinely conflicting — the same episode
+written on both sides, or a shelf that has not adopted the bot yet:
 
 ```bash
 memshelf resolve --shelf ~/my-shelf            # union appends, rebuild derived, doctor

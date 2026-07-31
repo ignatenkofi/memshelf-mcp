@@ -1,8 +1,14 @@
-"""The multi-writer conflict class (issue #58): two sessions shelve on
-parallel branches → INDEX.md / ledger.tsv / .meta.json / stats.svg collide.
-``resolve`` unions the appends, merges the metas, rebuilds the derived
-files, and runs doctor — reproducing the manual resolution of 2026-07-29
-(sqst-memshelf#46/#47) mechanically."""
+"""``resolve`` — the bridge over the multi-writer conflict class (#58).
+
+Two sessions shelving on parallel branches used to collide on four derived
+files at once. Since #58 removed derived files from ``shelve``'s write set,
+that merge is clean by construction — the first test here asserts exactly
+that, because the absence of the conflict is the change's whole point.
+
+``resolve`` stays for the shelves that have not adopted the bot yet, for
+hand-edited derived files, and for the residual real collision: the same
+episode written on both sides. Those are what the rest of this file covers,
+so the conflicts below are constructed rather than produced by ``shelve``."""
 
 import subprocess
 
@@ -12,6 +18,7 @@ pytest.importorskip("docshelf_mcp")
 
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
+from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.resolve import (  # noqa: E402
     _split_marker_sides,
     _union_meta,
@@ -61,8 +68,8 @@ def _shelve(root, slug, digest, title):
     )
 
 
-def _make_conflict(root):
-    """Two branches, one shelve each, merge → the four-file conflict."""
+def _two_parallel_shelves(root):
+    """Two branches, one shelve each, then merge both into main."""
     _git(root, "checkout", "-q", "-b", "session-a")
     _shelve(root, "2026-07-29-auth-refactor", DIGEST_A, "Рефактор авторизации")
     _git(root, "checkout", "-q", "main")
@@ -70,14 +77,60 @@ def _make_conflict(root):
     _shelve(root, "2026-07-29-storage-wal", DIGEST_B, "Хранилище на WAL")
     _git(root, "checkout", "-q", "main")
     _git(root, "merge", "-q", "session-a")
+    return _git(root, "merge", "session-b", check=False)
+
+
+def test_parallel_shelves_no_longer_conflict(tmp_path):
+    """#58 in one assertion: the scenario that needed `resolve` now just merges.
+
+    Before the split, each shelve appended to ledger.tsv, rewrote INDEX.md and
+    .meta.json and redrew stats.svg — so two independent topics collided on
+    four files that git cannot merge. Now each side carries one new episode
+    file and nothing else.
+    """
+    root = _init_shelf(tmp_path)
+    merge = _two_parallel_shelves(root)
+
+    assert merge.returncode == 0, f"unexpected conflict:\n{merge.stdout}{merge.stderr}"
+    assert _git(root, "ls-files", "-u").stdout == ""
+
+    # Both episodes are on main, and one rebuild renders both into the ledger
+    # and the INDEX — with the display titles that rode in their frontmatter.
+    rebuild(root)
+    ledger = (root / "ledger.tsv").read_text(encoding="utf-8")
+    assert "2026-07-29-auth-refactor" in ledger and "2026-07-29-storage-wal" in ledger
+    index = (root / "INDEX.md").read_text(encoding="utf-8")
+    assert "Рефактор авторизации" in index and "Хранилище на WAL" in index
+
+
+def _make_derived_conflict(root):
+    """A ledger/meta conflict as a shelf without the bot still produces one.
+
+    Constructed by hand now that ``shelve`` no longer writes derived files:
+    each branch regenerates them after its own shelve, which is what a shelf
+    that has not adopted the bot workflow does.
+    """
+    _git(root, "checkout", "-q", "-b", "session-a")
+    _shelve(root, "2026-07-29-auth-refactor", DIGEST_A, "Рефактор авторизации")
+    rebuild(root)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "a: derived")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "checkout", "-q", "-b", "session-b")
+    _shelve(root, "2026-07-29-storage-wal", DIGEST_B, "Хранилище на WAL")
+    rebuild(root)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "b: derived")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "session-a")
     merge = _git(root, "merge", "session-b", check=False)
-    assert merge.returncode != 0, "expected the multi-writer conflict"
+    assert merge.returncode != 0, "expected the derived-file conflict"
     return merge
 
 
 def test_live_conflict_resolved_end_to_end(tmp_path):
     root = _init_shelf(tmp_path)
-    _make_conflict(root)
+    _make_derived_conflict(root)
 
     unmerged = _git(root, "ls-files", "-u").stdout
     assert "ledger.tsv" in unmerged and "INDEX.md" in unmerged
@@ -109,7 +162,7 @@ def test_live_conflict_resolved_end_to_end(tmp_path):
 
 def test_commit_completes_the_merge(tmp_path):
     root = _init_shelf(tmp_path)
-    _make_conflict(root)
+    _make_derived_conflict(root)
 
     result = resolve_shelf(root, commit=True)
 

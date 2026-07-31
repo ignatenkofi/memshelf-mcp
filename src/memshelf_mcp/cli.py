@@ -22,6 +22,7 @@ from memshelf_mcp.tools import (
     ImportInput,
     IndexInput,
     InitInput,
+    RebuildInput,
     RecallInput,
     ResolveInput,
     SearchInput,
@@ -31,6 +32,7 @@ from memshelf_mcp.tools import (
     run_import,
     run_index,
     run_init,
+    run_rebuild,
     run_recall,
     run_resolve,
     run_search,
@@ -162,6 +164,21 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "ok" else 1
 
 
+def _cmd_rebuild(args: argparse.Namespace) -> int:
+    result = run_rebuild(
+        RebuildInput(shelf_path=args.shelf, check=args.check, adopt=args.adopt)
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if args.check and result["drifted"]:
+        print(
+            "derived files diverge from the episodes: "
+            + ", ".join(result["drifted"])
+            + "\nrun `memshelf rebuild --shelf ...` on main (the bot does this)",
+            file=sys.stderr,
+        )
+    return 0 if result["ok"] else 1
+
+
 def _cmd_import(args: argparse.Namespace) -> int:
     params = ImportInput(
         method=args.method,
@@ -268,6 +285,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Probe git remotes; fail on a publicly visible one (needs network).",
     )
     dc.set_defaults(func=_cmd_doctor)
+
+    rb = sub.add_parser(
+        "rebuild",
+        help="Regenerate derived files (ledger/INDEX/.meta/stats) from the episodes.",
+    )
+    rb.add_argument("--shelf", required=True, help="Path to the shelf.")
+    rb.add_argument(
+        "--check",
+        action="store_true",
+        help="Verify only: write nothing, exit 1 if any derived file has drifted. "
+        "This is what a shelf's PR guard runs.",
+    )
+    rb.add_argument(
+        "--adopt",
+        action="store_true",
+        help="One-shot migration for a pre-#58 shelf: copy date/notes/display title "
+        "out of ledger.tsv and .meta.json into the episodes before regenerating.",
+    )
+    rb.set_defaults(func=_cmd_rebuild)
 
     im = sub.add_parser("import", help="Prepare an exported transcript for shelving.")
     im.add_argument("method", choices=["discover", "extract"])

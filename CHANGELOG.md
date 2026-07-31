@@ -8,6 +8,43 @@ once code ships.
 
 ## [Unreleased]
 
+### Changed
+- **The episode is now the only thing `shelve` writes (#58).** `ledger.tsv`,
+  `INDEX.md`, `stats.svg` and each category's `.meta.json` became derived
+  files, rendered from `docs/` by the new `memshelf rebuild` / `memshelf_rebuild`.
+  Two sessions closing two topics used to append to the same ledger, rewrite
+  the same INDEX and redraw the same chart — a conflict git cannot merge and a
+  human had to unpick (the 2026-07-30 collision cost four conflicted files on
+  top of the real one). Now each side carries one new episode file, and the
+  merge is clean by construction; the test suite asserts exactly that, in the
+  place that used to assert the conflict. Owner's decision of 2026-07-31,
+  variant (a) — the pattern already proven in project-atlas ADR 0007.
+- Episode frontmatter gained `date`, `notes`, `display_title` and
+  `description`. A column that lives only in the derived file cannot be
+  regenerated, so everything the ledger and `.meta.json` need moved into the
+  episode. `date` is the shelve date, deliberately distinct from `span` (what
+  the conversation covered).
+- `shelve` stages only the episode when it auto-commits, so a shelve commit
+  can no longer carry a regenerated INDEX into a PR.
+
+### Added
+- `memshelf rebuild --shelf … [--check] [--adopt]` and the MCP tool
+  `memshelf_rebuild`. `--check` writes nothing and exits 1 if any derived file
+  has drifted from the episodes — that is the shelf's PR guard, running the
+  same code path the bot runs, so the guard cannot pass on logic the bot does
+  not execute. `--adopt` is the one-shot migration for a pre-#58 shelf: it
+  moves date/notes/display title out of `ledger.tsv` and `.meta.json` into the
+  episodes.
+- `adapters/shelf-repo/` — ready-to-copy workflows for a shared shelf: a bot
+  that regenerates derived files on `main`, and a PR guard that refuses diffs
+  touching derived paths.
+- Adoption reports `restated_digest_tokens`: rows whose recorded
+  `digest_tokens` disagrees with the digest actually in the file. On the
+  working shelf that was 30 of 60 rows (standing cost 15112 → 15427 tokens,
+  compression 344.5:1 → 337.5:1) — an M0/M1-transition residue, surfaced
+  rather than silently rewritten, because the shelf has published those
+  numbers.
+
 ### Fixed
 - **`shelve` can no longer produce an episode the spec validator rejects, and
   `doctor` now catches the ones already on disk** (#56). shelf-spec v0 § 5.2

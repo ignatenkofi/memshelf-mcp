@@ -66,12 +66,14 @@ shelve→compact→recall cycle survives without manual repair; `doctor` clean.
 - Retention: `retain_until`, purge tool, reindex after purge.
 - Rollups: consolidate old episodes into digest-of-digests, archive category.
 - Configurable PII/secret pattern packs per shelf.
-- **Derived files rendered by a bot, not by `shelve`** (#58, decided
-  2026-07-31): move `notes` into the episode frontmatter so `ledger.tsv`
-  becomes derivable, have `shelve` write only the episode, and regenerate
-  INDEX/ledger/.meta/stats on `main` behind a PR guard — the multi-writer
-  conflict class disappears by construction. `memshelf resolve` stays as the
-  fallback. Lands next to rollups: both rewrite how INDEX is produced.
+- ~~**Derived files rendered by a bot, not by `shelve`**~~ (#58, decided
+  2026-07-31) — **done**: `date`/`notes`/`display_title`/`description` moved
+  into the episode frontmatter, `shelve` writes and stages only the episode,
+  and `memshelf rebuild` renders `ledger.tsv`/`INDEX.md`/`stats.svg`/`.meta.json`
+  from `docs/`. Two parallel shelves now merge cleanly by construction;
+  `memshelf resolve` stays as the fallback for a real same-slug collision or a
+  shelf without the bot. Bot + PR-guard workflows: `adapters/shelf-repo/`.
+  Rollups (below) build on the same regeneration path.
 
 **Exit criteria:** a shelf with 100+ episodes keeps INDEX under ~10 KB and
 recall precision doesn't degrade (re-run the M0 question set); the advisor's

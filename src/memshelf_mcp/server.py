@@ -24,6 +24,7 @@ from memshelf_mcp.tools import (
     ImportInput,
     IndexInput,
     InitInput,
+    RebuildInput,
     RecallInput,
     ResolveInput,
     SearchInput,
@@ -33,6 +34,7 @@ from memshelf_mcp.tools import (
     run_import,
     run_index,
     run_init,
+    run_rebuild,
     run_recall,
     run_resolve,
     run_search,
@@ -162,6 +164,28 @@ def memshelf_init(params: InitInput) -> str:
         return _serialize(run_init(params))
     except Exception as exc:
         return _error_response(exc, "memshelf_init")
+
+
+@mcp.tool(
+    name="memshelf_rebuild",
+    annotations={
+        "title": "Regenerate the shelf's derived files from its episodes",
+        "readOnlyHint": False,
+        "destructiveHint": False,  # output is a pure function of the episodes
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+def memshelf_rebuild(params: RebuildInput) -> str:
+    """Regenerate ledger.tsv, each category's .meta.json, INDEX.md and stats.svg
+    from the episodes (#58). The episode is the source; these four are output,
+    owned by a bot on `main`, which is what removes the multi-writer conflict
+    class at the root. With check=true nothing is written and the result says
+    which files have drifted — the shelf's PR guard runs exactly this."""
+    try:
+        return _serialize(run_rebuild(params))
+    except Exception as exc:
+        return _error_response(exc, "memshelf_rebuild")
 
 
 @mcp.tool(
