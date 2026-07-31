@@ -8,6 +8,27 @@ once code ships.
 
 ## [Unreleased]
 
+### Added (#15 — retention and rollups)
+- **`memshelf rollup`** / `memshelf_rollup`: collapse a period's episodes into
+  one digest-of-digests and move the originals into `archive/`, a sub-shelf at
+  the shelf root. Because docshelf only indexes `docs/`, N INDEX lines become
+  one — which is the answer to `doctor`'s `index-bloat` warning, and to
+  ROADMAP M2's exit criterion (100+ episodes, INDEX under ~10 KB).
+- A rollup shrinks navigation and **nothing else**: `recall --id` and `search`
+  still reach archived episodes (the archive is searched as a second shelf),
+  `ledger.tsv` keeps every row, and `stats` is unchanged — an archived episode
+  still holds the mass it saved. The rollup episode names every id it hid, so
+  an INDEX line that hides 40 episodes cannot make them unfindable.
+- `doctor` learned about `archive/`. Without that it would have reported every
+  rolled-up episode as an `orphan-ledger-row` — a rollup would have looked
+  like corruption.
+- **Retention**: `retain_until` in the frontmatter (`shelve --retain-until`,
+  opt-in per episode) plus `memshelf purge` / `memshelf_purge`, dry-run by
+  default, sweeping the archive as well as `docs/` — retention that stopped at
+  the archive boundary would mean "kept forever, out of sight". The report
+  states plainly that purge removes the working-tree file only and that real
+  erasure is a deliberate filter-repo pass.
+
 ### Changed
 - **The episode is now the only thing `shelve` writes (#58).** `ledger.tsv`,
   `INDEX.md`, `stats.svg` and each category's `.meta.json` became derived

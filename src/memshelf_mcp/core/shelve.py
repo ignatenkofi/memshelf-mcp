@@ -144,6 +144,7 @@ def shelve(
     mode: str = "live",
     notes: str = "",
     date: str | None = None,
+    retain_until: str | None = None,
     extra_patterns: list[tuple[str, str]] | None = None,
     autocommit: bool = True,
 ) -> ShelveResult:
@@ -216,6 +217,7 @@ def shelve(
         display_title=display_title,
         description=desc,
         notes=ledger_notes,
+        retain_until=retain_until,
     )
     markdown = compose_episode(frontmatter, digest, sections)
 

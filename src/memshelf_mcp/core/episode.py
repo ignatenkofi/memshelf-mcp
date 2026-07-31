@@ -69,6 +69,9 @@ class Frontmatter:
     display_title: str | None = None
     description: str | None = None
     notes: str = ""
+    #: Retention (#15): after this date `memshelf purge` drops the episode.
+    #: Absent means "keep" — retention is opt-in per episode, never a default.
+    retain_until: str | None = None
 
     def to_yaml(self) -> str:
         lines = [f"id: {self.id}", f"kind: {self.kind}"]
@@ -78,6 +81,8 @@ class Frontmatter:
             lines.append(f"span: {self.span}")
         if self.date:
             lines.append(f"date: {self.date}")
+        if self.retain_until:
+            lines.append(f"retain_until: {self.retain_until}")
         if self.display_title:
             lines.append(f"display_title: {flatten(self.display_title)}")
         if self.description:

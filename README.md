@@ -49,7 +49,7 @@ git repo with **no remote configured**.
 ## Quick start
 
 As an **MCP server** (tools `memshelf_init` / `shelve` / `recall` / `index` /
-`search` / `stats` / `rebuild` / `resolve` / `doctor`):
+`search` / `stats` / `rebuild` / `rollup` / `purge` / `resolve` / `doctor`):
 
 ```bash
 # Claude Code
@@ -96,6 +96,39 @@ split adopts it once:
 memshelf rebuild --shelf ~/my-shelf --adopt   # move date/notes/title into the episodes
 memshelf rebuild --shelf ~/my-shelf --check   # the guard: exit 1 if anything drifted
 ```
+
+### Keeping INDEX readable as the shelf grows
+
+`INDEX.md` is the one file that rides in *every* session, so it grows with the
+episode count while the per-session budget does not. `doctor` warns
+(`index-bloat`) once it crosses the budget; two mechanics answer that warning
+(#15):
+
+```bash
+# Collapse a period into one digest-of-digests; originals move to archive/
+memshelf rollup --shelf ~/my-shelf --slug 2026-Q1-rollup --until 2026-03-31 \
+  --display-title "Роллап Q1" \
+  --digest "What the quarter decided, what it rejected, what stays open."
+
+# Retention is opt-in per episode, and purge is a dry run by default
+memshelf shelve --shelf ~/my-shelf ... --retain-until 2027-01-01
+memshelf purge  --shelf ~/my-shelf            # list what expired
+memshelf purge  --shelf ~/my-shelf --apply    # delete it, then reindex
+```
+
+A rollup shrinks **navigation and nothing else**: the originals move into
+`archive/` — a sub-shelf with its own INDEX, outside the parent's `docs/` —
+so N INDEX lines become one. Nothing is deleted, `recall --id` and `search`
+still reach them, and every ledger row survives, because an archived episode
+still holds the mass it saved. The rollup episode lists every id it hid.
+
+The rollup *digest* is yours, not the tool's: synthesizing a quarter of
+digests is the part a tool cannot do, so it takes the same digest contract
+`shelve` enforces.
+
+`purge` deletes the working-tree file — **git history still has it**. Real
+erasure is a deliberate `filter-repo` pass over the whole repository, never a
+side effect of a tool call, and the purge report says so.
 
 `resolve` stays for what remains genuinely conflicting — the same episode
 written on both sides, or a shelf that has not adopted the bot yet:

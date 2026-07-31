@@ -77,6 +77,9 @@ class EpisodeRecord:
     notes: str
     display_title: str
     description: str
+    #: Rolled up into ``archive/`` (#15). Still in the ledger — an archived
+    #: episode holds the mass it saved; only its INDEX line is gone.
+    archived: bool = False
 
 
 @dataclass
@@ -134,31 +137,41 @@ def collect_episodes(root: Path) -> tuple[list[EpisodeRecord], list[str]]:
     """
     records: list[EpisodeRecord] = []
     warnings: list[str] = []
-    for category in sorted(set(CATEGORY_BY_KIND.values())):
-        directory = root / "docs" / category
-        if not directory.is_dir():
-            continue
-        for path in sorted(directory.glob("*.md")):
-            text = path.read_text(encoding="utf-8")
-            fields, body = parse_frontmatter(text)
-            if not fields.get("id"):
-                warnings.append(f"docs/{category}/{path.name}: нет frontmatter id — пропущен")
+    # ``archive/`` is the rollup sub-shelf (#15). Its episodes are out of the
+    # INDEX but not out of the accounting: skipping them here would make a
+    # rollup look like the mass had never been shelved.
+    roots = [(root / "docs", False)]
+    archive_docs = root / "archive" / "docs"
+    if archive_docs.is_dir():
+        roots.append((archive_docs, True))
+    for base, archived in roots:
+        for category in sorted(set(CATEGORY_BY_KIND.values())):
+            directory = base / category
+            if not directory.is_dir():
                 continue
-            digest = _digest_of(body)
-            records.append(
-                EpisodeRecord(
-                    id=fields["id"],
-                    category=category,
-                    filename=path.name,
-                    date=fields.get("date") or fields.get("span") or "",
-                    mode=fields.get("mode", "live"),
-                    approx_tokens=_int(fields.get("approx_tokens", "0")),
-                    digest_tokens=len(digest) // CHARS_PER_TOKEN,
-                    notes=fields.get("notes", ""),
-                    display_title=fields.get("display_title", ""),
-                    description=fields.get("description", ""),
+            prefix = f"archive/docs/{category}" if archived else f"docs/{category}"
+            for path in sorted(directory.glob("*.md")):
+                text = path.read_text(encoding="utf-8")
+                fields, body = parse_frontmatter(text)
+                if not fields.get("id"):
+                    warnings.append(f"{prefix}/{path.name}: нет frontmatter id — пропущен")
+                    continue
+                digest = _digest_of(body)
+                records.append(
+                    EpisodeRecord(
+                        id=fields["id"],
+                        category=category,
+                        filename=path.name,
+                        date=fields.get("date") or fields.get("span") or "",
+                        mode=fields.get("mode", "live"),
+                        approx_tokens=_int(fields.get("approx_tokens", "0")),
+                        digest_tokens=len(digest) // CHARS_PER_TOKEN,
+                        notes=fields.get("notes", ""),
+                        display_title=fields.get("display_title", ""),
+                        description=fields.get("description", ""),
+                        archived=archived,
+                    )
                 )
-            )
     records.sort(key=lambda r: (r.date, r.id))
     return records, warnings
 
@@ -181,7 +194,9 @@ def render_meta(records: list[EpisodeRecord], category: str) -> str | None:
     data = {
         r.filename: {"title": r.display_title or r.id, "description": r.description}
         for r in records
-        if r.category == category and (r.display_title or r.description)
+        if r.category == category
+        and not r.archived  # archived episodes are the sub-shelf's business
+        and (r.display_title or r.description)
     }
     if not data:
         return None

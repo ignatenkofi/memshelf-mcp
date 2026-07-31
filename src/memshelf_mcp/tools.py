@@ -12,6 +12,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from memshelf_mcp.core.archive import purge as purge_shelf
+from memshelf_mcp.core.archive import rollup as rollup_shelf
 from memshelf_mcp.core.doctor import check_shelf
 from memshelf_mcp.core.importer import discover as import_discover
 from memshelf_mcp.core.importer import extract as import_extract
@@ -47,6 +49,11 @@ class ShelveInput(BaseModel):
     approx_tokens: int = 0
     mode: Literal["live", "import"] = "live"
     notes: str = ""
+    retain_until: str | None = Field(
+        default=None,
+        description="Retention (#15): ISO date after which `memshelf purge` drops this "
+        "episode. Absent means keep — retention is opt-in per episode.",
+    )
     date: str | None = Field(default=None, description="YYYY-MM-DD; defaults to today.")
     autocommit: bool = True
 
@@ -67,6 +74,7 @@ def run_shelve(params: ShelveInput) -> dict:
         approx_tokens=params.approx_tokens,
         mode=params.mode,
         notes=params.notes,
+        retain_until=params.retain_until,
         date=params.date,
         autocommit=params.autocommit,
     )
@@ -262,6 +270,63 @@ def run_rebuild(params: RebuildInput) -> dict:
         payload["adoption"] = adopt_shelf(params.shelf_path)
     payload.update(rebuild(params.shelf_path, check=params.check).as_dict())
     return payload
+
+
+class RollupInput(BaseModel):
+    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+    slug: str = Field(description="Latin slug/id of the rollup episode, e.g. 2026-Q2-rollup.")
+    digest: str = Field(
+        description="The digest-of-digests — YOUR synthesis of the period, not the tool's. "
+        "Same contract as a shelve digest: what was decided, what was rejected, what stays open."
+    )
+    until: str | None = Field(
+        default=None,
+        description="Archive every episode dated on or before this ISO date.",
+    )
+    episode_ids: list[str] = Field(
+        default_factory=list,
+        description="Explicit episode ids to archive instead of a date range.",
+    )
+    display_title: str | None = Field(default=None, description="Free-form INDEX title.")
+    sections: dict[str, str] = Field(
+        default_factory=dict, description="Extra H2 sections for the rollup episode."
+    )
+    date: str | None = Field(default=None, description="Rollup date (default: today).")
+
+
+def run_rollup(params: RollupInput) -> dict:
+    """Collapse a period into one digest-of-digests and move the originals into
+    the archive sub-shelf (#15). N INDEX lines become one; nothing is deleted,
+    recall by id keeps working, and the ledger keeps every row — an archived
+    episode still holds the mass it saved."""
+    return rollup_shelf(
+        params.shelf_path,
+        slug=params.slug,
+        digest=params.digest,
+        until=params.until,
+        episode_ids=list(params.episode_ids) or None,
+        display_title=params.display_title,
+        sections=dict(params.sections),
+        date=params.date,
+    ).as_dict()
+
+
+class PurgeInput(BaseModel):
+    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+    apply: bool = Field(
+        default=False,
+        description="Actually delete. Default is a dry run that only lists what expired.",
+    )
+    today: str | None = Field(
+        default=None, description="Treat this ISO date as today (testing/backdating)."
+    )
+
+
+def run_purge(params: PurgeInput) -> dict:
+    """Delete episodes whose `retain_until` has passed, then reindex (#15).
+    Dry-run by default. Deletes the working-tree file only — git history still
+    contains it, and real erasure is a deliberate filter-repo pass."""
+    return purge_shelf(params.shelf_path, today=params.today, apply=params.apply).as_dict()
 
 
 class ImportInput(BaseModel):

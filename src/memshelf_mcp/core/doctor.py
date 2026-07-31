@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from memshelf_mcp.core.archive import archived_episodes
 from memshelf_mcp.core.digest import validate_digest
 from memshelf_mcp.core.episode import CATEGORY_BY_KIND, required_sections
 from memshelf_mcp.core.frontmatter import parse_frontmatter
@@ -311,9 +312,13 @@ def check_shelf(
     ledger_ids = _ledger_ids(root / "ledger.tsv")
     seen: set[str] = set()
     episodes = 0
-    for entry in shelf.scan():
+    # Archived episodes (#15) are out of the INDEX, not out of the shelf: they
+    # keep their ledger rows, so a doctor blind to `archive/` would report every
+    # rolled-up episode as an orphan row — a rollup would look like corruption.
+    archived_rel = [str(path.relative_to(root)) for path in archived_episodes(root)]
+    for entry_rel in [e.relative_path for e in shelf.scan()] + archived_rel:
         episodes += 1
-        rel = entry.relative_path
+        rel = entry_rel
         stem = Path(rel).stem
         seen.add(stem)
         findings.extend(_check_episode(root, rel, pack.patterns))

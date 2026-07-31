@@ -50,11 +50,32 @@ def read_index(shelf_root: str | Path) -> str:
     return index.read_text(encoding="utf-8")
 
 
-def _resolve_id(shelf, episode_id: str) -> str:
+def _resolve_id(shelf, episode_id: str) -> tuple[object, str, str]:
+    """Locate an episode by id; returns ``(shelf_to_read, path_in_it, address)``.
+
+    A rollup (#15) moves episodes out of the INDEX, not out of reach — recall by
+    id has to keep working, or "nothing is deleted" would be true on disk and
+    false in practice. Archived episodes are read through the archive sub-shelf
+    (docshelf refuses paths outside its own ``docs/``), while the reported
+    address stays relative to the parent so the caller sees where it really is.
+    """
+    from docshelf_mcp.core.shelf import Shelf
+
+    from memshelf_mcp.core.archive import archive_root, archived_episodes
+
     stem = episode_id[:-3] if episode_id.endswith(".md") else episode_id
     for entry in shelf.scan():
         if Path(entry.relative_path).stem == stem:
-            return entry.relative_path
+            return shelf, entry.relative_path, entry.relative_path
+    root = Path(shelf.root)
+    for path in archived_episodes(root):
+        if path.stem == stem:
+            archive = archive_root(root)
+            return (
+                Shelf(archive),
+                str(path.relative_to(archive)),
+                str(path.relative_to(root)),
+            )
     raise EpisodeNotFound(f"no episode with id {episode_id!r} on the shelf")
 
 
@@ -103,8 +124,8 @@ def recall(
     from docshelf_mcp.core.shelf import Shelf
 
     shelf = Shelf(Path(shelf_root).expanduser().resolve())
-    address = _resolve_id(shelf, episode_id)
-    result = shelf.read_document(address, max_bytes=max_bytes)
+    source, path_in_shelf, address = _resolve_id(shelf, episode_id)
+    result = source.read_document(path_in_shelf, max_bytes=max_bytes)
     content = result.content
     if section is not None:
         content = _slice_section(content, section)
@@ -124,8 +145,26 @@ def search(shelf_root: str | Path, query: str, *, max_results: int = 10) -> list
     """Grep the shelf; return episode addresses (split docs hit at section level)."""
     from docshelf_mcp.core.shelf import Shelf
 
-    shelf = Shelf(Path(shelf_root).expanduser().resolve())
-    return [
+    from memshelf_mcp.core.archive import archive_root
+
+    root = Path(shelf_root).expanduser().resolve()
+    hits = [
         SearchHit(address=h["relative_path"], score=h["score"], snippet=h.get("snippet", ""))
-        for h in shelf.search(query, max_results=max_results)
+        for h in Shelf(root).search(query, max_results=max_results)
     ]
+    # The archive is a separate docshelf shelf, so its documents are invisible
+    # to the parent's search. A rolled-up episode that cannot be found is a
+    # deleted episode in every way that matters to the user.
+    archive = archive_root(root)
+    if (archive / "docs").is_dir():
+        hits += [
+            SearchHit(
+                address=f"{archive.name}/{h['relative_path']}",
+                score=h["score"],
+                snippet=h.get("snippet", ""),
+            )
+            for h in Shelf(archive).search(query, max_results=max_results)
+        ]
+        hits.sort(key=lambda hit: hit.score, reverse=True)
+        hits = hits[:max_results]
+    return hits

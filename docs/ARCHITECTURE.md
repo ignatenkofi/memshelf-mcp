@@ -58,6 +58,7 @@ memory-shelf/
 ├── INDEX.md                  # the ONLY file that lives in agent context
 ├── POLICY.md                 # per-shelf PII/redaction rules (optional)
 ├── ledger.tsv                # token accounting: one row per episode (derived)
+├── archive/                  # rollup sub-shelf (#15): own INDEX, outside docs/
 └── docs/
     ├── topics/               # closed topics & investigations (the bulk)
     │   ├── .meta.json
@@ -220,6 +221,8 @@ prompt) injects the current `INDEX.md` — the entire standing memory cost.
 | `memshelf_index` | read `INDEX.md` | Session-start bootstrap and mid-session refresh. |
 | `memshelf_doctor` | `docshelf_doctor` + episode checks | Schema drift, missing digests, secret-shaped strings that slipped through, ledger consistency. |
 | `memshelf_stats` | `ledger.tsv` | Transparent token accounting: standing cost (INDEX + digests) vs shelved mass, compression ratio, per-episode and cumulative savings — same tokenizer methodology as docshelf's `benchmarks/token_savings.py`. |
+| `memshelf_rollup` | episodes → `archive/` + one rollup episode | Collapse a period into a digest-of-digests (#15). INDEX shrinks; recall/search/ledger/stats keep the archive. The digest is the caller's — synthesis needs the model. |
+| `memshelf_purge` | `retain_until` → delete + reindex | Retention (#15), dry-run by default. Removes the working-tree file only; real erasure is a filter-repo pass. |
 | `memshelf_rebuild` | episodes → derived files | Render `ledger.tsv`, `INDEX.md`, `stats.svg` and each `.meta.json` from `docs/` (#58). `check=true` verifies instead of writing — the shelf's PR guard. |
 | `memshelf_import` (M1 candidate, pending M0) | segmentation + N× shelve | Retro-shelve an exported transcript: agent proposes episode cuts, then capture→digest→shelve per episode + one session digest. The raw transcript is input only — never stored. |
 

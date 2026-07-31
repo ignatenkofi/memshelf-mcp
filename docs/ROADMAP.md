@@ -63,8 +63,15 @@ shelve→compact→recall cycle survives without manual repair; `doctor` clean.
   closed-but-unshelved episodes with their token cost, recommend shelve
   actions. Doubles as the onboarding/first-run experience; heuristics-first,
   host-agnostic (see ARCHITECTURE open question 7).
-- Retention: `retain_until`, purge tool, reindex after purge.
-- Rollups: consolidate old episodes into digest-of-digests, archive category.
+- ~~Retention: `retain_until`, purge tool, reindex after purge.~~ — **done**
+  (#15): opt-in `retain_until`, `memshelf purge` dry-run by default, sweeps
+  `docs/` and `archive/`, states the git-history caveat instead of implying
+  erasure.
+- ~~Rollups: consolidate old episodes into digest-of-digests, archive
+  category.~~ — **done** (#15): `memshelf rollup` moves a period's episodes
+  into the `archive/` sub-shelf behind one digest-of-digests. Navigation
+  shrinks; recall, search, ledger and stats are untouched. Exit criterion
+  (100+ episodes, INDEX under ~10 KB) is now a matter of running it.
 - Configurable PII/secret pattern packs per shelf.
 - ~~**Derived files rendered by a bot, not by `shelve`**~~ (#58, decided
   2026-07-31) — **done**: `date`/`notes`/`display_title`/`description` moved

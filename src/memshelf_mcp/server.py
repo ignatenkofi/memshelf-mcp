@@ -24,9 +24,11 @@ from memshelf_mcp.tools import (
     ImportInput,
     IndexInput,
     InitInput,
+    PurgeInput,
     RebuildInput,
     RecallInput,
     ResolveInput,
+    RollupInput,
     SearchInput,
     ShelveInput,
     StatsInput,
@@ -34,9 +36,11 @@ from memshelf_mcp.tools import (
     run_import,
     run_index,
     run_init,
+    run_purge,
     run_rebuild,
     run_recall,
     run_resolve,
+    run_rollup,
     run_search,
     run_shelve,
     run_stats,
@@ -186,6 +190,54 @@ def memshelf_rebuild(params: RebuildInput) -> str:
         return _serialize(run_rebuild(params))
     except Exception as exc:
         return _error_response(exc, "memshelf_rebuild")
+
+
+@mcp.tool(
+    name="memshelf_rollup",
+    annotations={
+        "title": "Collapse a period into one digest-of-digests",
+        "readOnlyHint": False,
+        "destructiveHint": False,  # episodes move to archive/, nothing is deleted
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+def memshelf_rollup(params: RollupInput) -> str:
+    """Archive a period's episodes behind one digest-of-digests (#15).
+
+    INDEX.md rides in every session, so it grows while the budget does not;
+    a rollup turns N INDEX lines into one. The originals move to the `archive/`
+    sub-shelf — nothing is deleted, recall by id keeps working, and every
+    ledger row survives, because an archived episode still holds the mass it
+    saved. The digest is YOURS: synthesizing a quarter of digests is the part
+    a tool cannot do, so pass the same quality of digest `shelve` demands."""
+    try:
+        return _serialize(run_rollup(params))
+    except Exception as exc:
+        return _error_response(exc, "memshelf_rollup")
+
+
+@mcp.tool(
+    name="memshelf_purge",
+    annotations={
+        "title": "Delete episodes past their retain_until",
+        "readOnlyHint": False,
+        "destructiveHint": True,  # this one really does delete files
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+def memshelf_purge(params: PurgeInput) -> str:
+    """Drop episodes whose `retain_until` has passed, then reindex (#15).
+
+    Dry-run by default: without apply=true it only lists what expired. Deletes
+    the working-tree file — **git history still contains it**. Real erasure is
+    a deliberate filter-repo pass over the whole repository, never a side
+    effect of a tool call, and the result says so."""
+    try:
+        return _serialize(run_purge(params))
+    except Exception as exc:
+        return _error_response(exc, "memshelf_purge")
 
 
 @mcp.tool(

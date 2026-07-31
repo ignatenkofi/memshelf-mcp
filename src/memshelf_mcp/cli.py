@@ -1,8 +1,8 @@
 """``memshelf`` CLI — the portability surface for hosts without MCP.
 
 Anything that can run a shell command can drive the shelf: ``init``,
-``shelve``, ``recall``, ``index``, ``search``, ``stats``, ``resolve``,
-``doctor``.
+``shelve``, ``recall``, ``index``, ``search``, ``stats``, ``rebuild``,
+``rollup``, ``purge``, ``resolve``, ``doctor``.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import json
 import sys
 
 from memshelf_mcp import __version__
+from memshelf_mcp.core.archive import ArchiveError
 from memshelf_mcp.core.episode import EpisodeError
 from memshelf_mcp.core.importer import TranscriptError
 from memshelf_mcp.core.init import InitError
@@ -22,9 +23,11 @@ from memshelf_mcp.tools import (
     ImportInput,
     IndexInput,
     InitInput,
+    PurgeInput,
     RebuildInput,
     RecallInput,
     ResolveInput,
+    RollupInput,
     SearchInput,
     ShelveInput,
     StatsInput,
@@ -32,9 +35,11 @@ from memshelf_mcp.tools import (
     run_import,
     run_index,
     run_init,
+    run_purge,
     run_rebuild,
     run_recall,
     run_resolve,
+    run_rollup,
     run_search,
     run_shelve,
     run_stats,
@@ -66,6 +71,7 @@ def _cmd_shelve(args: argparse.Namespace) -> int:
         approx_tokens=args.approx_tokens,
         mode=args.mode,
         notes=args.notes,
+        retain_until=args.retain_until,
         date=args.date,
         autocommit=not args.no_commit,
     )
@@ -177,6 +183,35 @@ def _cmd_rebuild(args: argparse.Namespace) -> int:
     return 0 if result["ok"] else 1
 
 
+def _cmd_rollup(args: argparse.Namespace) -> int:
+    try:
+        result = run_rollup(
+            RollupInput(
+                shelf_path=args.shelf,
+                slug=args.slug,
+                digest=args.digest,
+                until=args.until,
+                episode_ids=args.episode,
+                display_title=args.display_title,
+                sections=_parse_sections(args.section),
+                date=args.date,
+            )
+        )
+    except (ArchiveError, EpisodeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_purge(args: argparse.Namespace) -> int:
+    result = run_purge(PurgeInput(shelf_path=args.shelf, apply=args.apply, today=args.today))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if result["expired"] and not result["applied"]:
+        print("dry run — re-run with --apply to delete", file=sys.stderr)
+    return 0
+
+
 def _cmd_import(args: argparse.Namespace) -> int:
     params = ImportInput(
         method=args.method,
@@ -224,6 +259,10 @@ def build_parser() -> argparse.ArgumentParser:
     sh.add_argument("--approx-tokens", type=int, default=0)
     sh.add_argument("--mode", choices=["live", "import"], default="live")
     sh.add_argument("--notes", default="")
+    sh.add_argument(
+        "--retain-until",
+        help="ISO date after which `memshelf purge` drops this episode (opt-in).",
+    )
     sh.add_argument("--date", help="YYYY-MM-DD (defaults to today).")
     sh.add_argument("--no-commit", action="store_true", help="Skip the auto-commit.")
     sh.set_defaults(func=_cmd_shelve)
@@ -302,6 +341,37 @@ def build_parser() -> argparse.ArgumentParser:
         "out of ledger.tsv and .meta.json into the episodes before regenerating.",
     )
     rb.set_defaults(func=_cmd_rebuild)
+
+    ru = sub.add_parser(
+        "rollup",
+        help="Collapse a period into one digest-of-digests; originals move to archive/.",
+    )
+    ru.add_argument("--shelf", required=True, help="Path to the shelf.")
+    ru.add_argument("--slug", required=True, help="Latin slug/id of the rollup episode.")
+    ru.add_argument(
+        "--digest",
+        required=True,
+        help="Your synthesis of the period — the tool does not write it for you.",
+    )
+    ru.add_argument("--until", help="Archive every episode dated on or before this ISO date.")
+    ru.add_argument(
+        "--episode",
+        action="append",
+        default=[],
+        help="Explicit episode id to archive (repeatable); alternative to --until.",
+    )
+    ru.add_argument("--display-title", help="Free-form INDEX title for the rollup.")
+    ru.add_argument(
+        "--section", action="append", default=[], metavar="NAME=BODY", help="Extra H2 section."
+    )
+    ru.add_argument("--date", help="Rollup date (default: today).")
+    ru.set_defaults(func=_cmd_rollup)
+
+    pu = sub.add_parser("purge", help="Delete episodes whose retain_until has passed.")
+    pu.add_argument("--shelf", required=True, help="Path to the shelf.")
+    pu.add_argument("--apply", action="store_true", help="Actually delete (default: dry run).")
+    pu.add_argument("--today", help="Treat this ISO date as today.")
+    pu.set_defaults(func=_cmd_purge)
 
     im = sub.add_parser("import", help="Prepare an exported transcript for shelving.")
     im.add_argument("method", choices=["discover", "extract"])
