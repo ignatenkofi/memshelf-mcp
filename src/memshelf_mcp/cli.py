@@ -165,9 +165,7 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
 
 
 def _cmd_rebuild(args: argparse.Namespace) -> int:
-    result = run_rebuild(
-        RebuildInput(shelf_path=args.shelf, check=args.check, adopt=args.adopt)
-    )
+    result = run_rebuild(RebuildInput(shelf_path=args.shelf, check=args.check, adopt=args.adopt))
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if args.check and result["drifted"]:
         print(

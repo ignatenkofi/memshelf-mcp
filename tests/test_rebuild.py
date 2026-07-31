@@ -89,7 +89,9 @@ def test_derived_files_survive_deletion(tmp_path):
     _shelve(root, "2026-07-22-auth", title="Первый", notes="n1")
     _shelve(root, "2026-07-23-storage", title="Второй", notes="n2")
     rebuild(root)
-    before = {p: (root / p).read_text(encoding="utf-8") for p in DERIVED_PATHS if (root / p).is_file()}
+    before = {
+        p: (root / p).read_text(encoding="utf-8") for p in DERIVED_PATHS if (root / p).is_file()
+    }
 
     for path in before:
         (root / path).unlink()
@@ -248,4 +250,6 @@ def test_adopt_reports_restated_digest_tokens(tmp_path):
 
 
 def test_render_ledger_has_a_header_even_with_no_episodes(tmp_path):
-    assert render_ledger([]).splitlines() == ["date\tepisode_id\tmode\tapprox_tokens_in\tdigest_tokens\tnotes"]
+    assert render_ledger([]).splitlines() == [
+        "date\tepisode_id\tmode\tapprox_tokens_in\tdigest_tokens\tnotes"
+    ]

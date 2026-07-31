@@ -165,9 +165,7 @@ def collect_episodes(root: Path) -> tuple[list[EpisodeRecord], list[str]]:
 
 def render_ledger(records: list[EpisodeRecord]) -> str:
     rows = [
-        "\t".join(
-            [r.date, r.id, r.mode, str(r.approx_tokens), str(r.digest_tokens), r.notes]
-        )
+        "\t".join([r.date, r.id, r.mode, str(r.approx_tokens), str(r.digest_tokens), r.notes])
         for r in records
     ]
     return LEDGER_HEADER + "".join(row + "\n" for row in rows)
@@ -197,7 +195,9 @@ def derived_paths(root: Path) -> list[str]:
     return [p for p in DERIVED_PATHS if (root / p).exists()]
 
 
-def _apply(root: Path, rel: str, content: str | None, *, check: bool, report: RebuildReport) -> None:
+def _apply(
+    root: Path, rel: str, content: str | None, *, check: bool, report: RebuildReport
+) -> None:
     """Write ``content`` to ``rel`` (or delete it when None), or record drift."""
     path = root / rel
     current = path.read_text(encoding="utf-8") if path.is_file() else None

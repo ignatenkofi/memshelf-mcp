@@ -95,7 +95,9 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 FALLBACK_IDENTITY = ("memshelf", "memshelf@localhost")
 
 
-def git_commit(root: Path, message: str, *, paths: list[str] | None = None) -> tuple[bool, str | None]:
+def git_commit(
+    root: Path, message: str, *, paths: list[str] | None = None
+) -> tuple[bool, str | None]:
     """Commit staged work under ``root``; return ``(committed, sha)``.
 
     ``paths`` narrows what gets staged. ``shelve`` passes the episode alone
