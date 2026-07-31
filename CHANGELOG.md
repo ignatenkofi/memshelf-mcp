@@ -8,6 +8,25 @@ once code ships.
 
 ## [Unreleased]
 
+### Fixed (found by validating against shelf-spec, not by the test suite)
+- **Free-text frontmatter is now written as quoted YAML.** A display title
+  containing `: ` — the shelf has several — parses fine with memshelf's own
+  forgiving `key: value` splitter and is a *syntax error* for a real YAML
+  loader. shelf-spec's validator (which the shelves run in CI) then reports
+  the episode as having **no frontmatter at all**, not as having a bad line:
+  running `--adopt` on the working shelf turned a `valid (0 findings)` shelf
+  into one with several `episode-frontmatter-missing` errors. `display_title`,
+  `description` and `notes` are always double-quoted now, on both the write
+  and the adopt path, and the reader unquotes them.
+- A rollup episode used `mode: rollup`; shelf-spec v0 § 5.2 (and § 4.4 for the
+  ledger column) allows exactly `live | import`. What makes a rollup a rollup
+  is its tag, not a third mode value — otherwise the episode meant to tidy the
+  shelf up would be the one failing its validator.
+- A rollup lists the display titles of the episodes it hid, not just their
+  slugs: the list is read by a human deciding whether to open the archive, and
+  a column of latin slugs answers nothing. (It also stopped the write-only
+  memory guard from flagging the rollup's own digest.)
+
 ### Added (#15 — retention and rollups)
 - **`memshelf rollup`** / `memshelf_rollup`: collapse a period's episodes into
   one digest-of-digests and move the originals into `archive/`, a sub-shelf at

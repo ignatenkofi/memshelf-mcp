@@ -92,7 +92,9 @@ def test_display_title_override_keeps_latin_filename(tmp_path):
     # episode's frontmatter; .meta.json and INDEX are rendered from it.
     episode = tmp_path / "docs" / "research" / "2026-07-22-founding.md"
     assert episode.is_file()
-    assert "display_title: Основание memshelf" in episode.read_text(encoding="utf-8")
+    # Free-text fields are quoted so the block stays valid YAML for a real
+    # loader (shelf-spec's validator), not just for memshelf's own reader.
+    assert 'display_title: "Основание memshelf"' in episode.read_text(encoding="utf-8")
 
     rebuild(tmp_path)
     meta = json.loads((tmp_path / "docs" / "research" / ".meta.json").read_text(encoding="utf-8"))

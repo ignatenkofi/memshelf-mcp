@@ -207,8 +207,8 @@ def test_adopt_moves_derived_only_fields_into_the_episode(tmp_path):
     report = adopt(root)
     assert report["count"] == 1
     text = (root / "docs" / "topics" / "2026-07-22-auth.md").read_text(encoding="utf-8")
-    assert "display_title: Рефактор" in text
-    assert "notes: chat-1" in text
+    assert 'display_title: "Рефактор"' in text
+    assert 'notes: "chat-1"' in text
     assert "date: 2026-07-22" in text
 
     assert rebuild(root, check=True).ok is True

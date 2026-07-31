@@ -46,6 +46,24 @@ def flatten(text: str) -> str:
     return " ".join(text.split())
 
 
+def yaml_scalar(text: str) -> str:
+    """Quote a free-text value so the block stays valid **YAML**.
+
+    The frontmatter is read by two very different parsers: memshelf's own
+    forgiving ``key: value`` splitter, and a real YAML loader — shelf-spec's
+    validator, which is what the shelves run in CI. A display title like
+    ``Охота на X1 Carbon: Грузия`` is fine for the first and a syntax error
+    for the second (YAML reads the inner ``: `` as a nested mapping), and the
+    failure mode is nasty: the validator reports the episode as having *no
+    frontmatter at all*, not as having a bad line.
+
+    Free-text fields are therefore always double-quoted. Always, not
+    conditionally — a rule with exceptions is a rule someone's title will
+    eventually fall through.
+    """
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 @dataclass(frozen=True)
 class Frontmatter:
     """The episode's frontmatter — and, since #58, the single source for every
@@ -84,14 +102,14 @@ class Frontmatter:
         if self.retain_until:
             lines.append(f"retain_until: {self.retain_until}")
         if self.display_title:
-            lines.append(f"display_title: {flatten(self.display_title)}")
+            lines.append(f"display_title: {yaml_scalar(flatten(self.display_title))}")
         if self.description:
-            lines.append(f"description: {flatten(self.description)}")
+            lines.append(f"description: {yaml_scalar(flatten(self.description))}")
         lines.append(f"tags: [{', '.join(self.tags)}]")
         lines.append(f"approx_tokens: {self.approx_tokens}")
         lines.append(f"mode: {self.mode}")
         if self.notes:
-            lines.append(f"notes: {flatten(self.notes)}")
+            lines.append(f"notes: {yaml_scalar(flatten(self.notes))}")
         return "\n".join(lines)
 
 

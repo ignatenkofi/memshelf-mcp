@@ -235,3 +235,20 @@ def test_purge_report_states_the_git_history_caveat(tmp_path):
     note = purge(root, today="2026-07-31").as_dict()["note"]
     assert "git history" in note
     assert "filter-repo" in note
+
+
+def test_rollup_mode_stays_within_the_spec(tmp_path):
+    """shelf-spec v0 allows exactly live|import — a third value would fail the
+    shelves' own validator on the episode meant to tidy them up."""
+    root = _shelf_with_three(tmp_path)
+    _do_rollup(root, until="2026-06-30")
+
+    text = (root / "docs" / "topics" / "2026-Q1-rollup.md").read_text(encoding="utf-8")
+    assert "mode: live" in text
+    assert "tags: [rollup]" in text
+    ledger_row = [
+        line
+        for line in (root / "ledger.tsv").read_text(encoding="utf-8").splitlines()
+        if "2026-Q1-rollup" in line
+    ][0]
+    assert ledger_row.split("\t")[2] == "live"

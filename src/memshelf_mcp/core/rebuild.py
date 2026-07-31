@@ -33,7 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from memshelf_mcp.core.episode import CATEGORY_BY_KIND
+from memshelf_mcp.core.episode import CATEGORY_BY_KIND, flatten, yaml_scalar
 from memshelf_mcp.core.frontmatter import parse_frontmatter
 from memshelf_mcp.core.shelve import LEDGER_HEADER
 
@@ -355,12 +355,15 @@ def adopt(shelf_root: str | Path) -> dict:
             additions: dict[str, str] = {}
             if "date" not in fields and row.get("date"):
                 additions["date"] = row["date"]
+            # Free text goes in quoted, exactly as `shelve` writes it: a title
+            # with a colon is valid for memshelf's reader and a syntax error
+            # for a real YAML loader, and adoption must not plant that.
             if "notes" not in fields and row.get("notes"):
-                additions["notes"] = row["notes"]
+                additions["notes"] = yaml_scalar(flatten(row["notes"]))
             if "display_title" not in fields and entry.get("title"):
-                additions["display_title"] = " ".join(str(entry["title"]).split())
+                additions["display_title"] = yaml_scalar(flatten(str(entry["title"])))
             if "description" not in fields and entry.get("description"):
-                additions["description"] = " ".join(str(entry["description"]).split())
+                additions["description"] = yaml_scalar(flatten(str(entry["description"])))
             updated = _insert_frontmatter_fields(text, additions)
             if updated is None:
                 continue

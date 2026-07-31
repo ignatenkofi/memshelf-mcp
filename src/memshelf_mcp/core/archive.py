@@ -219,13 +219,21 @@ def rollup(
     report = RollupReport(slug=slug, address="", index_tokens_before=_index_tokens(root))
     _ensure_archive_shelf(root)
 
-    rolled = [parse_frontmatter(p.read_text("utf-8"))[0].get("id", p.stem) for p in selected]
+    rolled: list[tuple[str, str]] = []
+    for path in selected:
+        fields, _ = parse_frontmatter(path.read_text("utf-8"))
+        rolled.append((fields.get("id", path.stem), fields.get("display_title", "")))
     for path in selected:
         report.archived.append(_move_to_archive(root, path))
 
     # The rollup names what it replaced: an INDEX line that hides 40 episodes
     # has to say which 40, or the archive becomes unreachable in practice.
-    covered = "\n".join(f"- `{episode_id}`" for episode_id in sorted(rolled))
+    # Titles, not just slugs — the list is read by a human deciding whether to
+    # go into the archive at all, and a column of latin slugs answers nothing.
+    covered = "\n".join(
+        f"- `{episode_id}`" + (f" — {title}" if title else "")
+        for episode_id, title in sorted(rolled)
+    )
     body = dict(sections or {})
     body["Archived"] = (
         f"Свёрнуто эпизодов: {len(rolled)}. Полные тексты — в под-полке "
@@ -241,7 +249,12 @@ def rollup(
         span=f"..{until}" if until else stamp,
         tags=("rollup",),
         approx_tokens=0,
-        mode="rollup",
+        # shelf-spec v0 § 5.2 (and § 4.4 for the ledger column) allows exactly
+        # `live` and `import`. A rollup is written live, so it is `live`; what
+        # makes it a rollup is the tag, not a third mode value. Inventing one
+        # would fail the shelves' own advisory validator on the very episode
+        # that is supposed to tidy them up.
+        mode="live",
         date=stamp,
         display_title=display_title,
         description=f"Роллап: {len(rolled)} эпизодов свёрнуты в архив.",

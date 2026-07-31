@@ -12,6 +12,27 @@ needs (``id``, ``kind``). No YAML dependency: the episode frontmatter is a flat
 
 from __future__ import annotations
 
+import json
+
+
+def _unquote(value: str) -> str:
+    """Decode a double-quoted YAML scalar; leave every other value as-is.
+
+    Free-text fields (``display_title``, ``description``, ``notes``) are
+    written quoted so the block stays valid YAML for a real loader — a title
+    containing ``: `` would otherwise make shelf-spec's validator report the
+    episode as having no frontmatter at all. This reader has to undo exactly
+    that, or the quotes would leak into ledger rows and INDEX titles.
+    """
+    if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
+        try:
+            decoded = json.loads(value)
+        except ValueError:
+            return value[1:-1]
+        if isinstance(decoded, str):
+            return decoded
+    return value
+
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     """Return ``(fields, body)``. A missing/empty block yields ``({}, text)``."""
@@ -31,7 +52,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     while j < len(lines) and lines[j].strip() != "---":
         if ":" in lines[j]:
             key, _, val = lines[j].partition(":")
-            fields[key.strip()] = val.strip()
+            fields[key.strip()] = _unquote(val.strip())
         j += 1
     body = "\n".join(lines[j + 1 :]) if j < len(lines) else ""
     return fields, body
