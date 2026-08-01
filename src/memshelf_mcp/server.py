@@ -4,9 +4,9 @@ A thin wrapper: each tool validates its input (pydantic), calls the typed entry
 point in ``tools.py``, and serializes the result. Tools: ``memshelf_init``
 (bootstrap), ``memshelf_shelve`` (write), ``memshelf_recall`` /
 ``memshelf_index`` / ``memshelf_search`` (read), ``memshelf_stats``
-(accounting), ``memshelf_resolve`` (multi-writer conflicts), and
-``memshelf_doctor`` (integrity). See ``docs/ARCHITECTURE.md`` → MCP tool
-surface.
+(accounting), ``memshelf_advise`` (context advisor), ``memshelf_resolve``
+(multi-writer conflicts), and ``memshelf_doctor`` (integrity). See
+``docs/ARCHITECTURE.md`` → MCP tool surface.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from mcp.server.fastmcp import FastMCP
 
 from memshelf_mcp import __version__
 from memshelf_mcp.tools import (
+    AdviseInput,
     DoctorInput,
     ImportInput,
     IndexInput,
@@ -32,6 +33,7 @@ from memshelf_mcp.tools import (
     SearchInput,
     ShelveInput,
     StatsInput,
+    run_advise,
     run_doctor,
     run_import,
     run_index,
@@ -147,6 +149,33 @@ def memshelf_stats(params: StatsInput) -> str:
         return _serialize(run_stats(params))
     except Exception as exc:
         return _error_response(exc, "memshelf_stats")
+
+
+@mcp.tool(
+    name="memshelf_advise",
+    annotations={"title": "Where did my context window go?", **_READ_ONLY},
+)
+def memshelf_advise(params: AdviseInput) -> str:
+    """Report what your context is made of and what you could put down (#14).
+
+    Tell it what is in your window — a label, a rough token size, and whether
+    the topic is still in play — and it returns a breakdown (static overhead /
+    memshelf's own cost / live topics / reclaimable) plus ranked **proposals**.
+    It writes nothing and shelves nothing; you decide.
+
+    Two things it does that a self-assessment cannot. It measures what memshelf
+    itself costs you every session (INDEX + digests), instead of leaving its own
+    overhead out of the picture. And it verifies any `episode_id` you claim is
+    already shelved: if the episode is not on the shelf, it says so rather than
+    proposing you drop content nobody stored.
+
+    Call it with no occupants for the first-run view of the shelf alone — the
+    report will say the window side is missing rather than report it clean.
+    """
+    try:
+        return _serialize(run_advise(params))
+    except Exception as exc:
+        return _error_response(exc, "memshelf_advise")
 
 
 @mcp.tool(

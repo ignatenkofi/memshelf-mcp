@@ -12,6 +12,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from memshelf_mcp.core.advisor import (
+    DEFAULT_BUDGET_TOKENS,
+    STALE_AFTER_TURNS,
+    Occupant,
+    advise,
+)
 from memshelf_mcp.core.archive import purge as purge_shelf
 from memshelf_mcp.core.archive import rollup as rollup_shelf
 from memshelf_mcp.core.doctor import check_shelf
@@ -327,6 +333,72 @@ def run_purge(params: PurgeInput) -> dict:
     Dry-run by default. Deletes the working-tree file only — git history still
     contains it, and real erasure is a deliberate filter-repo pass."""
     return purge_shelf(params.shelf_path, today=params.today, apply=params.apply).as_dict()
+
+
+class OccupantInput(BaseModel):
+    """One thing the caller reports as sitting in its context window."""
+
+    label: str = Field(description="What this is, in your own words — it is echoed in proposals.")
+    approx_tokens: int = Field(description="Rough size in tokens; an eyeball estimate is fine.")
+    state: Literal["live", "closed", "unknown"] = Field(
+        default="unknown",
+        description="Is the topic still in play? Only you can tell. Unstated counts as live.",
+    )
+    kind: Literal["topic", "research", "tool-output", "instructions", "other"] = "topic"
+    idle_turns: int | None = Field(
+        default=None, description="Turns since this was last referenced, if you can tell."
+    )
+    episode_id: str | None = Field(
+        default=None,
+        description="Set if you believe this is ALREADY shelved. The claim is verified "
+        "against the shelf before anything is proposed.",
+    )
+
+
+class AdviseInput(BaseModel):
+    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+    occupants: list[OccupantInput] = Field(
+        default_factory=list,
+        description="What is in your context right now. Empty is valid — you then get the "
+        "shelf side only, and the report says the window side is missing.",
+    )
+    budget_tokens: int = Field(
+        default=DEFAULT_BUDGET_TOKENS,
+        description="Your context window. Default is a common size, not a memshelf constant.",
+    )
+    stale_after_turns: int = Field(
+        default=STALE_AFTER_TURNS,
+        description="Turns of silence after which an occupant of unstated state is called stale.",
+    )
+    include_memory_overhead: bool = Field(
+        default=True,
+        description="Count memshelf's own standing cost (INDEX + digests) as an occupant.",
+    )
+
+
+def run_advise(params: AdviseInput) -> dict:
+    """Report where the window went and what could be put down (#14).
+
+    Proposals only — this call writes nothing and changes nothing.
+    """
+    advice = advise(
+        params.shelf_path,
+        occupants=[
+            Occupant(
+                label=o.label,
+                approx_tokens=o.approx_tokens,
+                state=o.state,
+                kind=o.kind,
+                idle_turns=o.idle_turns,
+                episode_id=o.episode_id,
+            )
+            for o in params.occupants
+        ],
+        budget_tokens=params.budget_tokens,
+        stale_after_turns=params.stale_after_turns,
+        include_memory_overhead=params.include_memory_overhead,
+    )
+    return {"status": "ok", **advice.as_dict()}
 
 
 class ImportInput(BaseModel):

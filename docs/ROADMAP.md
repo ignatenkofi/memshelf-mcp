@@ -57,12 +57,20 @@ shelve→compact→recall cycle survives without manual repair; `doctor` clean.
 
 ## M2 — Policy, hygiene & the context advisor
 
-- Token-budget monitor that *proposes* shelving (never forces).
-- **Context advisor** (the "where did my window go?" feature, MANIFEST hero
-  scenario 2): report static overhead vs live topics vs stale dumps, flag
-  closed-but-unshelved episodes with their token cost, recommend shelve
-  actions. Doubles as the onboarding/first-run experience; heuristics-first,
-  host-agnostic (see ARCHITECTURE open question 7).
+- ~~Token-budget monitor that *proposes* shelving (never forces).~~ —
+  **done** (#14): the advisor takes the budget and reports headroom; the
+  proposal, not the action, is the output.
+- ~~**Context advisor**~~ (the "where did my window go?" feature, MANIFEST
+  hero scenario 2) — **done** (#14): `memshelf advise` / `memshelf_advise`
+  reports static overhead vs memshelf's own cost vs live topics vs
+  reclaimable, and ranks shelve/drop/rollup proposals net of what each one
+  costs. Host-agnostic as decided in ARCHITECTURE open question 7: the window
+  breakdown is a caller input, and the tool contributes what a self-assessment
+  cannot — measured overhead, verification of "already shelved" claims against
+  the episodes, and a deterministic ranking. Called with no occupants it is
+  the first-run view of the shelf, and says so rather than reporting a clean
+  window. The exit criterion below (proposals accepted, not overridden) stays
+  open — it is a dogfood measurement, not a code deliverable.
 - ~~Retention: `retain_until`, purge tool, reindex after purge.~~ — **done**
   (#15): opt-in `retain_until`, `memshelf purge` dry-run by default, sweeps
   `docs/` and `archive/`, states the git-history caveat instead of implying

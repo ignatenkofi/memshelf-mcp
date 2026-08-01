@@ -75,6 +75,7 @@ memshelf shelve --shelf ~/my-shelf --slug 2026-07-23-topic --kind topic \
 memshelf recall  --shelf ~/my-shelf --id 2026-07-23-topic --section Decisions --log
 memshelf rebuild --shelf ~/my-shelf  # render the derived files from the episodes
 memshelf stats   --shelf ~/my-shelf  # claimed + realized savings
+memshelf advise  --shelf ~/my-shelf  # where the window went; proposals only
 memshelf doctor  --shelf ~/my-shelf  # exit 1 on integrity errors
 ```
 
@@ -96,6 +97,42 @@ split adopts it once:
 memshelf rebuild --shelf ~/my-shelf --adopt   # move date/notes/title into the episodes
 memshelf rebuild --shelf ~/my-shelf --check   # the guard: exit 1 if anything drifted
 ```
+
+### Where did my window go?
+
+`memshelf advise` answers the question the project was founded on — *a dead
+topic has been occupying 30K tokens for forty minutes* — and answers it with
+**proposals**. It writes nothing.
+
+The tool cannot see your window, so you tell it what is in there; it does the
+part you cannot do about yourself:
+
+```bash
+memshelf advise --shelf ~/my-shelf \
+  --occupant 'CLAUDE.md stack=18000,kind=instructions' \
+  --occupant 'auth refactor=42000,closed' \
+  --occupant 'current work=51000,live' \
+  --occupant 'search dump=9000,idle=18' \
+  --occupant 'Case B verdict=12000,live,episode=2026-07-22-case-b-verdict'
+```
+
+You get a breakdown — static overhead / **memshelf's own cost** / live /
+reclaimable — and ranked proposals: `shelve` the closed topic and the idle
+dump, `drop` the one that is already on the shelf (recall it if you need it),
+`rollup` when INDEX itself is what got fat. Run it with no occupants at all
+for the first-run view of the shelf; it will say the window side is missing
+rather than report it clean.
+
+Three things keep it honest:
+
+- **It counts itself.** INDEX + digests are what memshelf takes out of every
+  session, and that number is in the report, not left out of it.
+- **It verifies "already shelved".** Claim an `episode=` that isn't on the
+  shelf and it refuses the drop out loud — that is the one mistake here that
+  destroys work.
+- **It reports net.** Shelving adds a digest and an INDEX line to every later
+  session, so proposals subtract that, and a topic too small to pay for its
+  own digest is not proposed at all.
 
 ### Keeping INDEX readable as the shelf grows
 

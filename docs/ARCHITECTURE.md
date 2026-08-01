@@ -224,6 +224,7 @@ prompt) injects the current `INDEX.md` — the entire standing memory cost.
 | `memshelf_rollup` | episodes → `archive/` + one rollup episode | Collapse a period into a digest-of-digests (#15). INDEX shrinks; recall/search/ledger/stats keep the archive. The digest is the caller's — synthesis needs the model. |
 | `memshelf_purge` | `retain_until` → delete + reindex | Retention (#15), dry-run by default. Removes the working-tree file only; real erasure is a filter-repo pass. |
 | `memshelf_rebuild` | episodes → derived files | Render `ledger.tsv`, `INDEX.md`, `stats.svg` and each `.meta.json` from `docs/` (#58). `check=true` verifies instead of writing — the shelf's PR guard. |
+| `memshelf_advise` | caller-reported occupants + shelf | The context advisor (#14): breakdown of the window (static / memshelf's own cost / live / reclaimable) and ranked shelve/drop/rollup **proposals**. Writes nothing. Verifies any "already shelved" claim against the episodes before proposing a drop. |
 | `memshelf_import` (M1 candidate, pending M0) | segmentation + N× shelve | Retro-shelve an exported transcript: agent proposes episode cuts, then capture→digest→shelve per episode + one session digest. The raw transcript is input only — never stored. |
 
 Design rule: every memshelf tool is a thin layer over `docshelf_mcp.Shelf`;
@@ -403,10 +404,18 @@ Rules that keep the boundary honest:
 6. **Chat-project UX**: how far can the manual surface go without hooks —
    is a project-prompt-driven shelve loop reliable enough to document as
    supported?
-7. **Context advisor scope** (ROADMAP M2): heuristics only (episode age /
-   size / idleness from shelf + session metadata), or deeper harness
-   integration (parsing `/context`-style breakdowns)? How much can be done
-   host-agnostically?
+7. ~~**Context advisor scope**~~ Resolved 2026-08-01 (#14): **heuristics
+   only, and the window breakdown is an input, not something the tool goes
+   looking for.** A library cannot see the window it is asked about, and
+   parsing a host's `/context` output would work on one host and rot with its
+   next release — so the advisor uses the split `shelve` and `rollup` already
+   use: the model reports what only the model knows (which topics are in play,
+   which are closed, roughly how big), the tool contributes what a
+   self-assessment cannot — its own measured overhead, verification of
+   "already shelved" claims against the actual episodes, net-of-standing-cost
+   arithmetic, and a deterministic ranking. Deeper harness integration stays
+   available as a *host adapter* that fills the same input, which is where a
+   host-specific parser belongs (portability rule 2).
 8. **Artifact mirror** (ROADMAP M3): publish INDEX (and episodes?) as
    private claude.ai artifacts for phone-side reading — worth the adapter,
    or does MCP-everywhere make it moot?

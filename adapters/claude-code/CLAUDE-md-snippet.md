@@ -21,6 +21,13 @@ Long-term working memory for this project lives on a shelf at
 - **Offer to shelve.** When a topic closes, or a dormant topic is visibly
   heavy (tens of KB doing nothing for a long stretch), offer `/shelve`.
   Before any compaction, shelve closed topics first.
+- **When the window feels heavy, ask instead of guessing.** `memshelf_advise`
+  (CLI: `memshelf advise`) takes your own account of what is in context —
+  label, rough size, whether the topic is still in play — and returns a
+  breakdown plus ranked proposals. It writes nothing, so running it is free of
+  consequence. Two things it checks that you cannot check about yourself: what
+  the shelf itself is costing you this session, and whether a topic you
+  believe is already shelved actually is.
 - **Shelf git rules:** commit after every shelve; never write outside the
   shelf directory. Pushing depends on the environment — in an ephemeral cloud
   session (web/remote Claude Code, a container that dies at session end) push

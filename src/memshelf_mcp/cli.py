@@ -1,8 +1,8 @@
 """``memshelf`` CLI — the portability surface for hosts without MCP.
 
 Anything that can run a shell command can drive the shelf: ``init``,
-``shelve``, ``recall``, ``index``, ``search``, ``stats``, ``rebuild``,
-``rollup``, ``purge``, ``resolve``, ``doctor``.
+``shelve``, ``recall``, ``index``, ``search``, ``stats``, ``advise``,
+``rebuild``, ``rollup``, ``purge``, ``resolve``, ``doctor``.
 """
 
 from __future__ import annotations
@@ -10,8 +10,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
+
+from pydantic import ValidationError
 
 from memshelf_mcp import __version__
+from memshelf_mcp.core.advisor import DEFAULT_BUDGET_TOKENS, STALE_AFTER_TURNS
 from memshelf_mcp.core.archive import ArchiveError
 from memshelf_mcp.core.episode import EpisodeError
 from memshelf_mcp.core.importer import TranscriptError
@@ -19,10 +23,12 @@ from memshelf_mcp.core.init import InitError
 from memshelf_mcp.core.recall import EpisodeNotFound
 from memshelf_mcp.core.shelve import DigestContractError
 from memshelf_mcp.tools import (
+    AdviseInput,
     DoctorInput,
     ImportInput,
     IndexInput,
     InitInput,
+    OccupantInput,
     PurgeInput,
     RebuildInput,
     RecallInput,
@@ -31,6 +37,7 @@ from memshelf_mcp.tools import (
     SearchInput,
     ShelveInput,
     StatsInput,
+    run_advise,
     run_doctor,
     run_import,
     run_index,
@@ -137,6 +144,78 @@ def _cmd_stats(args: argparse.Namespace) -> int:
     result = run_stats(StatsInput(shelf_path=args.shelf))
     if args.banner:
         print(result["banner"])
+        return 0
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _parse_occupant(item: str) -> OccupantInput:
+    """Parse ``LABEL=TOKENS[,closed][,idle=N][,kind=K][,episode=ID]``.
+
+    One repeatable flag rather than five parallel ones: the whole occupant has
+    to survive as a single quoted shell argument, since a caller assembles
+    these by hand while its context is already full.
+    """
+    label, sep, rest = item.partition("=")
+    if not sep or not rest.strip():
+        raise SystemExit(f"--occupant must be LABEL=TOKENS[,attr...], got {item!r}")
+    parts = [p.strip() for p in rest.split(",")]
+    try:
+        fields: dict = {"label": label.strip(), "approx_tokens": int(parts[0])}
+    except ValueError:
+        raise SystemExit(f"--occupant {item!r}: {parts[0]!r} is not a token count") from None
+    for attr in parts[1:]:
+        if not attr:
+            continue
+        key, eq, value = attr.partition("=")
+        if not eq:
+            fields["state"] = key  # bare word: live | closed | unknown
+        elif key == "idle":
+            try:
+                fields["idle_turns"] = int(value)
+            except ValueError:
+                raise SystemExit(f"--occupant {item!r}: idle={value!r} is not a number") from None
+        elif key == "kind":
+            fields["kind"] = value
+        elif key == "episode":
+            fields["episode_id"] = value
+        else:
+            raise SystemExit(f"--occupant {item!r}: unknown attribute {key!r}")
+    try:
+        return OccupantInput(**fields)
+    except ValidationError as exc:
+        raise SystemExit(f"--occupant {item!r}: {exc.errors()[0]['msg']}") from None
+
+
+def _load_occupants_json(path: str) -> list[OccupantInput]:
+    raw = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"--occupants-json: {exc}") from None
+    if not isinstance(data, list):
+        raise SystemExit("--occupants-json must hold a JSON list of occupant objects")
+    try:
+        return [OccupantInput(**item) for item in data]
+    except (ValidationError, TypeError) as exc:
+        raise SystemExit(f"--occupants-json: {exc}") from None
+
+
+def _cmd_advise(args: argparse.Namespace) -> int:
+    occupants = [_parse_occupant(item) for item in args.occupant]
+    if args.occupants_json:
+        occupants += _load_occupants_json(args.occupants_json)
+    result = run_advise(
+        AdviseInput(
+            shelf_path=args.shelf,
+            occupants=occupants,
+            budget_tokens=args.budget,
+            stale_after_turns=args.stale_after,
+            include_memory_overhead=not args.exclude_self,
+        )
+    )
+    if args.summary:
+        print(result["summary"])
         return 0
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
@@ -294,6 +373,45 @@ def build_parser() -> argparse.ArgumentParser:
         "--chart", action="store_true", help="(Re)draw stats.svg at the shelf root and exit."
     )
     st.set_defaults(func=_cmd_stats)
+
+    ad = sub.add_parser(
+        "advise",
+        help="Where the context window went, and what could be put down (proposals only).",
+    )
+    ad.add_argument("--shelf", required=True, help="Path to the shelf.")
+    ad.add_argument(
+        "--occupant",
+        action="append",
+        default=[],
+        metavar="SPEC",
+        help="LABEL=TOKENS[,live|closed][,idle=N][,kind=K][,episode=ID]; repeatable. "
+        "Example: --occupant 'auth refactor=30000,closed'. Without occupants you get "
+        "the shelf side only.",
+    )
+    ad.add_argument(
+        "--occupants-json",
+        metavar="PATH",
+        help="JSON list of occupant objects ('-' reads stdin); the full form of --occupant.",
+    )
+    ad.add_argument(
+        "--budget",
+        type=int,
+        default=DEFAULT_BUDGET_TOKENS,
+        help=f"Your context window in tokens (default {DEFAULT_BUDGET_TOKENS}).",
+    )
+    ad.add_argument(
+        "--stale-after",
+        type=int,
+        default=STALE_AFTER_TURNS,
+        help="Turns of silence after which an occupant of unstated state counts as stale.",
+    )
+    ad.add_argument(
+        "--exclude-self",
+        action="store_true",
+        help="Don't count memshelf's own standing cost (INDEX + digests) as an occupant.",
+    )
+    ad.add_argument("--summary", action="store_true", help="Print the one-line summary only.")
+    ad.set_defaults(func=_cmd_advise)
 
     it = sub.add_parser("init", help="Bootstrap a memory shelf (idempotent).")
     it.add_argument("--shelf", required=True, help="Directory for the shelf.")

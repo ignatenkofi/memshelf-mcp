@@ -8,6 +8,47 @@ once code ships.
 
 ## [Unreleased]
 
+### Added (#14 — the context advisor)
+- **`memshelf advise` / `memshelf_advise`** — "where did my window go?"
+  (MANIFEST hero scenario 2). Reports the breakdown — static overhead,
+  memshelf's own standing cost, live topics, reclaimable — and ranks
+  `shelve` / `drop` / `rollup` **proposals**. It writes nothing.
+- The window breakdown is a caller **input** (ARCHITECTURE open question 7,
+  now closed): a library cannot see the window it is asked about, and a
+  parser for one host's `/context` output would rot with that host's next
+  release. Same split as `shelve` and `rollup` — the model supplies the
+  judgement, the tool supplies what a self-assessment cannot:
+  - its own overhead, measured (INDEX + digests), instead of leaving itself
+    out of the picture;
+  - **verification of every "already shelved" claim** against the actual
+    episodes — a claimed `episode_id` that isn't on the shelf is refused
+    loudly and becomes a shelve candidate, because acting on it would drop
+    content nobody stored;
+  - arithmetic net of what shelving costs forever (~200 tokens of digest and
+    INDEX line per episode), and no proposal at all below 2000 tokens, where
+    the trade stops being worth making;
+  - a deterministic ranking — the M2 exit criterion ("proposals accepted,
+    not overridden") is unmeasurable against a heuristic that reshuffles.
+- When `INDEX.md` is itself over `doctor`'s budget, the advisor answers its
+  own `index-bloat` warning with a concrete `memshelf rollup --until <date>`,
+  computed by walking the oldest episodes and adding up **what each one's
+  INDEX line actually costs** — entries differ by more than a factor of two,
+  and an average both picks the wrong set and misreports the gain. Doctor and
+  the advisor read the same budget constant, so they cannot disagree about
+  the threshold.
+- That rollup proposal refuses to be silently destructive on a shelf written
+  before #58: if display titles still live only in `.meta.json`, a rollup
+  would regenerate the derived files and strip the title off every remaining
+  entry, so the report says to run `memshelf rebuild --adopt` first. Found by
+  executing the advisor's own proposal on a copy of the working shelf — the
+  INDEX shrank far more than predicted, and for the wrong reason.
+- Called with **no** occupants it is the first-run view of the shelf and says
+  the window side is missing — silence about the window is not a clean window.
+- Standing cost is read from the episodes, not `ledger.tsv`: since #58 the
+  ledger is bot-rendered, so on a branch it can lag or be missing, and an
+  advisor reporting zero overhead there would be flattering rather than
+  merely silent.
+
 ### Fixed (found by validating against shelf-spec, not by the test suite)
 - **Free-text frontmatter is now written as quoted YAML.** A display title
   containing `: ` — the shelf has several — parses fine with memshelf's own
