@@ -349,3 +349,99 @@ def test_tool_shelved_episode_without_span_passes_doctor(tmp_path):
     )
     report = check_shelf(root)
     assert report.ok, [f.code for f in report.findings]
+
+
+# --- the register itself: uniqueness + column format (#63, #65, #66) --------
+
+
+def _seed_one(root, slug="2026-07-22-ok"):
+    shelve(
+        root,
+        slug=slug,
+        kind="topic",
+        digest="The plan chose X; the Y alternative was rejected. Open: nothing.",
+        sections={"Decisions": "X"},
+        date=slug[:10],
+    )
+    rebuild(root)  # the ledger is derived now (#58)
+
+
+def test_duplicate_episode_id_in_ledger_is_an_error(tmp_path):
+    """The 30-duplicate corruption of 2026-08-01 passed doctor with 0 errors.
+
+    That green signal is what let it reach main: the shelf rule is "doctor
+    clean ⇒ safe to push".
+    """
+    root = _init(tmp_path)
+    _seed_one(root)
+    ledger = tmp_path / "ledger.tsv"
+    rows = ledger.read_text(encoding="utf-8").splitlines(keepends=True)
+    ledger.write_text("".join(rows + [rows[-1]]), encoding="utf-8")
+
+    report = check_shelf(root)
+
+    assert not report.ok
+    assert "ledger-malformed" in _codes(report)
+    detail = next(f.detail for f in report.findings if f.code == "ledger-malformed")
+    assert "already recorded on line" in detail
+
+
+def test_span_interval_in_the_date_column_is_an_error(tmp_path):
+    """What `shelf-spec validate` rejected while doctor stayed green (#65/#66).
+
+    doctor's coverage has to be a superset of the spec validator's, or the
+    shelf's own gate is weaker than the advisory CI it is supposed to precede.
+    """
+    root = _init(tmp_path)
+    _seed_one(root)
+    ledger = tmp_path / "ledger.tsv"
+    ledger.write_text(
+        ledger.read_text(encoding="utf-8").replace("2026-07-22\t", "2026-07-21..2026-07-22\t", 1),
+        encoding="utf-8",
+    )
+
+    report = check_shelf(root)
+
+    assert not report.ok
+    assert "ledger-malformed" in _codes(report)
+
+
+@pytest.mark.parametrize(
+    "bad_row",
+    [
+        "2026-07-23\t2026-07-23-x\tlive\t100\n",  # too few columns
+        "2026-07-23\t2026-07-23-x\thearsay\t100\t20\t\n",  # mode outside the spec
+        "2026-07-23\t2026-07-23-x\tlive\tmany\t20\t\n",  # non-numeric token count
+    ],
+)
+def test_malformed_ledger_rows_are_errors(tmp_path, bad_row):
+    root = _init(tmp_path)
+    _seed_one(root)
+    with (tmp_path / "ledger.tsv").open("a", encoding="utf-8") as fh:
+        fh.write(bad_row)
+
+    report = check_shelf(root)
+
+    assert "ledger-malformed" in _codes(report)
+    assert not report.ok
+
+
+def test_bad_ledger_header_is_an_error(tmp_path):
+    root = _init(tmp_path)
+    _seed_one(root)
+    (tmp_path / "ledger.tsv").write_text("date,episode_id\n", encoding="utf-8")
+
+    report = check_shelf(root)
+
+    assert "ledger-malformed" in _codes(report)
+
+
+def test_regenerated_ledger_passes_the_register_checks(tmp_path):
+    root = _init(tmp_path)
+    _seed_one(root, "2026-07-22-one")
+    _seed_one(root, "2026-07-23-two")
+
+    report = check_shelf(root)
+
+    assert "ledger-malformed" not in _codes(report)
+    assert report.ok, [f.code for f in report.findings]

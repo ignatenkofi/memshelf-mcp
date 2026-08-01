@@ -271,7 +271,12 @@ never fail an otherwise-good shelve.
 **Deliberate divergence — `memshelf_doctor` finding names.** The spec names
 four findings that overlap this tool's checks (`no-ledger`,
 `ledger-malformed`, `episode-frontmatter-missing`,
-`episode-frontmatter-invalid`). `doctor` keeps its own, more granular
+`episode-frontmatter-invalid`). One of them, `ledger-malformed`, `doctor` now
+emits under the spec's own name: it validates the register's columns against
+§ 4.4 (plus `episode_id` uniqueness, which is memshelf's own invariant and has
+no spec counterpart), and a check that exists to keep the two tools' verdicts
+aligned should not force a mapping table to prove it (#63, #65, #66). For the
+rest `doctor` keeps its own, more granular
 vocabulary instead (`no-ledger-row` and `orphan-ledger-row` for the two
 distinct ledger/episode mismatches; `no-frontmatter`,
 `frontmatter-missing-field`, `bad-approx-tokens`, `bad-kind`, `id-mismatch`,
