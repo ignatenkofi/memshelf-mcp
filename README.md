@@ -86,7 +86,10 @@ memshelf doctor  --shelf ~/my-shelf  # exit 1 on integrity errors
 `memshelf rebuild` renders the four from `docs/`. That is what makes two
 sessions shelving in parallel a non-event — they no longer touch the same four
 files in the same places, so the merge is clean by construction. Delete all
-four and `rebuild` restores them byte-identically.
+four and `rebuild` restores them byte-identically. "Writes the episode alone"
+is literal: `shelve` restores the category's `.meta.json` sidecar to the state
+it found it in, so a clean tree after a shelve holds exactly one new file
+(#69).
 
 On a shared shelf, let a bot own them on `main` and guard PRs against touching
 derived paths — ready-to-copy workflows are in
@@ -171,9 +174,15 @@ side effect of a tool call, and the purge report says so.
 written on both sides, or a shelf that has not adopted the bot yet:
 
 ```bash
-memshelf resolve --shelf ~/my-shelf            # union appends, rebuild derived, doctor
+memshelf resolve --shelf ~/my-shelf            # regenerate derived, union the recall log, doctor
 memshelf resolve --shelf ~/my-shelf --commit   # same + complete the merge commit
 ```
+
+A conflict in a derived path is resolved by **regenerating** it, never by
+merging the two sides: a derived file has no history, only a current correct
+value, so a union of two versions is not the sum of two truths (#64). The one
+file `resolve` still merges is `recall-log.tsv` — nothing regenerates a recall
+log, because a recall is an event, not a fact about the episodes.
 
 Conflicting *episodes* are content, not mechanics — `resolve` reports
 them and steps aside.

@@ -246,6 +246,19 @@ that a shelf's bot owns on `main` while PRs carry episodes. An append-only
 ledger written by every shelve was the multi-writer conflict class: two
 sessions, two topics, one unmergeable line.
 
+That reclassification changes how a conflict in those files is resolved.
+Before #58 they were append-only, so a union lost nothing. After it they are a
+pure function of `docs/` ⊕ `archive/docs/`, and merging two versions of a
+derived file produces neither side's truth: a rollup deletes `.meta` entries
+whose episodes moved into `archive/`, and a rebuild restates `digest_tokens`,
+so a union revives the deleted entries and doubles the restated rows (#64,
+seen live on 2026-08-01). **The only correct resolution for a derived path is
+regeneration** — `rebuild` plus `rebuild_archive_index`, since the archive
+sub-shelf keeps an INDEX that `rebuild` does not touch. `memshelf resolve`
+does exactly that; the one file it still merges is `recall-log.tsv`, which
+nothing regenerates because a recall is an event, not a fact about the
+episodes.
+
 The normative on-disk contract for this file is shelf-spec v0 (openshelf,
 ADR-0005) § 4.4, not this document — the columns above are memshelf's
 `profile: memory` instantiation of it. One spec constraint is load-bearing
@@ -258,7 +271,12 @@ never fail an otherwise-good shelve.
 **Deliberate divergence — `memshelf_doctor` finding names.** The spec names
 four findings that overlap this tool's checks (`no-ledger`,
 `ledger-malformed`, `episode-frontmatter-missing`,
-`episode-frontmatter-invalid`). `doctor` keeps its own, more granular
+`episode-frontmatter-invalid`). One of them, `ledger-malformed`, `doctor` now
+emits under the spec's own name: it validates the register's columns against
+§ 4.4 (plus `episode_id` uniqueness, which is memshelf's own invariant and has
+no spec counterpart), and a check that exists to keep the two tools' verdicts
+aligned should not force a mapping table to prove it (#63, #65, #66). For the
+rest `doctor` keeps its own, more granular
 vocabulary instead (`no-ledger-row` and `orphan-ledger-row` for the two
 distinct ledger/episode mismatches; `no-frontmatter`,
 `frontmatter-missing-field`, `bad-approx-tokens`, `bad-kind`, `id-mismatch`,

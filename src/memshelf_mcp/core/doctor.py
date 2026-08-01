@@ -52,6 +52,20 @@ _STOPWORDS = frozenset(
 
 _WORD_RE = re.compile(r"\w{4,}", re.UNICODE)
 
+# Overlap is measured on a stem prefix, not on whole tokens. Russian inflects
+# by suffix, and exact matching therefore reads «партии» / «партия» and
+# «студентом» / «студента» as unrelated words — on a Russian shelf the metric
+# undercounts grounding systematically, which is not a property of the digest
+# but of the language it is written in. Measured on the live shelf: an episode
+# whose digest and body plainly share their subject scored 11%, and 11 of its
+# digest words had same-root counterparts in the body that exact matching threw
+# away. Five characters is enough to keep the root and drop the ending; it also
+# merges English word families («refactor» / «refactoring»). The cost is
+# occasional over-matching («конфиг» / «конфликт»), which is acceptable in a
+# check whose whole question is "does this digest share *almost nothing* with
+# its episode".
+_STEM_LEN = 5
+
 
 @dataclass
 class Finding:
@@ -96,8 +110,21 @@ def _section_body(body: str, name: str) -> str | None:
 
 
 def _content_words(text: str) -> set[str]:
-    """Lowercased 4+ char word tokens, minus stopwords and pure digits."""
-    return {w for w in (m.group(0).lower() for m in _WORD_RE.finditer(text)) if w not in _STOPWORDS}
+    """Lowercased 4+ char word tokens, minus stopwords and pure digits.
+
+    Digits really are dropped now: the docstring always said so, but the filter
+    was missing, and years like ``2026`` counted as shared vocabulary in every
+    episode on a dated shelf — overlap that says nothing about grounding.
+    """
+    return {
+        w
+        for w in (m.group(0).lower() for m in _WORD_RE.finditer(text))
+        if w not in _STOPWORDS and not w.isdigit()
+    }
+
+
+def _stems(words: set[str]) -> set[str]:
+    return {w[:_STEM_LEN] for w in words}
 
 
 def _strip_section(body: str, name: str) -> str:
@@ -118,20 +145,98 @@ def _digest_body_grounding(digest: str, body: str) -> float | None:
     body_words = _content_words(_strip_section(body, "Digest"))
     if len(digest_words) < _MISMATCH_MIN_DIGEST_WORDS or len(body_words) < _MISMATCH_MIN_BODY_WORDS:
         return None
-    return len(digest_words & body_words) / len(digest_words)
+    body_stems = _stems(body_words)
+    grounded = sum(1 for w in digest_words if w[:_STEM_LEN] in body_stems)
+    return grounded / len(digest_words)
 
 
 def _ledger_ids(path: Path) -> set[str]:
-    ids: set[str] = set()
+    return {cols[1] for _, cols in _ledger_rows(path) if len(cols) >= 2}
+
+
+# shelf-spec v0 § 4.4. Kept here rather than imported: doctor is offline and
+# dependency-free by design, and the spec's own validator is the second reader
+# — the point is that both agree, not that one calls the other.
+_LEDGER_COLUMNS = ("date", "episode_id", "mode", "approx_tokens_in", "digest_tokens", "notes")
+_LEDGER_MODES = {"live", "import"}
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _ledger_rows(path: Path) -> list[tuple[int, list[str]]]:
+    """``(line_number, cells)`` for every non-blank data row, 1-indexed."""
     if not path.is_file():
-        return ids
-    for i, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
-        if i == 0 or not line.strip():
+        return []
+    return [
+        (n, line.split("\t"))
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        if n > 1 and line.strip()
+    ]
+
+
+def _check_ledger(root: Path) -> list[Finding]:
+    """Validate the register itself, not just the episodes it points at.
+
+    doctor used to read ``ledger.tsv`` only to cross-check episode ids, which
+    left the file's own integrity unchecked — and the shelf rule "doctor clean
+    ⇒ safe to push" then handed out a false guarantee twice in one day: 30
+    duplicate rows passed with 0 errors (#63), and a ``span`` interval in the
+    date column passed while ``shelf-spec validate`` rejected it (#65, #66).
+
+    Coverage here is deliberately a superset of the spec validator's
+    ``ledger-malformed``: everything it calls an error must be an error here
+    too (ARCHITECTURE, finding-name divergence — names may differ, coverage and
+    severity may not), plus the uniqueness of ``episode_id``, which is
+    memshelf's own invariant on the register.
+    """
+    path = root / "ledger.tsv"
+    if not path.is_file():
+        return []
+    out: list[Finding] = []
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0].split("\t") != list(_LEDGER_COLUMNS):
+        out.append(
+            Finding(
+                "error",
+                "ledger-malformed",
+                "ledger.tsv",
+                "header line does not match '" + "\t".join(_LEDGER_COLUMNS) + "'",
+                "regenerate the ledger: `memshelf rebuild --shelf .`",
+            )
+        )
+
+    problems: list[str] = []
+    seen: dict[str, int] = {}
+    for n, cols in _ledger_rows(path):
+        if len(cols) != len(_LEDGER_COLUMNS):
+            problems.append(f"line {n}: expected {len(_LEDGER_COLUMNS)} tab-separated columns")
             continue
-        cols = line.split("\t")
-        if len(cols) >= 2:
-            ids.add(cols[1])
-    return ids
+        date, episode_id, mode, tokens_in, digest_tokens, _notes = cols
+        if not _ISO_DATE.fullmatch(date):
+            problems.append(f"line {n}: date {date!r} is not YYYY-MM-DD")
+        if mode not in _LEDGER_MODES:
+            problems.append(f"line {n}: mode {mode!r} is not one of {sorted(_LEDGER_MODES)}")
+        for col_name, value in (("approx_tokens_in", tokens_in), ("digest_tokens", digest_tokens)):
+            if not value.isdigit():
+                problems.append(f"line {n}: {col_name} {value!r} is not a non-negative integer")
+        if episode_id in seen:
+            problems.append(
+                f"line {n}: episode_id {episode_id!r} already recorded on line {seen[episode_id]}"
+            )
+        else:
+            seen[episode_id] = n
+
+    if problems:
+        out.append(
+            Finding(
+                "error",
+                "ledger-malformed",
+                "ledger.tsv",
+                "; ".join(problems[:10]) + ("; ..." if len(problems) > 10 else ""),
+                "fix the ledger per shelf-spec v0 § 4.4, or regenerate it: "
+                "`memshelf rebuild --shelf .`",
+            )
+        )
+    return out
 
 
 # Frontmatter fields shelf-spec v0 § 5.2 marks REQUIRED. An episode missing any
@@ -308,6 +413,8 @@ def check_shelf(
                 "fix the rule; until then it does not guard this shelf",
             )
         )
+
+    findings.extend(_check_ledger(root))
 
     ledger_ids = _ledger_ids(root / "ledger.tsv")
     seen: set[str] = set()

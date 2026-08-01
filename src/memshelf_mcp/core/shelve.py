@@ -233,6 +233,14 @@ def shelve(
     fd, tmp_name = tempfile.mkstemp(suffix=".md")
     os.close(fd)
     tmp = Path(tmp_name)
+    # add_document also records title/description in the category's sidecar for
+    # docshelf's indexer — a derived file the shelve contract promises not to
+    # touch (#58, #69). Snapshot it and put it back: on `main` the bot renders
+    # it, on a branch it is supposed to lag, and the version add_document would
+    # leave behind is worse than either (it writes title=<slug>, since
+    # display_title only reaches the sidecar through `rebuild`).
+    sidecar = root / "docs" / category / ".meta.json"
+    sidecar_before = sidecar.read_text(encoding="utf-8") if sidecar.is_file() else None
     try:
         tmp.write_text(markdown, encoding="utf-8")
         shelf.add_document(
@@ -244,6 +252,10 @@ def shelve(
         )
     finally:
         tmp.unlink(missing_ok=True)
+        if sidecar_before is None:
+            sidecar.unlink(missing_ok=True)
+        elif sidecar.is_file() and sidecar.read_text(encoding="utf-8") != sidecar_before:
+            sidecar.write_text(sidecar_before, encoding="utf-8")
 
     address = f"docs/{category}/{slug}.md"
 

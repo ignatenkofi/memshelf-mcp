@@ -283,3 +283,75 @@ def test_explicit_span_wins_over_the_default(tmp_path):
     )
     text = (tmp_path / "docs" / "topics" / "2026-07-27-multi-day.md").read_text(encoding="utf-8")
     assert "span: 2026-07-24..2026-07-27" in text
+
+
+def test_shelve_leaves_only_the_episode_in_the_working_tree(tmp_path):
+    """#69: the contract says shelve writes the episode and nothing else.
+
+    `add_document` also records title/description in the category's
+    `.meta.json` — a derived path. Left behind it puts the caller in front of
+    two wrong options: commit it (and trip the shelf's own PR guard, with a
+    latin slug where the display title belongs) or hand-revert a file they
+    never asked for.
+    """
+    root = _init_shelf(tmp_path)
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "init"], check=True)
+
+    shelve(
+        root,
+        slug="2026-08-01-first",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "X over Y"},
+        display_title="Человеческий заголовок",
+        date="2026-08-01",
+        autocommit=False,
+    )
+
+    status = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain", "-uall"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert status == ["??", "docs/topics/2026-08-01-first.md"], status
+
+
+def test_shelve_preserves_an_existing_sidecar_byte_for_byte(tmp_path):
+    """A shelf that already has a rendered sidecar keeps exactly it.
+
+    Restoring, not deleting: shelves without the bot still rely on the file
+    between rebuilds, so the second shelve must not cost them their titles.
+    """
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-08-01-first",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "X over Y"},
+        display_title="Первый",
+        date="2026-08-01",
+        autocommit=False,
+    )
+    rebuild(root)
+    sidecar = tmp_path / "docs" / "topics" / ".meta.json"
+    before = sidecar.read_text(encoding="utf-8")
+    assert "Первый" in before
+
+    shelve(
+        root,
+        slug="2026-08-02-second",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "X over Y"},
+        display_title="Второй",
+        date="2026-08-02",
+        autocommit=False,
+    )
+
+    assert sidecar.read_text(encoding="utf-8") == before
+    # …and one rebuild brings the new episode in, with its display title.
+    rebuild(root)
+    assert "Второй" in sidecar.read_text(encoding="utf-8")

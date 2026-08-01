@@ -349,3 +349,178 @@ def test_tool_shelved_episode_without_span_passes_doctor(tmp_path):
     )
     report = check_shelf(root)
     assert report.ok, [f.code for f in report.findings]
+
+
+# --- the register itself: uniqueness + column format (#63, #65, #66) --------
+
+
+def _seed_one(root, slug="2026-07-22-ok"):
+    shelve(
+        root,
+        slug=slug,
+        kind="topic",
+        digest="The plan chose X; the Y alternative was rejected. Open: nothing.",
+        sections={"Decisions": "X"},
+        date=slug[:10],
+    )
+    rebuild(root)  # the ledger is derived now (#58)
+
+
+def test_duplicate_episode_id_in_ledger_is_an_error(tmp_path):
+    """The 30-duplicate corruption of 2026-08-01 passed doctor with 0 errors.
+
+    That green signal is what let it reach main: the shelf rule is "doctor
+    clean ⇒ safe to push".
+    """
+    root = _init(tmp_path)
+    _seed_one(root)
+    ledger = tmp_path / "ledger.tsv"
+    rows = ledger.read_text(encoding="utf-8").splitlines(keepends=True)
+    ledger.write_text("".join(rows + [rows[-1]]), encoding="utf-8")
+
+    report = check_shelf(root)
+
+    assert not report.ok
+    assert "ledger-malformed" in _codes(report)
+    detail = next(f.detail for f in report.findings if f.code == "ledger-malformed")
+    assert "already recorded on line" in detail
+
+
+def test_span_interval_in_the_date_column_is_an_error(tmp_path):
+    """What `shelf-spec validate` rejected while doctor stayed green (#65/#66).
+
+    doctor's coverage has to be a superset of the spec validator's, or the
+    shelf's own gate is weaker than the advisory CI it is supposed to precede.
+    """
+    root = _init(tmp_path)
+    _seed_one(root)
+    ledger = tmp_path / "ledger.tsv"
+    ledger.write_text(
+        ledger.read_text(encoding="utf-8").replace("2026-07-22\t", "2026-07-21..2026-07-22\t", 1),
+        encoding="utf-8",
+    )
+
+    report = check_shelf(root)
+
+    assert not report.ok
+    assert "ledger-malformed" in _codes(report)
+
+
+@pytest.mark.parametrize(
+    "bad_row",
+    [
+        "2026-07-23\t2026-07-23-x\tlive\t100\n",  # too few columns
+        "2026-07-23\t2026-07-23-x\thearsay\t100\t20\t\n",  # mode outside the spec
+        "2026-07-23\t2026-07-23-x\tlive\tmany\t20\t\n",  # non-numeric token count
+    ],
+)
+def test_malformed_ledger_rows_are_errors(tmp_path, bad_row):
+    root = _init(tmp_path)
+    _seed_one(root)
+    with (tmp_path / "ledger.tsv").open("a", encoding="utf-8") as fh:
+        fh.write(bad_row)
+
+    report = check_shelf(root)
+
+    assert "ledger-malformed" in _codes(report)
+    assert not report.ok
+
+
+def test_bad_ledger_header_is_an_error(tmp_path):
+    root = _init(tmp_path)
+    _seed_one(root)
+    (tmp_path / "ledger.tsv").write_text("date,episode_id\n", encoding="utf-8")
+
+    report = check_shelf(root)
+
+    assert "ledger-malformed" in _codes(report)
+
+
+def test_regenerated_ledger_passes_the_register_checks(tmp_path):
+    root = _init(tmp_path)
+    _seed_one(root, "2026-07-22-one")
+    _seed_one(root, "2026-07-23-two")
+
+    report = check_shelf(root)
+
+    assert "ledger-malformed" not in _codes(report)
+    assert report.ok, [f.code for f in report.findings]
+
+
+# --- grounding is measured on stems, not on whole tokens --------------------
+
+
+def test_inflected_russian_digest_is_not_a_mismatch(tmp_path):
+    """The four false positives on the live shelf, in one case.
+
+    Exact-token overlap reads «партии»/«партия» and «студентом»/«студента» as
+    unrelated words, so a Russian digest scores low no matter how grounded it
+    is — a property of the language, not of the digest. The episode below
+    plainly summarizes its own body; before stemming it scored 11%.
+    """
+    root = _init(tmp_path)
+    _write_raw(
+        root,
+        "sessions",
+        "2026-07-22-inflected",
+        _fm("2026-07-22-inflected", kind="session")
+        + "\n## Digest\nХвост сезона проверки домашних заданий потока: три партии работ, "
+        "финиш программы студентом с подтверждением кандидатуры, закрытие затянувшейся "
+        "саги вторым студентом. Импортирован из фрагмента экспорта переписки; ожидается "
+        "доимпорт начала сезона. Каждая арка вынесена отдельным эпизодом.\n"
+        "\n## Timeline\nПартия первая: финальная тройка заданий студента, повторная "
+        "попытка второго студента и прорыв на пятом уроке. Партия вторая: следующее "
+        "задание второго студента. Партия третья: финал саги, последняя работа целого "
+        "потока. Проверок больше не запланировано, поток завершён. Импорт выполнен из "
+        "фрагмента экспортированной переписки, полная выгрузка ожидалась позже. "
+        "Подтверждена кандидатура, отмеченная ранее. Программа закрыта.\n"
+        "\n## Open threads\nЭпизоды арок хранятся отдельно, доимпорту начал сезон "
+        "помешала утрата исходника.\n",
+    )
+
+    report = check_shelf(root)
+
+    assert "digest-body-mismatch" not in _codes(report), [
+        f.detail for f in report.findings if f.code == "digest-body-mismatch"
+    ]
+
+
+def test_unrelated_digest_still_flagged_after_stemming(tmp_path):
+    """Positive control: loosening the match must not disarm the guard.
+
+    A check that cannot fail is not a check — the lesson the isolation step and
+    the gitleaks fixture both taught (devsecops-pipeline#19, form 3).
+    """
+    root = _init(tmp_path)
+    _write_raw(
+        root,
+        "sessions",
+        "2026-07-22-unrelated",
+        _fm("2026-07-22-unrelated", kind="session")
+        + "\n## Digest\nОбсудили выбор красок для веранды, сравнили матовую и глянцевую "
+        "фактуру, договорились про освещение террасы и заказ садовой мебели. Решено "
+        "брать светлый оттенок, отложить покупку кресел и позвать столяра весной.\n"
+        "\n## Timeline\nПоднимали кластер PostgreSQL, настраивали потоковую репликацию, "
+        "чинили автоочистку и перекладывали шардирование. Обсуждали журналирование, "
+        "контрольные точки и мониторинг задержки реплики. Разбирали восстановление из "
+        "базовой копии, проверку целостности после отказа, поведение планировщика "
+        "запросов, сбор статистики и построение индексов. Померили просадку записи под "
+        "нагрузкой, сравнили синхронный и асинхронный режимы.\n"
+        "\n## Open threads\nУчения по восстановлению.\n",
+    )
+
+    report = check_shelf(root)
+
+    assert "digest-body-mismatch" in _codes(report)
+
+
+def test_years_are_not_shared_vocabulary(tmp_path):
+    """Pure digits stopped counting as content words.
+
+    On a dated shelf every episode shares `2026` with every other; the
+    docstring always excluded digits, the filter did not.
+    """
+    from memshelf_mcp.core.doctor import _content_words
+
+    words = _content_words("2026 отчёт 07-09 регламент 1234")
+    assert words == {"отчёт", "регламент"}
