@@ -8,6 +8,11 @@ name: shelf-derived
 # другой дописанной строки — конфликт был не смысловым, а бухгалтерским.
 # Разделив вход и выход, мы оставляем только настоящие столкновения: два
 # эпизода с одним слагом.
+#
+# Первое живое подключение (sqst-memshelf, 2026-08-01) пришлось на утро, где
+# две параллельные сессии за час дали три конфликта в этих файлах и две ручные
+# правки ledger.tsv — каждая откатилась бы первым же rebuild. Этот воркфлоу
+# делает такую правку невозможной, а не просто нежелательной.
 
 on:
   push:
@@ -35,15 +40,34 @@ jobs:
       - name: Пересобрать производные файлы из эпизодов
         run: memshelf rebuild --shelf .
 
+      # rebuild не трогает archive/INDEX.md — это отдельный вызов (см. docstring
+      # core/archive.py: у архива нет своего ledger, и второй ledger удвоил бы
+      # ровно те числа, которые роллап обязан оставить нетронутыми). Без этого
+      # шага индекс архива остаётся правильным только потому, что его закоммитил
+      # человек, — то есть ровно та зависимость от дисциплины, которую бот убирает.
+      - name: Пересобрать индекс архива
+        run: |
+          python - <<'PY'
+          from memshelf_mcp.core.archive import rebuild_archive_index
+          rebuild_archive_index(".")
+          PY
+
       - name: Doctor (errors блокируют)
         run: memshelf doctor --shelf .
+
+      # Регенерация обязана быть неподвижной точкой: второй прогон не должен
+      # ничего менять. Иначе рендер недетерминирован, и бот будет коммитить шум
+      # каждую ночь. Тот же двойной прогон, что гоняет CI атласа.
+      - name: Регенерация идемпотентна
+        run: memshelf rebuild --shelf . --check
 
       - name: Закоммитить, если что-то изменилось
         run: |
           set -euo pipefail
           git config user.name "shelf-bot"
           git config user.email "shelf-bot@users.noreply.github.com"
-          git add -- ledger.tsv INDEX.md stats.svg 'docs/*/.meta.json'
+          git add -- ledger.tsv INDEX.md stats.svg 'docs/*/.meta.json' \
+                     'archive/INDEX.md' 'archive/docs/*/.meta.json'
           if git diff --cached --quiet; then
             echo "::notice::производные файлы уже соответствуют эпизодам"
             exit 0
