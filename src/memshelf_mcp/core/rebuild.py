@@ -30,6 +30,7 @@ episodes, and a regeneration that diffs proves they do not.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -47,6 +48,7 @@ __all__ = [
     "render_meta",
     "rebuild",
     "derived_paths",
+    "shelve_date",
 ]
 
 #: Repo-relative paths a shelf's bot owns. A PR touching any of them is
@@ -61,6 +63,41 @@ DERIVED_PATHS = (
 )
 
 CHARS_PER_TOKEN = 4
+
+#: shelf-spec v0 § 4.4 constrains the ledger's first column to a calendar date.
+ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def shelve_date(fields: dict[str, str], episode_id: str) -> tuple[str, str | None]:
+    """The ledger's ``date`` column for one episode: ``(date, warning)``.
+
+    Deliberately **not** ``span``. ``span`` is when the *conversation*
+    happened — ``A..B`` by design, and on real shelves sometimes carrying a
+    parenthetical — while § 4.4 constrains this column to ``YYYY-MM-DD``.
+    Before #58 the difference was invisible (``shelve`` appended the row and
+    filled the column from its own ``--date``); once the ledger became derived,
+    a ``date or span`` fallback started printing intervals into a field the
+    spec forbids them in, and only the external validator noticed (#65, #66).
+
+    The fallback is the slug's date prefix: the shelving convention puts the
+    date there, and unlike ``span`` it cannot be a range. Failing that the
+    column is left empty rather than guessed — ``doctor`` reports an empty
+    date as ``ledger-malformed``, which is the loud outcome the silent one
+    was missing.
+    """
+    date = (fields.get("date") or "").strip()
+    if ISO_DATE.fullmatch(date):
+        return date, None
+    prefix = episode_id[:10]
+    if ISO_DATE.fullmatch(prefix):
+        return prefix, (
+            f"нет frontmatter `date` — дата взята из префикса слага ({prefix}); "
+            "допишите `date:` в эпизод или прогоните `memshelf rebuild --adopt`"
+        )
+    return "", (
+        "нет frontmatter `date`, и слаг не начинается с даты — колонка ledger "
+        "останется пустой, doctor сообщит ledger-malformed"
+    )
 
 
 @dataclass
@@ -157,12 +194,15 @@ def collect_episodes(root: Path) -> tuple[list[EpisodeRecord], list[str]]:
                     warnings.append(f"{prefix}/{path.name}: нет frontmatter id — пропущен")
                     continue
                 digest = _digest_of(body)
+                date, date_warning = shelve_date(fields, fields["id"])
+                if date_warning:
+                    warnings.append(f"{prefix}/{path.name}: {date_warning}")
                 records.append(
                     EpisodeRecord(
                         id=fields["id"],
                         category=category,
                         filename=path.name,
-                        date=fields.get("date") or fields.get("span") or "",
+                        date=date,
                         mode=fields.get("mode", "live"),
                         approx_tokens=_int(fields.get("approx_tokens", "0")),
                         digest_tokens=len(digest) // CHARS_PER_TOKEN,
@@ -353,8 +393,23 @@ def adopt(shelf_root: str | Path) -> dict:
             entry = meta.get(category, {}).get(path.name, {})
             row = ledger.get(episode_id, {})
             additions: dict[str, str] = {}
-            if "date" not in fields and row.get("date"):
-                additions["date"] = row["date"]
+            if "date" not in fields:
+                # The old ledger first, then the slug prefix. Both are checked
+                # against the spec's format: an episode that arrived past the
+                # migration (parallel branch, hand-added, imported) is exactly
+                # the case that left one `span` interval in the date column of
+                # a live shelf (#65), so adoption must not copy a bad value
+                # forward — and must not leave the field unset either.
+                candidate = next(
+                    (
+                        value
+                        for value in (row.get("date", ""), episode_id[:10])
+                        if ISO_DATE.fullmatch(value or "")
+                    ),
+                    "",
+                )
+                if candidate:
+                    additions["date"] = candidate
             # Free text goes in quoted, exactly as `shelve` writes it: a title
             # with a colon is valid for memshelf's reader and a syntax error
             # for a real YAML loader, and adoption must not plant that.

@@ -15,6 +15,7 @@ pytest.importorskip("docshelf_mcp")
 
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
+from memshelf_mcp.core.doctor import check_shelf  # noqa: E402
 from memshelf_mcp.core.rebuild import (  # noqa: E402
     DERIVED_PATHS,
     adopt,
@@ -253,3 +254,134 @@ def test_render_ledger_has_a_header_even_with_no_episodes(tmp_path):
     assert render_ledger([]).splitlines() == [
         "date\tepisode_id\tmode\tapprox_tokens_in\tdigest_tokens\tnotes"
     ]
+
+
+# --- the date column is the shelve date, never the span (#65, #66) ----------
+
+
+def test_multi_day_span_does_not_reach_the_ledger_date_column(tmp_path):
+    """`--span A..B` is a documented flag; any episode using it broke the shelf.
+
+    The interval belongs in the frontmatter (where it lands correctly) and the
+    ledger's first column is a calendar date per shelf-spec § 4.4. The live
+    shelf's first multi-day episode is what made `shelf-spec validate` red.
+    """
+    root = _init(tmp_path)
+    shelve(
+        root,
+        slug="2026-08-01-ups-graceful-shutdown",
+        kind="topic",
+        digest=DIGEST,
+        sections={"Decisions": "Recorded."},
+        span="2026-07-31..2026-08-01",
+        date="2026-08-01",
+    )
+    rebuild(root)
+
+    row = (tmp_path / "ledger.tsv").read_text(encoding="utf-8").splitlines()[1]
+    assert row.split("\t")[0] == "2026-08-01"
+    episode = (tmp_path / "docs" / "topics" / "2026-08-01-ups-graceful-shutdown.md").read_text(
+        encoding="utf-8"
+    )
+    assert "span: 2026-07-31..2026-08-01" in episode
+    assert check_shelf(root).ok
+
+
+def test_episode_without_date_falls_back_to_the_slug_not_the_span(tmp_path):
+    """The trigger of #65: an episode that arrived past the adopt migration.
+
+    A `date or span` fallback printed the interval into the spec-constrained
+    column and every tool but the external validator called it fine.
+    """
+    root = _init(tmp_path)
+    _shelve(root, "2026-07-22-note")
+    _strip_new_fields(root, "2026-07-22-note")
+    episode = tmp_path / "docs" / "topics" / "2026-07-22-note.md"
+    episode.write_text(
+        episode.read_text(encoding="utf-8").replace(
+            "kind: topic", "kind: topic\nspan: 2026-07-20..2026-07-22"
+        ),
+        encoding="utf-8",
+    )
+
+    records, warnings = collect_episodes(tmp_path)
+
+    assert records[0].date == "2026-07-22"  # from the slug, not "2026-07-20..2026-07-22"
+    assert any("нет frontmatter `date`" in w for w in warnings)
+
+    rebuild(root)
+    assert check_shelf(root).ok
+
+
+def test_episode_without_date_or_dated_slug_leaves_the_column_loud(tmp_path):
+    """No trustworthy source ⇒ empty column ⇒ doctor errors. Never a guess."""
+    root = _init(tmp_path)
+    _shelve(root, "2026-07-22-note")
+    _strip_new_fields(root, "2026-07-22-note")
+    episode = tmp_path / "docs" / "topics" / "2026-07-22-note.md"
+    moved = tmp_path / "docs" / "topics" / "undated-note.md"
+    moved.write_text(
+        episode.read_text(encoding="utf-8").replace("2026-07-22-note", "undated-note"),
+        encoding="utf-8",
+    )
+    episode.unlink()
+
+    records, warnings = collect_episodes(tmp_path)
+
+    assert [r.date for r in records] == [""]
+    assert any("слаг не начинается с даты" in w for w in warnings)
+
+    rebuild(root)
+    report = check_shelf(root)
+    assert not report.ok
+    assert "ledger-malformed" in {f.code for f in report.findings}
+
+
+def test_adopt_dates_an_episode_the_old_ledger_never_knew(tmp_path):
+    """#65 item 3: adoption must not leave a dateless episode behind.
+
+    The one on the live shelf came from a parallel branch after the migration
+    had run, so it had no ledger row to adopt from — and stayed a mine.
+    """
+    root = _init(tmp_path)
+    _shelve(root, "2026-07-22-known")
+    _shelve(root, "2026-07-23-stranger")
+    rebuild(root)
+    # The stranger loses both its frontmatter date and its ledger row, exactly
+    # as an episode that arrived past the migration would look.
+    _strip_new_fields(root, "2026-07-23-stranger")
+    ledger = tmp_path / "ledger.tsv"
+    ledger.write_text(
+        "".join(
+            line + "\n"
+            for line in ledger.read_text(encoding="utf-8").splitlines()
+            if "stranger" not in line
+        ),
+        encoding="utf-8",
+    )
+
+    adopt(root)
+
+    episode = (tmp_path / "docs" / "topics" / "2026-07-23-stranger.md").read_text(encoding="utf-8")
+    assert "date: 2026-07-23" in episode
+    rebuild(root)
+    assert check_shelf(root).ok
+
+
+def test_adopt_refuses_a_malformed_date_from_the_old_ledger(tmp_path):
+    """A pre-#58 ledger can already hold a bad date; adoption must not copy it."""
+    root = _init(tmp_path)
+    _shelve(root, "2026-07-22-note")
+    rebuild(root)
+    _strip_new_fields(root, "2026-07-22-note")
+    ledger = tmp_path / "ledger.tsv"
+    ledger.write_text(
+        ledger.read_text(encoding="utf-8").replace("2026-07-22\t", "2026-07-20..2026-07-22\t", 1),
+        encoding="utf-8",
+    )
+
+    adopt(root)
+
+    episode = (tmp_path / "docs" / "topics" / "2026-07-22-note.md").read_text(encoding="utf-8")
+    assert "date: 2026-07-22" in episode
+    assert "2026-07-20..2026-07-22" not in episode
