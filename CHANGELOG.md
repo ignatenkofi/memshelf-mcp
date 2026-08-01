@@ -8,6 +8,44 @@ once code ships.
 
 ## [Unreleased]
 
+### Fixed (one family, all five found by running the tool, not by its tests)
+
+Five defects reported over 2026-08-01 share a shape: the tool finishes, reports
+success, and leaves an artifact it would itself call broken.
+
+- **`resolve` regenerates derived paths instead of merging them** (#64).
+  After #58 `ledger.tsv`, `INDEX.md`, `stats.svg` and `docs/*/.meta.json` are a
+  pure function of `docs/` ⊕ `archive/docs/`; a union of two versions is not
+  the sum of two truths. The live 2026-08-01 collision revived 16 `.meta`
+  entries whose episodes had moved into `archive/` and doubled 30 ledger rows
+  whose `digest_tokens` had been restated — and `resolve` answered
+  `status: ok`. It now calls `rebuild` plus `rebuild_archive_index` (the
+  archive keeps its own INDEX, which `rebuild` does not touch). Regression test
+  builds the conflict on a shelf with a non-empty `archive/` — the class the
+  old tests could not reach.
+- **`_union_tsv` is a three-way multiset union** (#62). It survives only for
+  `recall-log.tsv`, the one file nothing regenerates; its rows carry no
+  timestamp, so two sessions recalling the same section write byte-identical
+  rows and a set union silently undercounted the savings the log measures.
+- **`doctor` validates the register itself** (#63, #65, #66): `episode_id`
+  uniqueness plus the column format of shelf-spec § 4.4 (header, column count,
+  date, mode, numeric columns), emitted under the spec's own
+  `ledger-malformed`. 30 duplicate rows and a `span` interval in the date
+  column had both passed with 0 errors, which is how they reached `main` — the
+  shelf rule is "doctor clean ⇒ safe to push".
+- **The ledger's date column is the shelve date, never `span`** (#65, #66).
+  `date or span` printed intervals into a spec-constrained field; the fallback
+  is now the slug's date prefix, and failing that the column is left empty so
+  `doctor` says so out loud. `--adopt` dates every episode that lacks one
+  rather than only those with a row in the old ledger — the episode that
+  arrived past the migration was the mine.
+- **`shelve` restores the `.meta.json` sidecar** (#69). `add_document` wrote
+  the category sidecar behind the contract's back, leaving a derived path
+  dirty: committing it trips the shelf's own PR guard and puts a latin slug
+  where the display title belongs, and not committing it trips generic
+  "nothing uncommitted" hooks. A clean tree after a shelve now holds exactly
+  one new file.
+
 ### Added (#14 — the context advisor)
 - **`memshelf advise` / `memshelf_advise`** — "where did my window go?"
   (MANIFEST hero scenario 2). Reports the breakdown — static overhead,

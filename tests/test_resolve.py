@@ -273,6 +273,7 @@ def test_conflict_on_a_shelf_with_a_non_empty_archive(tmp_path):
     """
     root = _init_shelf(tmp_path)
     _shelve(root, "2026-07-20-old-one", DIGEST_A, "Старый эпизод")
+    rebuild(root)  # a bot-less shelf commits its own derived files
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "seed")
 

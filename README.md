@@ -86,7 +86,10 @@ memshelf doctor  --shelf ~/my-shelf  # exit 1 on integrity errors
 `memshelf rebuild` renders the four from `docs/`. That is what makes two
 sessions shelving in parallel a non-event — they no longer touch the same four
 files in the same places, so the merge is clean by construction. Delete all
-four and `rebuild` restores them byte-identically.
+four and `rebuild` restores them byte-identically. "Writes the episode alone"
+is literal: `shelve` restores the category's `.meta.json` sidecar to the state
+it found it in, so a clean tree after a shelve holds exactly one new file
+(#69).
 
 On a shared shelf, let a bot own them on `main` and guard PRs against touching
 derived paths — ready-to-copy workflows are in
