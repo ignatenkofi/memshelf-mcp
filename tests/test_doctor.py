@@ -445,3 +445,82 @@ def test_regenerated_ledger_passes_the_register_checks(tmp_path):
 
     assert "ledger-malformed" not in _codes(report)
     assert report.ok, [f.code for f in report.findings]
+
+
+# --- grounding is measured on stems, not on whole tokens --------------------
+
+
+def test_inflected_russian_digest_is_not_a_mismatch(tmp_path):
+    """The four false positives on the live shelf, in one case.
+
+    Exact-token overlap reads «партии»/«партия» and «студентом»/«студента» as
+    unrelated words, so a Russian digest scores low no matter how grounded it
+    is — a property of the language, not of the digest. The episode below
+    plainly summarizes its own body; before stemming it scored 11%.
+    """
+    root = _init(tmp_path)
+    _write_raw(
+        root,
+        "sessions",
+        "2026-07-22-inflected",
+        _fm("2026-07-22-inflected", kind="session")
+        + "\n## Digest\nХвост сезона проверки домашних заданий потока: три партии работ, "
+        "финиш программы студентом с подтверждением кандидатуры, закрытие затянувшейся "
+        "саги вторым студентом. Импортирован из фрагмента экспорта переписки; ожидается "
+        "доимпорт начала сезона. Каждая арка вынесена отдельным эпизодом.\n"
+        "\n## Timeline\nПартия первая: финальная тройка заданий студента, повторная "
+        "попытка второго студента и прорыв на пятом уроке. Партия вторая: следующее "
+        "задание второго студента. Партия третья: финал саги, последняя работа целого "
+        "потока. Проверок больше не запланировано, поток завершён. Импорт выполнен из "
+        "фрагмента экспортированной переписки, полная выгрузка ожидалась позже. "
+        "Подтверждена кандидатура, отмеченная ранее. Программа закрыта.\n"
+        "\n## Open threads\nЭпизоды арок хранятся отдельно, доимпорту начал сезон "
+        "помешала утрата исходника.\n",
+    )
+
+    report = check_shelf(root)
+
+    assert "digest-body-mismatch" not in _codes(report), [
+        f.detail for f in report.findings if f.code == "digest-body-mismatch"
+    ]
+
+
+def test_unrelated_digest_still_flagged_after_stemming(tmp_path):
+    """Positive control: loosening the match must not disarm the guard.
+
+    A check that cannot fail is not a check — the lesson the isolation step and
+    the gitleaks fixture both taught (devsecops-pipeline#19, form 3).
+    """
+    root = _init(tmp_path)
+    _write_raw(
+        root,
+        "sessions",
+        "2026-07-22-unrelated",
+        _fm("2026-07-22-unrelated", kind="session")
+        + "\n## Digest\nОбсудили выбор красок для веранды, сравнили матовую и глянцевую "
+        "фактуру, договорились про освещение террасы и заказ садовой мебели. Решено "
+        "брать светлый оттенок, отложить покупку кресел и позвать столяра весной.\n"
+        "\n## Timeline\nПоднимали кластер PostgreSQL, настраивали потоковую репликацию, "
+        "чинили автоочистку и перекладывали шардирование. Обсуждали журналирование, "
+        "контрольные точки и мониторинг задержки реплики. Разбирали восстановление из "
+        "базовой копии, проверку целостности после отказа, поведение планировщика "
+        "запросов, сбор статистики и построение индексов. Померили просадку записи под "
+        "нагрузкой, сравнили синхронный и асинхронный режимы.\n"
+        "\n## Open threads\nУчения по восстановлению.\n",
+    )
+
+    report = check_shelf(root)
+
+    assert "digest-body-mismatch" in _codes(report)
+
+
+def test_years_are_not_shared_vocabulary(tmp_path):
+    """Pure digits stopped counting as content words.
+
+    On a dated shelf every episode shares `2026` with every other; the
+    docstring always excluded digits, the filter did not.
+    """
+    from memshelf_mcp.core.doctor import _content_words
+
+    words = _content_words("2026 отчёт 07-09 регламент 1234")
+    assert words == {"отчёт", "регламент"}

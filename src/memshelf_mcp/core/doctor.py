@@ -52,6 +52,20 @@ _STOPWORDS = frozenset(
 
 _WORD_RE = re.compile(r"\w{4,}", re.UNICODE)
 
+# Overlap is measured on a stem prefix, not on whole tokens. Russian inflects
+# by suffix, and exact matching therefore reads «партии» / «партия» and
+# «студентом» / «студента» as unrelated words — on a Russian shelf the metric
+# undercounts grounding systematically, which is not a property of the digest
+# but of the language it is written in. Measured on the live shelf: an episode
+# whose digest and body plainly share their subject scored 11%, and 11 of its
+# digest words had same-root counterparts in the body that exact matching threw
+# away. Five characters is enough to keep the root and drop the ending; it also
+# merges English word families («refactor» / «refactoring»). The cost is
+# occasional over-matching («конфиг» / «конфликт»), which is acceptable in a
+# check whose whole question is "does this digest share *almost nothing* with
+# its episode".
+_STEM_LEN = 5
+
 
 @dataclass
 class Finding:
@@ -96,8 +110,21 @@ def _section_body(body: str, name: str) -> str | None:
 
 
 def _content_words(text: str) -> set[str]:
-    """Lowercased 4+ char word tokens, minus stopwords and pure digits."""
-    return {w for w in (m.group(0).lower() for m in _WORD_RE.finditer(text)) if w not in _STOPWORDS}
+    """Lowercased 4+ char word tokens, minus stopwords and pure digits.
+
+    Digits really are dropped now: the docstring always said so, but the filter
+    was missing, and years like ``2026`` counted as shared vocabulary in every
+    episode on a dated shelf — overlap that says nothing about grounding.
+    """
+    return {
+        w
+        for w in (m.group(0).lower() for m in _WORD_RE.finditer(text))
+        if w not in _STOPWORDS and not w.isdigit()
+    }
+
+
+def _stems(words: set[str]) -> set[str]:
+    return {w[:_STEM_LEN] for w in words}
 
 
 def _strip_section(body: str, name: str) -> str:
@@ -118,7 +145,9 @@ def _digest_body_grounding(digest: str, body: str) -> float | None:
     body_words = _content_words(_strip_section(body, "Digest"))
     if len(digest_words) < _MISMATCH_MIN_DIGEST_WORDS or len(body_words) < _MISMATCH_MIN_BODY_WORDS:
         return None
-    return len(digest_words & body_words) / len(digest_words)
+    body_stems = _stems(body_words)
+    grounded = sum(1 for w in digest_words if w[:_STEM_LEN] in body_stems)
+    return grounded / len(digest_words)
 
 
 def _ledger_ids(path: Path) -> set[str]:

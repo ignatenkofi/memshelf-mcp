@@ -46,6 +46,22 @@ success, and leaves an artifact it would itself call broken.
   "nothing uncommitted" hooks. A clean tree after a shelve now holds exactly
   one new file.
 
+### Fixed (the digest-grounding guard was measuring the wrong thing)
+
+- **`digest-body-mismatch` compares stems, not whole tokens.** Russian
+  inflects by suffix, so exact matching read «партии»/«партия» and
+  «студентом»/«студента» as unrelated words: on a Russian shelf the guard
+  undercounted grounding systematically, which is a property of the language,
+  not of the digest. The live shelf carried four such warnings; on one of them
+  eleven digest words had same-root counterparts in the body that exact
+  matching threw away. After the change the same shelf reports one warning
+  across 63 measured episodes, with a median grounding of 68%. A positive
+  control keeps the guard armed: an unrelated digest over the same body still
+  scores 8% and still fires.
+- **Pure digits stopped counting as shared vocabulary.** The docstring always
+  said they were excluded; the filter was missing, so every episode on a dated
+  shelf shared `2026` with every other.
+
 ### Added (#14 — the context advisor)
 - **`memshelf advise` / `memshelf_advise`** — "where did my window go?"
   (MANIFEST hero scenario 2). Reports the breakdown — static overhead,
