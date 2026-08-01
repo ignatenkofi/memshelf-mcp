@@ -1,0 +1,43 @@
+name: shelf-pr-guard
+# PR возят эпизоды, производное коммитит бот на main (#58). Гард ловит два
+# случая: (1) PR правит производный путь — значит правится выход вместо входа;
+# (2) эпизоды и производные файлы разъехались — значит бот на main отстал или
+# кто-то отредактировал ledger руками.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Установить memshelf
+        run: pip install --quiet "memshelf-mcp @ git+https://github.com/ignatenkofi/memshelf-mcp"
+
+      - name: Дифф PR не трогает производные пути
+        run: |
+          set -euo pipefail
+          BASE="origin/${{ github.base_ref }}"
+          CHANGED=$(git diff --name-only "$BASE...HEAD")
+          BAD=$(printf '%s\n' "$CHANGED" | grep -E '^(ledger\.tsv|INDEX\.md|stats\.svg|docs/[^/]+/\.meta\.json)$' || true)
+          if [ -n "$BAD" ]; then
+            echo "::error::PR правит производные файлы — их собирает бот на main (#58):"
+            printf '  %s\n' $BAD
+            echo "Правь эпизод в docs/, а не его отражение. Локально посмотреть: memshelf rebuild --shelf ."
+            exit 1
+          fi
+          echo "дифф чист: производных путей не трогает"
+
+      - name: Производные файлы соответствуют эпизодам
+        run: memshelf rebuild --shelf . --check

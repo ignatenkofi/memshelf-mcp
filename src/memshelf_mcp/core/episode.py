@@ -35,8 +35,47 @@ class EpisodeError(ValueError):
     """The episode's parts don't satisfy the format contract."""
 
 
+def flatten(text: str) -> str:
+    """Collapse a value to one line — the frontmatter block is flat ``key: value``.
+
+    A newline in a value would end the field and, past the closing ``---``,
+    silently turn the rest into body text. Callers pass free-form strings
+    (display titles, ledger notes), so flattening belongs here rather than in
+    each caller.
+    """
+    return " ".join(text.split())
+
+
+def yaml_scalar(text: str) -> str:
+    """Quote a free-text value so the block stays valid **YAML**.
+
+    The frontmatter is read by two very different parsers: memshelf's own
+    forgiving ``key: value`` splitter, and a real YAML loader — shelf-spec's
+    validator, which is what the shelves run in CI. A display title like
+    ``Охота на X1 Carbon: Грузия`` is fine for the first and a syntax error
+    for the second (YAML reads the inner ``: `` as a nested mapping), and the
+    failure mode is nasty: the validator reports the episode as having *no
+    frontmatter at all*, not as having a bad line.
+
+    Free-text fields are therefore always double-quoted. Always, not
+    conditionally — a rule with exceptions is a rule someone's title will
+    eventually fall through.
+    """
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 @dataclass(frozen=True)
 class Frontmatter:
+    """The episode's frontmatter — and, since #58, the single source for every
+    derived file on the shelf.
+
+    ``date``, ``notes``, ``display_title`` and ``description`` are here because
+    ``ledger.tsv`` and ``.meta.json`` are regenerated from the episodes: a
+    column that lives only in the derived file cannot be regenerated, and the
+    file stops being derived. ``date`` is the shelve date, deliberately
+    distinct from ``span`` (what the conversation covered).
+    """
+
     id: str
     kind: str
     span: str | None = None
@@ -44,6 +83,13 @@ class Frontmatter:
     approx_tokens: int = 0
     mode: str = "live"
     session: str | None = None
+    date: str | None = None
+    display_title: str | None = None
+    description: str | None = None
+    notes: str = ""
+    #: Retention (#15): after this date `memshelf purge` drops the episode.
+    #: Absent means "keep" — retention is opt-in per episode, never a default.
+    retain_until: str | None = None
 
     def to_yaml(self) -> str:
         lines = [f"id: {self.id}", f"kind: {self.kind}"]
@@ -51,9 +97,19 @@ class Frontmatter:
             lines.append(f"session: {self.session}")
         if self.span:
             lines.append(f"span: {self.span}")
+        if self.date:
+            lines.append(f"date: {self.date}")
+        if self.retain_until:
+            lines.append(f"retain_until: {self.retain_until}")
+        if self.display_title:
+            lines.append(f"display_title: {yaml_scalar(flatten(self.display_title))}")
+        if self.description:
+            lines.append(f"description: {yaml_scalar(flatten(self.description))}")
         lines.append(f"tags: [{', '.join(self.tags)}]")
         lines.append(f"approx_tokens: {self.approx_tokens}")
         lines.append(f"mode: {self.mode}")
+        if self.notes:
+            lines.append(f"notes: {yaml_scalar(flatten(self.notes))}")
         return "\n".join(lines)
 
 

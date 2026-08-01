@@ -57,21 +57,38 @@ shelve→compact→recall cycle survives without manual repair; `doctor` clean.
 
 ## M2 — Policy, hygiene & the context advisor
 
-- Token-budget monitor that *proposes* shelving (never forces).
-- **Context advisor** (the "where did my window go?" feature, MANIFEST hero
-  scenario 2): report static overhead vs live topics vs stale dumps, flag
-  closed-but-unshelved episodes with their token cost, recommend shelve
-  actions. Doubles as the onboarding/first-run experience; heuristics-first,
-  host-agnostic (see ARCHITECTURE open question 7).
-- Retention: `retain_until`, purge tool, reindex after purge.
-- Rollups: consolidate old episodes into digest-of-digests, archive category.
+- ~~Token-budget monitor that *proposes* shelving (never forces).~~ —
+  **done** (#14): the advisor takes the budget and reports headroom; the
+  proposal, not the action, is the output.
+- ~~**Context advisor**~~ (the "where did my window go?" feature, MANIFEST
+  hero scenario 2) — **done** (#14): `memshelf advise` / `memshelf_advise`
+  reports static overhead vs memshelf's own cost vs live topics vs
+  reclaimable, and ranks shelve/drop/rollup proposals net of what each one
+  costs. Host-agnostic as decided in ARCHITECTURE open question 7: the window
+  breakdown is a caller input, and the tool contributes what a self-assessment
+  cannot — measured overhead, verification of "already shelved" claims against
+  the episodes, and a deterministic ranking. Called with no occupants it is
+  the first-run view of the shelf, and says so rather than reporting a clean
+  window. The exit criterion below (proposals accepted, not overridden) stays
+  open — it is a dogfood measurement, not a code deliverable.
+- ~~Retention: `retain_until`, purge tool, reindex after purge.~~ — **done**
+  (#15): opt-in `retain_until`, `memshelf purge` dry-run by default, sweeps
+  `docs/` and `archive/`, states the git-history caveat instead of implying
+  erasure.
+- ~~Rollups: consolidate old episodes into digest-of-digests, archive
+  category.~~ — **done** (#15): `memshelf rollup` moves a period's episodes
+  into the `archive/` sub-shelf behind one digest-of-digests. Navigation
+  shrinks; recall, search, ledger and stats are untouched. Exit criterion
+  (100+ episodes, INDEX under ~10 KB) is now a matter of running it.
 - Configurable PII/secret pattern packs per shelf.
-- **Derived files rendered by a bot, not by `shelve`** (#58, decided
-  2026-07-31): move `notes` into the episode frontmatter so `ledger.tsv`
-  becomes derivable, have `shelve` write only the episode, and regenerate
-  INDEX/ledger/.meta/stats on `main` behind a PR guard — the multi-writer
-  conflict class disappears by construction. `memshelf resolve` stays as the
-  fallback. Lands next to rollups: both rewrite how INDEX is produced.
+- ~~**Derived files rendered by a bot, not by `shelve`**~~ (#58, decided
+  2026-07-31) — **done**: `date`/`notes`/`display_title`/`description` moved
+  into the episode frontmatter, `shelve` writes and stages only the episode,
+  and `memshelf rebuild` renders `ledger.tsv`/`INDEX.md`/`stats.svg`/`.meta.json`
+  from `docs/`. Two parallel shelves now merge cleanly by construction;
+  `memshelf resolve` stays as the fallback for a real same-slug collision or a
+  shelf without the bot. Bot + PR-guard workflows: `adapters/shelf-repo/`.
+  Rollups (below) build on the same regeneration path.
 
 **Exit criteria:** a shelf with 100+ episodes keeps INDEX under ~10 KB and
 recall precision doesn't degrade (re-run the M0 question set); the advisor's

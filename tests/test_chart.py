@@ -3,6 +3,7 @@ import subprocess
 import pytest
 
 from memshelf_mcp.core.chart import render_chart_svg, write_chart
+from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 
 _HEADER = "date\tepisode_id\tmode\tapprox_tokens_in\tdigest_tokens\tnotes\n"
 
@@ -29,7 +30,9 @@ def test_chart_has_both_series_and_ratio(tmp_path):
     assert "07-13" in svg and "07-14" in svg  # date labels
 
 
-def test_shelve_redraws_chart(tmp_path):
+def test_rebuild_redraws_chart(tmp_path):
+    # Since #58 the chart is a derived file: shelve writes the episode,
+    # rebuild renders stats.svg from the episodes.
     pytest.importorskip("docshelf_mcp")
     from docshelf_mcp.core.shelf import Shelf
 
@@ -49,6 +52,8 @@ def test_shelve_redraws_chart(tmp_path):
         approx_tokens=50000,
         date="2026-07-22",
     )
+    assert not (tmp_path / "stats.svg").exists()  # shelve writes no derived file
+    rebuild(tmp_path)
     chart = tmp_path / "stats.svg"
     assert chart.is_file()
     first = chart.read_text(encoding="utf-8")
@@ -63,13 +68,15 @@ def test_shelve_redraws_chart(tmp_path):
         approx_tokens=70000,
         date="2026-07-23",
     )
+    rebuild(tmp_path)
     second = chart.read_text(encoding="utf-8")
     assert second != first  # redrawn
     assert "07-23" in second
     assert "without memshelf: 120K" in second  # 50K + 70K cumulative
 
-    # the chart travels inside the shelve commit
+    # The chart is derived, so it is deliberately NOT in the shelve commit —
+    # on a real shelf the bot commits it on main (#58).
     tracked = subprocess.run(
         ["git", "-C", str(tmp_path), "ls-files", "stats.svg"], capture_output=True, text=True
     ).stdout.strip()
-    assert tracked == "stats.svg"
+    assert tracked == ""

@@ -8,6 +8,124 @@ once code ships.
 
 ## [Unreleased]
 
+### Added (#14 — the context advisor)
+- **`memshelf advise` / `memshelf_advise`** — "where did my window go?"
+  (MANIFEST hero scenario 2). Reports the breakdown — static overhead,
+  memshelf's own standing cost, live topics, reclaimable — and ranks
+  `shelve` / `drop` / `rollup` **proposals**. It writes nothing.
+- The window breakdown is a caller **input** (ARCHITECTURE open question 7,
+  now closed): a library cannot see the window it is asked about, and a
+  parser for one host's `/context` output would rot with that host's next
+  release. Same split as `shelve` and `rollup` — the model supplies the
+  judgement, the tool supplies what a self-assessment cannot:
+  - its own overhead, measured (INDEX + digests), instead of leaving itself
+    out of the picture;
+  - **verification of every "already shelved" claim** against the actual
+    episodes — a claimed `episode_id` that isn't on the shelf is refused
+    loudly and becomes a shelve candidate, because acting on it would drop
+    content nobody stored;
+  - arithmetic net of what shelving costs forever (~200 tokens of digest and
+    INDEX line per episode), and no proposal at all below 2000 tokens, where
+    the trade stops being worth making;
+  - a deterministic ranking — the M2 exit criterion ("proposals accepted,
+    not overridden") is unmeasurable against a heuristic that reshuffles.
+- When `INDEX.md` is itself over `doctor`'s budget, the advisor answers its
+  own `index-bloat` warning with a concrete `memshelf rollup --until <date>`,
+  computed by walking the oldest episodes and adding up **what each one's
+  INDEX line actually costs** — entries differ by more than a factor of two,
+  and an average both picks the wrong set and misreports the gain. Doctor and
+  the advisor read the same budget constant, so they cannot disagree about
+  the threshold.
+- That rollup proposal refuses to be silently destructive on a shelf written
+  before #58: if display titles still live only in `.meta.json`, a rollup
+  would regenerate the derived files and strip the title off every remaining
+  entry, so the report says to run `memshelf rebuild --adopt` first. Found by
+  executing the advisor's own proposal on a copy of the working shelf — the
+  INDEX shrank far more than predicted, and for the wrong reason.
+- Called with **no** occupants it is the first-run view of the shelf and says
+  the window side is missing — silence about the window is not a clean window.
+- Standing cost is read from the episodes, not `ledger.tsv`: since #58 the
+  ledger is bot-rendered, so on a branch it can lag or be missing, and an
+  advisor reporting zero overhead there would be flattering rather than
+  merely silent.
+
+### Fixed (found by validating against shelf-spec, not by the test suite)
+- **Free-text frontmatter is now written as quoted YAML.** A display title
+  containing `: ` — the shelf has several — parses fine with memshelf's own
+  forgiving `key: value` splitter and is a *syntax error* for a real YAML
+  loader. shelf-spec's validator (which the shelves run in CI) then reports
+  the episode as having **no frontmatter at all**, not as having a bad line:
+  running `--adopt` on the working shelf turned a `valid (0 findings)` shelf
+  into one with several `episode-frontmatter-missing` errors. `display_title`,
+  `description` and `notes` are always double-quoted now, on both the write
+  and the adopt path, and the reader unquotes them.
+- A rollup episode used `mode: rollup`; shelf-spec v0 § 5.2 (and § 4.4 for the
+  ledger column) allows exactly `live | import`. What makes a rollup a rollup
+  is its tag, not a third mode value — otherwise the episode meant to tidy the
+  shelf up would be the one failing its validator.
+- A rollup lists the display titles of the episodes it hid, not just their
+  slugs: the list is read by a human deciding whether to open the archive, and
+  a column of latin slugs answers nothing. (It also stopped the write-only
+  memory guard from flagging the rollup's own digest.)
+
+### Added (#15 — retention and rollups)
+- **`memshelf rollup`** / `memshelf_rollup`: collapse a period's episodes into
+  one digest-of-digests and move the originals into `archive/`, a sub-shelf at
+  the shelf root. Because docshelf only indexes `docs/`, N INDEX lines become
+  one — which is the answer to `doctor`'s `index-bloat` warning, and to
+  ROADMAP M2's exit criterion (100+ episodes, INDEX under ~10 KB).
+- A rollup shrinks navigation and **nothing else**: `recall --id` and `search`
+  still reach archived episodes (the archive is searched as a second shelf),
+  `ledger.tsv` keeps every row, and `stats` is unchanged — an archived episode
+  still holds the mass it saved. The rollup episode names every id it hid, so
+  an INDEX line that hides 40 episodes cannot make them unfindable.
+- `doctor` learned about `archive/`. Without that it would have reported every
+  rolled-up episode as an `orphan-ledger-row` — a rollup would have looked
+  like corruption.
+- **Retention**: `retain_until` in the frontmatter (`shelve --retain-until`,
+  opt-in per episode) plus `memshelf purge` / `memshelf_purge`, dry-run by
+  default, sweeping the archive as well as `docs/` — retention that stopped at
+  the archive boundary would mean "kept forever, out of sight". The report
+  states plainly that purge removes the working-tree file only and that real
+  erasure is a deliberate filter-repo pass.
+
+### Changed
+- **The episode is now the only thing `shelve` writes (#58).** `ledger.tsv`,
+  `INDEX.md`, `stats.svg` and each category's `.meta.json` became derived
+  files, rendered from `docs/` by the new `memshelf rebuild` / `memshelf_rebuild`.
+  Two sessions closing two topics used to append to the same ledger, rewrite
+  the same INDEX and redraw the same chart — a conflict git cannot merge and a
+  human had to unpick (the 2026-07-30 collision cost four conflicted files on
+  top of the real one). Now each side carries one new episode file, and the
+  merge is clean by construction; the test suite asserts exactly that, in the
+  place that used to assert the conflict. Owner's decision of 2026-07-31,
+  variant (a) — the pattern already proven in project-atlas ADR 0007.
+- Episode frontmatter gained `date`, `notes`, `display_title` and
+  `description`. A column that lives only in the derived file cannot be
+  regenerated, so everything the ledger and `.meta.json` need moved into the
+  episode. `date` is the shelve date, deliberately distinct from `span` (what
+  the conversation covered).
+- `shelve` stages only the episode when it auto-commits, so a shelve commit
+  can no longer carry a regenerated INDEX into a PR.
+
+### Added
+- `memshelf rebuild --shelf … [--check] [--adopt]` and the MCP tool
+  `memshelf_rebuild`. `--check` writes nothing and exits 1 if any derived file
+  has drifted from the episodes — that is the shelf's PR guard, running the
+  same code path the bot runs, so the guard cannot pass on logic the bot does
+  not execute. `--adopt` is the one-shot migration for a pre-#58 shelf: it
+  moves date/notes/display title out of `ledger.tsv` and `.meta.json` into the
+  episodes.
+- `adapters/shelf-repo/` — ready-to-copy workflows for a shared shelf: a bot
+  that regenerates derived files on `main`, and a PR guard that refuses diffs
+  touching derived paths.
+- Adoption reports `restated_digest_tokens`: rows whose recorded
+  `digest_tokens` disagrees with the digest actually in the file. On the
+  working shelf that was 30 of 60 rows (standing cost 15112 → 15427 tokens,
+  compression 344.5:1 → 337.5:1) — an M0/M1-transition residue, surfaced
+  rather than silently rewritten, because the shelf has published those
+  numbers.
+
 ### Fixed
 - **`shelve` can no longer produce an episode the spec validator rejects, and
   `doctor` now catches the ones already on disk** (#56). shelf-spec v0 § 5.2

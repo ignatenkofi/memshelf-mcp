@@ -12,10 +12,20 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from memshelf_mcp.core.advisor import (
+    DEFAULT_BUDGET_TOKENS,
+    STALE_AFTER_TURNS,
+    Occupant,
+    advise,
+)
+from memshelf_mcp.core.archive import purge as purge_shelf
+from memshelf_mcp.core.archive import rollup as rollup_shelf
 from memshelf_mcp.core.doctor import check_shelf
 from memshelf_mcp.core.importer import discover as import_discover
 from memshelf_mcp.core.importer import extract as import_extract
 from memshelf_mcp.core.init import init_shelf
+from memshelf_mcp.core.rebuild import adopt as adopt_shelf
+from memshelf_mcp.core.rebuild import rebuild
 from memshelf_mcp.core.recall import read_index, recall, search
 from memshelf_mcp.core.resolve import resolve_shelf
 from memshelf_mcp.core.shelve import shelve
@@ -45,6 +55,11 @@ class ShelveInput(BaseModel):
     approx_tokens: int = 0
     mode: Literal["live", "import"] = "live"
     notes: str = ""
+    retain_until: str | None = Field(
+        default=None,
+        description="Retention (#15): ISO date after which `memshelf purge` drops this "
+        "episode. Absent means keep — retention is opt-in per episode.",
+    )
     date: str | None = Field(default=None, description="YYYY-MM-DD; defaults to today.")
     autocommit: bool = True
 
@@ -65,6 +80,7 @@ def run_shelve(params: ShelveInput) -> dict:
         approx_tokens=params.approx_tokens,
         mode=params.mode,
         notes=params.notes,
+        retain_until=params.retain_until,
         date=params.date,
         autocommit=params.autocommit,
     )
@@ -230,6 +246,159 @@ def run_resolve(params: ResolveInput) -> dict:
     rows and .meta.json keys from both branches, rebuild INDEX/stats from
     docs/, run doctor. Conflicting episodes are reported, never auto-merged."""
     return resolve_shelf(params.shelf_path, commit=params.commit).as_dict()
+
+
+class RebuildInput(BaseModel):
+    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+    check: bool = Field(
+        default=False,
+        description="Verify instead of write: report which derived files would "
+        "change and exit non-zero if any would. The shelf's PR guard runs this.",
+    )
+    adopt: bool = Field(
+        default=False,
+        description="One-shot migration for a shelf written before #58: copy the "
+        "shelve date, ledger notes and display title out of ledger.tsv/.meta.json "
+        "into each episode's frontmatter, so regenerating cannot drop them.",
+    )
+
+
+def run_rebuild(params: RebuildInput) -> dict:
+    """Regenerate every derived file from the episodes (#58): ledger.tsv,
+    each category's .meta.json, INDEX.md, stats.svg. The episode is the source;
+    these four are output, and a bot on `main` owns them. With check=True
+    nothing is written — the same code path answers 'do the committed
+    artifacts still match the episodes?'."""
+    if params.adopt and params.check:
+        raise ValueError("adopt writes to the episodes — it cannot be combined with check")
+    payload = {}
+    if params.adopt:
+        payload["adoption"] = adopt_shelf(params.shelf_path)
+    payload.update(rebuild(params.shelf_path, check=params.check).as_dict())
+    return payload
+
+
+class RollupInput(BaseModel):
+    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+    slug: str = Field(description="Latin slug/id of the rollup episode, e.g. 2026-Q2-rollup.")
+    digest: str = Field(
+        description="The digest-of-digests — YOUR synthesis of the period, not the tool's. "
+        "Same contract as a shelve digest: what was decided, what was rejected, what stays open."
+    )
+    until: str | None = Field(
+        default=None,
+        description="Archive every episode dated on or before this ISO date.",
+    )
+    episode_ids: list[str] = Field(
+        default_factory=list,
+        description="Explicit episode ids to archive instead of a date range.",
+    )
+    display_title: str | None = Field(default=None, description="Free-form INDEX title.")
+    sections: dict[str, str] = Field(
+        default_factory=dict, description="Extra H2 sections for the rollup episode."
+    )
+    date: str | None = Field(default=None, description="Rollup date (default: today).")
+
+
+def run_rollup(params: RollupInput) -> dict:
+    """Collapse a period into one digest-of-digests and move the originals into
+    the archive sub-shelf (#15). N INDEX lines become one; nothing is deleted,
+    recall by id keeps working, and the ledger keeps every row — an archived
+    episode still holds the mass it saved."""
+    return rollup_shelf(
+        params.shelf_path,
+        slug=params.slug,
+        digest=params.digest,
+        until=params.until,
+        episode_ids=list(params.episode_ids) or None,
+        display_title=params.display_title,
+        sections=dict(params.sections),
+        date=params.date,
+    ).as_dict()
+
+
+class PurgeInput(BaseModel):
+    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+    apply: bool = Field(
+        default=False,
+        description="Actually delete. Default is a dry run that only lists what expired.",
+    )
+    today: str | None = Field(
+        default=None, description="Treat this ISO date as today (testing/backdating)."
+    )
+
+
+def run_purge(params: PurgeInput) -> dict:
+    """Delete episodes whose `retain_until` has passed, then reindex (#15).
+    Dry-run by default. Deletes the working-tree file only — git history still
+    contains it, and real erasure is a deliberate filter-repo pass."""
+    return purge_shelf(params.shelf_path, today=params.today, apply=params.apply).as_dict()
+
+
+class OccupantInput(BaseModel):
+    """One thing the caller reports as sitting in its context window."""
+
+    label: str = Field(description="What this is, in your own words — it is echoed in proposals.")
+    approx_tokens: int = Field(description="Rough size in tokens; an eyeball estimate is fine.")
+    state: Literal["live", "closed", "unknown"] = Field(
+        default="unknown",
+        description="Is the topic still in play? Only you can tell. Unstated counts as live.",
+    )
+    kind: Literal["topic", "research", "tool-output", "instructions", "other"] = "topic"
+    idle_turns: int | None = Field(
+        default=None, description="Turns since this was last referenced, if you can tell."
+    )
+    episode_id: str | None = Field(
+        default=None,
+        description="Set if you believe this is ALREADY shelved. The claim is verified "
+        "against the shelf before anything is proposed.",
+    )
+
+
+class AdviseInput(BaseModel):
+    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+    occupants: list[OccupantInput] = Field(
+        default_factory=list,
+        description="What is in your context right now. Empty is valid — you then get the "
+        "shelf side only, and the report says the window side is missing.",
+    )
+    budget_tokens: int = Field(
+        default=DEFAULT_BUDGET_TOKENS,
+        description="Your context window. Default is a common size, not a memshelf constant.",
+    )
+    stale_after_turns: int = Field(
+        default=STALE_AFTER_TURNS,
+        description="Turns of silence after which an occupant of unstated state is called stale.",
+    )
+    include_memory_overhead: bool = Field(
+        default=True,
+        description="Count memshelf's own standing cost (INDEX + digests) as an occupant.",
+    )
+
+
+def run_advise(params: AdviseInput) -> dict:
+    """Report where the window went and what could be put down (#14).
+
+    Proposals only — this call writes nothing and changes nothing.
+    """
+    advice = advise(
+        params.shelf_path,
+        occupants=[
+            Occupant(
+                label=o.label,
+                approx_tokens=o.approx_tokens,
+                state=o.state,
+                kind=o.kind,
+                idle_turns=o.idle_turns,
+                episode_id=o.episode_id,
+            )
+            for o in params.occupants
+        ],
+        budget_tokens=params.budget_tokens,
+        stale_after_turns=params.stale_after_turns,
+        include_memory_overhead=params.include_memory_overhead,
+    )
+    return {"status": "ok", **advice.as_dict()}
 
 
 class ImportInput(BaseModel):

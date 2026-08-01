@@ -7,6 +7,7 @@ pytest.importorskip("docshelf_mcp")
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
 from memshelf_mcp.core.doctor import check_shelf  # noqa: E402
+from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.shelve import shelve  # noqa: E402
 
 
@@ -114,6 +115,7 @@ def test_orphan_ledger_row_flagged(tmp_path):
         sections={"Decisions": "X"},
         date="2026-07-22",
     )
+    rebuild(root)  # the ledger is derived now (#58)
     with (tmp_path / "ledger.tsv").open("a", encoding="utf-8") as fh:
         fh.write("2026-07-22\t2026-07-22-ghost\tlive\t100\t20\t\n")
     report = check_shelf(root)

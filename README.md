@@ -49,7 +49,7 @@ git repo with **no remote configured**.
 ## Quick start
 
 As an **MCP server** (tools `memshelf_init` / `shelve` / `recall` / `index` /
-`search` / `stats` / `resolve` / `doctor`):
+`search` / `stats` / `rebuild` / `rollup` / `purge` / `resolve` / `doctor`):
 
 ```bash
 # Claude Code
@@ -72,14 +72,103 @@ memshelf init   --shelf ~/my-shelf --name "My working memory"
 memshelf shelve --shelf ~/my-shelf --slug 2026-07-23-topic --kind topic \
   --digest "What was decided, what was rejected and why, what stays open." \
   --section "Decisions=..."
-memshelf recall --shelf ~/my-shelf --id 2026-07-23-topic --section Decisions --log
-memshelf stats  --shelf ~/my-shelf   # claimed + realized savings
-memshelf doctor --shelf ~/my-shelf   # exit 1 on integrity errors
+memshelf recall  --shelf ~/my-shelf --id 2026-07-23-topic --section Decisions --log
+memshelf rebuild --shelf ~/my-shelf  # render the derived files from the episodes
+memshelf stats   --shelf ~/my-shelf  # claimed + realized savings
+memshelf advise  --shelf ~/my-shelf  # where the window went; proposals only
+memshelf doctor  --shelf ~/my-shelf  # exit 1 on integrity errors
 ```
 
-Two sessions shelved on parallel branches and the merge collides in
-`INDEX.md` / `ledger.tsv` / `.meta.json` / `stats.svg`? That is the
-multi-writer conflict class (#58) and it resolves mechanically:
+### The episode is the source; everything else is output
+
+`ledger.tsv`, `INDEX.md`, `stats.svg` and each category's `.meta.json` are
+**derived** (#58): `shelve` writes and commits the episode alone, and
+`memshelf rebuild` renders the four from `docs/`. That is what makes two
+sessions shelving in parallel a non-event — they no longer touch the same four
+files in the same places, so the merge is clean by construction. Delete all
+four and `rebuild` restores them byte-identically.
+
+On a shared shelf, let a bot own them on `main` and guard PRs against touching
+derived paths — ready-to-copy workflows are in
+[`adapters/shelf-repo/`](adapters/shelf-repo/). A shelf written before this
+split adopts it once:
+
+```bash
+memshelf rebuild --shelf ~/my-shelf --adopt   # move date/notes/title into the episodes
+memshelf rebuild --shelf ~/my-shelf --check   # the guard: exit 1 if anything drifted
+```
+
+### Where did my window go?
+
+`memshelf advise` answers the question the project was founded on — *a dead
+topic has been occupying 30K tokens for forty minutes* — and answers it with
+**proposals**. It writes nothing.
+
+The tool cannot see your window, so you tell it what is in there; it does the
+part you cannot do about yourself:
+
+```bash
+memshelf advise --shelf ~/my-shelf \
+  --occupant 'CLAUDE.md stack=18000,kind=instructions' \
+  --occupant 'auth refactor=42000,closed' \
+  --occupant 'current work=51000,live' \
+  --occupant 'search dump=9000,idle=18' \
+  --occupant 'Case B verdict=12000,live,episode=2026-07-22-case-b-verdict'
+```
+
+You get a breakdown — static overhead / **memshelf's own cost** / live /
+reclaimable — and ranked proposals: `shelve` the closed topic and the idle
+dump, `drop` the one that is already on the shelf (recall it if you need it),
+`rollup` when INDEX itself is what got fat. Run it with no occupants at all
+for the first-run view of the shelf; it will say the window side is missing
+rather than report it clean.
+
+Three things keep it honest:
+
+- **It counts itself.** INDEX + digests are what memshelf takes out of every
+  session, and that number is in the report, not left out of it.
+- **It verifies "already shelved".** Claim an `episode=` that isn't on the
+  shelf and it refuses the drop out loud — that is the one mistake here that
+  destroys work.
+- **It reports net.** Shelving adds a digest and an INDEX line to every later
+  session, so proposals subtract that, and a topic too small to pay for its
+  own digest is not proposed at all.
+
+### Keeping INDEX readable as the shelf grows
+
+`INDEX.md` is the one file that rides in *every* session, so it grows with the
+episode count while the per-session budget does not. `doctor` warns
+(`index-bloat`) once it crosses the budget; two mechanics answer that warning
+(#15):
+
+```bash
+# Collapse a period into one digest-of-digests; originals move to archive/
+memshelf rollup --shelf ~/my-shelf --slug 2026-Q1-rollup --until 2026-03-31 \
+  --display-title "Роллап Q1" \
+  --digest "What the quarter decided, what it rejected, what stays open."
+
+# Retention is opt-in per episode, and purge is a dry run by default
+memshelf shelve --shelf ~/my-shelf ... --retain-until 2027-01-01
+memshelf purge  --shelf ~/my-shelf            # list what expired
+memshelf purge  --shelf ~/my-shelf --apply    # delete it, then reindex
+```
+
+A rollup shrinks **navigation and nothing else**: the originals move into
+`archive/` — a sub-shelf with its own INDEX, outside the parent's `docs/` —
+so N INDEX lines become one. Nothing is deleted, `recall --id` and `search`
+still reach them, and every ledger row survives, because an archived episode
+still holds the mass it saved. The rollup episode lists every id it hid.
+
+The rollup *digest* is yours, not the tool's: synthesizing a quarter of
+digests is the part a tool cannot do, so it takes the same digest contract
+`shelve` enforces.
+
+`purge` deletes the working-tree file — **git history still has it**. Real
+erasure is a deliberate `filter-repo` pass over the whole repository, never a
+side effect of a tool call, and the purge report says so.
+
+`resolve` stays for what remains genuinely conflicting — the same episode
+written on both sides, or a shelf that has not adopted the bot yet:
 
 ```bash
 memshelf resolve --shelf ~/my-shelf            # union appends, rebuild derived, doctor

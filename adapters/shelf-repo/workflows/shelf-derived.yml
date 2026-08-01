@@ -1,0 +1,52 @@
+name: shelf-derived
+# Производные файлы полки коммитит бот на main (#58) — по образцу
+# project-atlas ADR 0007. PR возят эпизоды; ledger.tsv, INDEX.md, stats.svg и
+# docs/*/.meta.json собираются здесь заново из эпизодов.
+#
+# Зачем: две сессии, закрывающие две темы, трогают одни и те же четыре файла в
+# одних и тех же местах. Git не умеет мержить дописанную строку ledger против
+# другой дописанной строки — конфликт был не смысловым, а бухгалтерским.
+# Разделив вход и выход, мы оставляем только настоящие столкновения: два
+# эпизода с одним слагом.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: shelf-derived
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Установить memshelf
+        run: pip install --quiet "memshelf-mcp @ git+https://github.com/ignatenkofi/memshelf-mcp"
+
+      - name: Пересобрать производные файлы из эпизодов
+        run: memshelf rebuild --shelf .
+
+      - name: Doctor (errors блокируют)
+        run: memshelf doctor --shelf .
+
+      - name: Закоммитить, если что-то изменилось
+        run: |
+          set -euo pipefail
+          git config user.name "shelf-bot"
+          git config user.email "shelf-bot@users.noreply.github.com"
+          git add -- ledger.tsv INDEX.md stats.svg 'docs/*/.meta.json'
+          if git diff --cached --quiet; then
+            echo "::notice::производные файлы уже соответствуют эпизодам"
+            exit 0
+          fi
+          git commit -m "chore: regenerate derived files [skip ci]"
+          git push
