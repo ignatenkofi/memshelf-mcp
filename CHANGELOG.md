@@ -8,6 +8,42 @@ once code ships.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The digest contract was checked after the write, and nothing could fix it**
+  (#71). `shelve` printed `digest_warnings: ["thin"]` only once the episode was
+  written, the ledger row accounted for and the auto-commit made — and then
+  offered no way to correct it: re-shelving the same slug raised
+  `DocumentExistsError`, and docshelf's `overwrite=True` was never plumbed
+  through. All three remaining exits were bad: a new slug duplicates the episode
+  and its ledger row, a hand-edit bypasses the redaction pass and the shelf's own
+  «write with the tool, not by hand» rule, and leaving a weak digest devalues the
+  episode — the digest is the only thing read at recall before fetching the body.
+
+  Same family as #62–#66: the contract is checked after the action, and the
+  failed check rolls nothing back.
+
+  - `shelve --amend` / `amend=True` rewrites an episode already on the shelf
+    under the same slug. The whole pipeline runs again — redaction, the digest
+    contract, composition — so an amended episode is exactly as guarded as a
+    fresh one. Since #58 the ledger row is rendered by `rebuild` from the
+    frontmatter, so rewriting the one episode recomputes the one row rather than
+    adding a second.
+  - Amending a slug that is **not** on the shelf is an error, not a create. The
+    overwhelmingly likely cause is a mistyped slug, and a silent create leaves
+    the author believing they fixed an episode that still carries the old text.
+  - A plain `shelve` onto an occupied slug still refuses — amend is opt-in,
+    never the default — but the message now names `--amend` instead of pointing
+    at a Python kwarg the CLI user cannot pass.
+
+- **The validator was unreachable without writing** (#71). `memshelf lint-digest`
+  runs the same Layer-3 check with no side effects, so a digest can be checked
+  while it is still being written rather than by way of a throwaway shelve. Reads
+  `--digest`, `--digest-file` or stdin; exits non-zero on errors, and `--strict`
+  makes warnings count too. The default stays permissive deliberately: a pure
+  reference digest legitimately carries no decision cue, and `thin` must not turn
+  into a blocking dialog. Also exposed as the `memshelf_lint_digest` MCP tool.
+
 ### Fixed (one family, all five found by running the tool, not by its tests)
 
 Five defects reported over 2026-08-01 share a shape: the tool finishes, reports

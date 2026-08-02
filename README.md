@@ -74,10 +74,44 @@ memshelf shelve --shelf ~/my-shelf --slug 2026-07-23-topic --kind topic \
   --section "Decisions=..."
 memshelf recall  --shelf ~/my-shelf --id 2026-07-23-topic --section Decisions --log
 memshelf rebuild --shelf ~/my-shelf  # render the derived files from the episodes
+
+memshelf lint-digest --digest "..."          # check the contract, write nothing
+memshelf shelve ... --amend                  # rewrite an episode already shelved
 memshelf stats   --shelf ~/my-shelf  # claimed + realized savings
 memshelf advise  --shelf ~/my-shelf  # where the window went; proposals only
 memshelf doctor  --shelf ~/my-shelf  # exit 1 on integrity errors
 ```
+
+### Getting the digest right is a loop, not a gate
+
+The digest is the only thing read at recall before fetching the body, so a weak
+one devalues the whole episode. Two commands make fixing it cheap (#71):
+
+```bash
+# Before writing anything: same validator `shelve` runs, no side effects.
+memshelf lint-digest --digest "$(cat draft.txt)"
+memshelf lint-digest --strict --digest-file draft.txt   # warnings fail too
+```
+
+Errors block a shelve; warnings do not, and `--strict` is what turns them into
+a failure for a caller that wants that. The default stays permissive on purpose
+— a pure reference digest legitimately carries no decision marker, and `thin`
+must not make it unwritable.
+
+```bash
+# After writing: rewrite in place, same slug.
+memshelf shelve --shelf ~/my-shelf --slug 2026-07-23-topic --kind topic \
+  --digest "..." --section "Decisions=..." --amend
+```
+
+`--amend` runs the whole pipeline again — redaction, the digest contract,
+composition — so an amended episode is exactly as guarded as a fresh one, which
+a hand-edit of the file never is. Because the ledger row is derived (below),
+rewriting the one episode recomputes the one row instead of adding a second:
+the reason a new slug was the wrong workaround goes away with it. Amending a
+slug that is not on the shelf is an error, not a create — that is a typo, and
+creating it silently would leave you believing you fixed an episode that still
+carries the old text.
 
 ### The episode is the source; everything else is output
 

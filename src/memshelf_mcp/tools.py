@@ -20,6 +20,7 @@ from memshelf_mcp.core.advisor import (
 )
 from memshelf_mcp.core.archive import purge as purge_shelf
 from memshelf_mcp.core.archive import rollup as rollup_shelf
+from memshelf_mcp.core.digest import validate_digest
 from memshelf_mcp.core.doctor import check_shelf
 from memshelf_mcp.core.importer import discover as import_discover
 from memshelf_mcp.core.importer import extract as import_extract
@@ -62,6 +63,12 @@ class ShelveInput(BaseModel):
     )
     date: str | None = Field(default=None, description="YYYY-MM-DD; defaults to today.")
     autocommit: bool = True
+    amend: bool = Field(
+        default=False,
+        description="Rewrite an episode already on the shelf, under the same slug (#71): "
+        "one episode, one recomputed ledger row, redaction and the digest contract re-run. "
+        "Errors if the slug is not there — that is a typo, not a create.",
+    )
 
 
 def run_shelve(params: ShelveInput) -> dict:
@@ -83,6 +90,7 @@ def run_shelve(params: ShelveInput) -> dict:
         retain_until=params.retain_until,
         date=params.date,
         autocommit=params.autocommit,
+        amend=params.amend,
     )
     totals = compute_stats(params.shelf_path)
     return {
@@ -91,6 +99,7 @@ def run_shelve(params: ShelveInput) -> dict:
         "display_title": result.display_title,
         "committed": result.committed,
         "commit": result.commit,
+        "amended": result.amended,
         "redaction": {
             "total": result.redaction.total,
             "counts": result.redaction.counts,
@@ -213,6 +222,35 @@ def run_init(params: InitInput) -> dict:
         "created": result.created,
         "committed": result.committed,
         "commit": result.commit,
+    }
+
+
+class LintDigestInput(BaseModel):
+    digest: str = Field(description="The digest text to check. Nothing is written.")
+    strict: bool = Field(
+        default=False,
+        description="Make warnings count as failure. Off by default: a reference digest "
+        "legitimately carries no decision marker, so `thin` must not block by default.",
+    )
+
+
+def run_lint_digest(params: LintDigestInput) -> dict:
+    """Check a digest against the Layer-3 contract without writing anything (#71).
+
+    The contract has always been enforced at shelve time, which is one moment
+    too late to be useful while the digest is still being written. Same
+    validator, no side effects — the point is that «check before you write» stops
+    requiring a throwaway shelve.
+    """
+    result = validate_digest(params.digest)
+    ok = result.ok and (not result.warnings or not params.strict)
+    return {
+        "status": "ok" if ok else "rejected",
+        "passed": ok,
+        "word_count": result.word_count,
+        "errors": [{"code": f.code, "message": f.message} for f in result.errors],
+        "warnings": [{"code": f.code, "message": f.message} for f in result.warnings],
+        "report": result.report(),
     }
 
 
