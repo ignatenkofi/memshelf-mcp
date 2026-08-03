@@ -5,6 +5,13 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
 
 # /shelve — offload an episode to the memory shelf (M0, prompt-only)
 
+> **Prefer the tool when it is installed.** `memshelf shelve --shelf … --slug …
+> --kind … --digest … --section …` does everything below in one call —
+> redaction, the digest contract, composition, the episode write and the
+> auto-commit — and cannot drift from the contract the way a prompt can. These
+> steps are the fallback for hosts without `memshelf`; keep them in sync with
+> `core/shelve.py` when the contract changes.
+
 ## Prerequisites
 
 - `MEMSHELF_ROOT` env var (or an explicit path given by the user) points to
@@ -81,22 +88,31 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
    Category mapping: `topic → topics`, `research → research`,
    `session → sessions`.
 
-6. **Ledger.** Append one line to `<shelf>/ledger.tsv`
-   (create with header if missing):
+6. **Do NOT write the ledger by hand.** Since #58 `ledger.tsv` — like
+   `INDEX.md`, `stats.svg` and each category's `.meta.json` — is a **derived**
+   file: it is rendered from the episodes' frontmatter, not appended to. A
+   hand-written row is at best redundant and at worst the merge conflict the
+   split exists to remove, because two sessions shelving in parallel would
+   again touch the same file.
 
-   ```text
-   date	episode_id	mode	approx_tokens_in	digest_tokens	notes
-   ```
+   Everything the row needs therefore goes into the frontmatter of step 2
+   (`date`, `mode`, `approx_tokens`, `notes`), and the file itself is produced
+   by whichever of these applies:
 
-   `mode` = `live` or `import`; `digest_tokens` = digest chars/4.
+   - `memshelf rebuild --shelf <shelf>` if the CLI is available;
+   - the shelf's bot on `main`, if the shelf adopted #58 (then the file
+     legitimately lags on a branch — that is not a defect to fix by hand).
 
-   `notes` must contain **no tab characters** (shelf-spec v0 § 4.4): it is the
-   last column, so a tab shifts the field count for every reader — and a
-   newline forges an entire bogus row. Keep it to one tab-free line.
+   `notes` still must contain **no tab characters** (shelf-spec v0 § 4.4): it
+   becomes the last ledger column, so a tab shifts the field count for every
+   reader and a newline forges an entire bogus row. Keep it to one tab-free
+   line.
 
 7. **Commit, then push if the container is ephemeral — shelf repo only.**
-   `git add -A && git commit` inside the shelf with message `shelve: <id>`;
-   never write outside the shelf directory. Whether to push depends on the
+   Stage **the episode file alone** — `git add <shelf>/docs/<category>/<id>.md`,
+   not `git add -A` — and commit with message `shelve: <id>`; never write
+   outside the shelf directory. Staging everything would sweep in the derived
+   files of step 6 and recreate the collision #58 removed. Whether to push depends on the
    shelf's storage mode and the session:
    - `git-local` / `plain` (no remote): nothing to push — the commit is the
      durable record.

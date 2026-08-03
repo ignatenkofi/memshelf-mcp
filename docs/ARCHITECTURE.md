@@ -412,8 +412,11 @@ Rules that keep the boundary honest:
 2. ~~**Repo placement.**~~ Resolved 2026-07-13: separate
    [`memshelf-mcp`](https://github.com/ignatenkofi/memshelf-mcp) repo,
    seeded from this RFC.
-3. **Server topology.** Separate MCP server process vs same-process
-   registration alongside docshelf tools (one config entry for users).
+3. ~~**Server topology.**~~ Resolved 2026-07-22 (#28): a separate MCP
+   process. `memshelf-mcp` ships its own stdio server (`server.py`); the
+   core imports docshelf as a library, while the server stays independently
+   versioned and installable. Users who want both attach two config entries.
+   See `docs/DECISIONS.md`.
 4. **Episode segmentation automation** (v2+): can topic boundaries be
    detected well enough to *propose* cuts, or does explicit-only remain the
    right default?
