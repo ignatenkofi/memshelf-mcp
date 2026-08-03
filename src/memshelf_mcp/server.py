@@ -25,6 +25,7 @@ from memshelf_mcp.tools import (
     ImportInput,
     IndexInput,
     InitInput,
+    LintDigestInput,
     PurgeInput,
     RebuildInput,
     RecallInput,
@@ -38,6 +39,7 @@ from memshelf_mcp.tools import (
     run_import,
     run_index,
     run_init,
+    run_lint_digest,
     run_purge,
     run_rebuild,
     run_recall,
@@ -92,6 +94,24 @@ def memshelf_shelve(params: ShelveInput) -> str:
         return _serialize(run_shelve(params))
     except Exception as exc:
         return _error_response(exc, "memshelf_shelve")
+
+
+@mcp.tool(
+    name="memshelf_lint_digest",
+    annotations={"title": "Check a digest against the contract, writing nothing", **_READ_ONLY},
+)
+def memshelf_lint_digest(params: LintDigestInput) -> str:
+    """Validate a digest against the Layer-3 contract without touching the shelf.
+
+    Same validator ``memshelf_shelve`` runs, minus every side effect — so the
+    digest can be checked while it is still being written, rather than after the
+    episode is already committed (#71). Errors block a shelve; warnings do not,
+    and ``strict`` is what turns them into a failure for a caller that wants it.
+    """
+    try:
+        return _serialize(run_lint_digest(params))
+    except Exception as exc:
+        return _error_response(exc, "memshelf_lint_digest")
 
 
 @mcp.tool(

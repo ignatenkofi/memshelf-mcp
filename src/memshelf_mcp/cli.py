@@ -2,7 +2,7 @@
 
 Anything that can run a shell command can drive the shelf: ``init``,
 ``shelve``, ``recall``, ``index``, ``search``, ``stats``, ``advise``,
-``rebuild``, ``rollup``, ``purge``, ``resolve``, ``doctor``.
+``rebuild``, ``rollup``, ``purge``, ``resolve``, ``doctor``, ``lint-digest``.
 """
 
 from __future__ import annotations
@@ -21,13 +21,14 @@ from memshelf_mcp.core.episode import EpisodeError
 from memshelf_mcp.core.importer import TranscriptError
 from memshelf_mcp.core.init import InitError
 from memshelf_mcp.core.recall import EpisodeNotFound
-from memshelf_mcp.core.shelve import DigestContractError
+from memshelf_mcp.core.shelve import AmendTargetMissing, DigestContractError, EpisodeExists
 from memshelf_mcp.tools import (
     AdviseInput,
     DoctorInput,
     ImportInput,
     IndexInput,
     InitInput,
+    LintDigestInput,
     OccupantInput,
     PurgeInput,
     RebuildInput,
@@ -42,6 +43,7 @@ from memshelf_mcp.tools import (
     run_import,
     run_index,
     run_init,
+    run_lint_digest,
     run_purge,
     run_rebuild,
     run_recall,
@@ -81,15 +83,28 @@ def _cmd_shelve(args: argparse.Namespace) -> int:
         retain_until=args.retain_until,
         date=args.date,
         autocommit=not args.no_commit,
+        amend=args.amend,
     )
     try:
         result = run_shelve(params)
-    except (DigestContractError, EpisodeError) as exc:
+    except (DigestContractError, EpisodeError, AmendTargetMissing, EpisodeExists) as exc:
         # Expected, actionable failures: print the fix to stderr, exit non-zero.
         print(str(exc), file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
+
+
+def _cmd_lint_digest(args: argparse.Namespace) -> int:
+    if args.digest_file:
+        digest = Path(args.digest_file).expanduser().read_text(encoding="utf-8")
+    elif args.digest is not None:
+        digest = args.digest
+    else:
+        digest = sys.stdin.read()
+    result = run_lint_digest(LintDigestInput(digest=digest, strict=args.strict))
+    print(result["report"])
+    return 0 if result["passed"] else 1
 
 
 def _cmd_recall(args: argparse.Namespace) -> int:
@@ -344,7 +359,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sh.add_argument("--date", help="YYYY-MM-DD (defaults to today).")
     sh.add_argument("--no-commit", action="store_true", help="Skip the auto-commit.")
+    sh.add_argument(
+        "--amend",
+        action="store_true",
+        help="Rewrite an episode already on the shelf under the same slug: one episode, "
+        "one recomputed ledger row, redaction and the digest contract re-run. "
+        "Fails if the slug is not there.",
+    )
     sh.set_defaults(func=_cmd_shelve)
+
+    ld = sub.add_parser(
+        "lint-digest",
+        help="Check a digest against the contract without writing anything.",
+    )
+    ld.add_argument("--digest", help="The digest text. Omit both to read stdin.")
+    ld.add_argument("--digest-file", help="Read the digest from this file.")
+    ld.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit non-zero on warnings too (default: only errors fail).",
+    )
+    ld.set_defaults(func=_cmd_lint_digest)
 
     rc = sub.add_parser("recall", help="Recall an episode, or one section of it.")
     rc.add_argument("--shelf", required=True, help="Path to the shelf.")

@@ -62,6 +62,23 @@ class DigestContractError(ValueError):
         super().__init__("digest rejected:\n" + result.report())
 
 
+class AmendTargetMissing(FileNotFoundError):
+    """Raised when ``amend=True`` names an episode that isn't on the shelf.
+
+    Creating it instead would be the wrong kindness: the overwhelmingly likely
+    cause is a mistyped slug, and a silent create leaves the author believing
+    they fixed an episode that still carries the old text (#71).
+    """
+
+
+class EpisodeExists(FileExistsError):
+    """Raised when a plain shelve would clobber an existing episode.
+
+    docshelf's own guard says «pass overwrite=True» — advice the CLI could not
+    take before #71. This one names the flag that exists.
+    """
+
+
 @dataclass
 class ShelveResult:
     address: str  # episode path relative to the shelf root
@@ -73,6 +90,7 @@ class ShelveResult:
     committed: bool
     commit: str | None = None
     warnings: list[str] = field(default_factory=list)
+    amended: bool = False
 
 
 def _first_sentence(text: str, cap: int = 200) -> str:
@@ -147,6 +165,7 @@ def shelve(
     retain_until: str | None = None,
     extra_patterns: list[tuple[str, str]] | None = None,
     autocommit: bool = True,
+    amend: bool = False,
 ) -> ShelveResult:
     """Shelve one episode into an initialized docshelf shelf.
 
@@ -158,12 +177,41 @@ def shelve(
     and — for a git shelf with ``autocommit`` — one commit is made, staging the
     episode only (never a push). Derived files are not touched: run
     ``memshelf rebuild`` (the shelf's bot does it on ``main``).
+
+    ``amend`` rewrites an episode that is already on the shelf, under the same
+    slug (#71). The whole pipeline runs again — redaction, the digest contract,
+    composition — so an amended episode is exactly as guarded as a fresh one,
+    which a hand-edit of the file never is. Since #58 the ledger row is
+    rendered by ``rebuild`` from the frontmatter, so rewriting the one episode
+    recomputes the one row rather than adding a second: the reason a new slug
+    was the wrong workaround disappears with it.
     """
-    from docshelf_mcp.core.shelf import Shelf  # heavy dep, imported lazily
+    from docshelf_mcp.core.shelf import DocumentExistsError, Shelf  # heavy dep, lazy
+    from docshelf_mcp.core.slugify import slugify
 
     root = Path(shelf_root).expanduser().resolve()
     sections = dict(sections or {})
     warnings: list[str] = []
+
+    # Resolve the target before any work: an amend of a slug that isn't there
+    # must cost nothing and say so. The path is derived exactly the way
+    # docshelf will derive it (add_document gets title=slug and no `slug=`, so
+    # the stem is slugify(title, max_len=80) or "document"), and this one
+    # derivation then feeds the amend guard, the returned address and git
+    # staging. Держать вторую — как раз то, из-за чего `address` мог назвать
+    # несуществующий файл: он собирался из сырого слага, пока docshelf писал в
+    # нормализованный. Слаг вида «2026-08-03-Проверка Слага» уезжал в
+    # docs/topics/2026-08-03-проверка-слага.md, а вызывающему возвращался
+    # исходный путь, и `git add` по нему тихо не находил ничего.
+    category = CATEGORY_BY_KIND[kind]
+    doc_stem = slugify(slug, max_len=80) or "document"
+    episode_path = root / "docs" / category / f"{doc_stem}.md"
+    if amend and not episode_path.is_file():
+        raise AmendTargetMissing(
+            f"--amend: no episode {slug!r} on this shelf "
+            f"({episode_path.relative_to(root).as_posix()} does not exist). "
+            "Check the slug, or shelve it without --amend to create it."
+        )
 
     # The shelf's own machine-readable POLICY pack (#16) layers onto the builtin
     # credential shapes and any caller-supplied patterns. A malformed pack does
@@ -222,7 +270,6 @@ def shelve(
     markdown = compose_episode(frontmatter, digest, sections)
 
     # Layer 1 — write through docshelf.
-    category = CATEGORY_BY_KIND[kind]
     shelf = Shelf(root)
 
     # add_document slugifies its `title` into the filename, and docshelf's
@@ -243,13 +290,23 @@ def shelve(
     sidecar_before = sidecar.read_text(encoding="utf-8") if sidecar.is_file() else None
     try:
         tmp.write_text(markdown, encoding="utf-8")
-        shelf.add_document(
-            tmp,
-            category=category,
-            title=slug,
-            description=desc,
-            rebuild_index=False,
-        )
+        try:
+            shelf.add_document(
+                tmp,
+                category=category,
+                title=slug,
+                description=desc,
+                rebuild_index=False,
+                overwrite=amend,
+            )
+        except DocumentExistsError as exc:
+            # docshelf's guard points at its own Python kwarg. Name the flag the
+            # caller actually has — that gap is what #71 was filed about.
+            raise EpisodeExists(
+                f"episode {slug!r} is already on this shelf. Pass --amend "
+                "(CLI) / amend=True to rewrite it in place — same slug, one "
+                f"ledger row, redaction and the digest contract re-run.\n{exc}"
+            ) from exc
     finally:
         tmp.unlink(missing_ok=True)
         if sidecar_before is None:
@@ -257,7 +314,7 @@ def shelve(
         elif sidecar.is_file() and sidecar.read_text(encoding="utf-8") != sidecar_before:
             sidecar.write_text(sidecar_before, encoding="utf-8")
 
-    address = f"docs/{category}/{slug}.md"
+    address = episode_path.relative_to(root).as_posix()
 
     # The ledger row is no longer written here — it is what `rebuild` will
     # render from this episode's frontmatter. Returned anyway so the caller
@@ -273,7 +330,8 @@ def shelve(
     # the conflict class the split exists to remove.
     committed, sha = False, None
     if autocommit and (root / ".git").exists():
-        committed, sha = git_commit(root, f"shelve: {slug}", paths=[address])
+        subject = f"shelve: {slug} (amend)" if amend else f"shelve: {slug}"
+        committed, sha = git_commit(root, subject, paths=[address])
 
     return ShelveResult(
         address=address,
@@ -285,4 +343,5 @@ def shelve(
         committed=committed,
         commit=sha,
         warnings=warnings,
+        amended=amend,
     )

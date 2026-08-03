@@ -8,7 +8,11 @@ pytest.importorskip("docshelf_mcp")
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
 from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
-from memshelf_mcp.core.shelve import DigestContractError, shelve  # noqa: E402
+from memshelf_mcp.core.shelve import (  # noqa: E402
+    AmendTargetMissing,
+    DigestContractError,
+    shelve,
+)
 
 GOOD_DIGEST = (
     "The auth refactor moved token checks into middleware; the decided approach "
@@ -355,3 +359,234 @@ def test_shelve_preserves_an_existing_sidecar_byte_for_byte(tmp_path):
     # …and one rebuild brings the new episode in, with its display title.
     rebuild(root)
     assert "Второй" in sidecar.read_text(encoding="utf-8")
+
+
+# ── #71: amend ────────────────────────────────────────────────────────────
+#
+# The digest contract is checked *after* the episode is written, committed and
+# accounted for — and until now the tool that reported the problem was also the
+# reason it could not be fixed. These cover the fix, not the report.
+
+
+def _amend_setup(tmp_path, digest=GOOD_DIGEST):
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-08-02-thin",
+        kind="topic",
+        digest=digest,
+        sections={"Decisions": "first pass"},
+        approx_tokens=1000,
+        date="2026-08-02",
+    )
+    return root
+
+
+def test_amend_rewrites_the_episode_in_place(tmp_path):
+    root = _amend_setup(tmp_path)
+    better = (
+        "The nightly guard was rewritten: the decided approach asserts the "
+        "advisory id, not the exit code. The rc-only check was rejected as "
+        "unfalsifiable. Open: whether the fixture should cover a second ecosystem."
+    )
+    result = shelve(
+        root,
+        slug="2026-08-02-thin",
+        kind="topic",
+        digest=better,
+        sections={"Decisions": "second pass"},
+        approx_tokens=2000,
+        date="2026-08-02",
+        amend=True,
+    )
+    episode = (tmp_path / "docs" / "topics" / "2026-08-02-thin.md").read_text(encoding="utf-8")
+    assert "second pass" in episode
+    assert "first pass" not in episode
+    assert "approx_tokens: 2000" in episode
+    assert result.amended is True
+
+
+def test_amend_leaves_exactly_one_episode_and_one_ledger_row(tmp_path):
+    """The reason a new slug was the wrong workaround: it doubles the registry."""
+    root = _amend_setup(tmp_path)
+    shelve(
+        root,
+        slug="2026-08-02-thin",
+        kind="topic",
+        digest=GOOD_DIGEST.replace("auth refactor", "guard rewrite"),
+        sections={"Decisions": "second pass"},
+        approx_tokens=2000,
+        date="2026-08-02",
+        amend=True,
+    )
+    rebuild(root)
+    episodes = list((tmp_path / "docs" / "topics").glob("*.md"))
+    assert len(episodes) == 1, [p.name for p in episodes]
+
+    rows = (tmp_path / "ledger.tsv").read_text(encoding="utf-8").strip().splitlines()[1:]
+    ids = [r.split("\t")[1] for r in rows]
+    assert ids == ["2026-08-02-thin"], ids
+    # Recomputed, not appended: the row carries the amended accounting.
+    assert rows[0].split("\t")[3] == "2000"
+
+
+def test_amend_commits_under_its_own_message(tmp_path):
+    root = _amend_setup(tmp_path)
+    shelve(
+        root,
+        slug="2026-08-02-thin",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "second pass"},
+        approx_tokens=2000,
+        date="2026-08-02",
+        amend=True,
+    )
+    subject = subprocess.run(
+        ["git", "-C", str(root), "log", "-1", "--format=%s"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert subject == "shelve: 2026-08-02-thin (amend)"
+
+
+def test_amend_reruns_redaction(tmp_path):
+    """A hand-edit bypasses the redaction pass. An amend must not."""
+    root = _amend_setup(tmp_path)
+    result = shelve(
+        root,
+        slug="2026-08-02-thin",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "token was ghp_" + "d" * 36 + " before rotation"},
+        approx_tokens=2000,
+        date="2026-08-02",
+        amend=True,
+    )
+    episode = (tmp_path / "docs" / "topics" / "2026-08-02-thin.md").read_text(encoding="utf-8")
+    assert "ghp_" not in episode
+    assert result.redaction.total >= 1
+
+
+def test_amend_of_a_missing_episode_is_an_error(tmp_path):
+    """Amending what is not there is a typo'd slug, not a create."""
+    root = _init_shelf(tmp_path)
+    with pytest.raises(AmendTargetMissing) as exc:
+        shelve(
+            root,
+            slug="2026-08-02-never-written",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            date="2026-08-02",
+            amend=True,
+        )
+    assert "2026-08-02-never-written" in str(exc.value)
+    assert not (tmp_path / "docs" / "topics" / "2026-08-02-never-written.md").exists()
+
+
+def test_shelve_without_amend_still_refuses_to_overwrite(tmp_path):
+    """The guard stays; amend is opt-in, never the default."""
+    root = _amend_setup(tmp_path)
+    with pytest.raises(Exception) as exc:
+        shelve(
+            root,
+            slug="2026-08-02-thin",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "collides"},
+            date="2026-08-02",
+        )
+    assert "amend" in str(exc.value).lower()
+
+
+def test_amend_still_enforces_the_digest_contract(tmp_path):
+    """An amend that would install a rejected digest writes nothing."""
+    root = _amend_setup(tmp_path)
+    before = (tmp_path / "docs" / "topics" / "2026-08-02-thin.md").read_text(encoding="utf-8")
+    with pytest.raises(DigestContractError):
+        shelve(
+            root,
+            slug="2026-08-02-thin",
+            kind="topic",
+            digest="we decided to keep it",  # first-person plural — hard reject
+            date="2026-08-02",
+            amend=True,
+        )
+    after = (tmp_path / "docs" / "topics" / "2026-08-02-thin.md").read_text(encoding="utf-8")
+    assert after == before
+
+
+def test_address_names_the_file_that_was_actually_written(tmp_path):
+    """A slug that is not already slug-shaped must not desync path and address.
+
+    docshelf writes to ``slugify(slug, max_len=80)``; ``address`` used to be
+    assembled from the raw slug. For «2026-08-03-Проверка Слага» the two part
+    ways: the episode lands at ``2026-08-03-проверка-слага.md`` while the
+    caller is handed a path that does not exist — and the auto-commit stages
+    that non-path, so the episode silently stays uncommitted. In an ephemeral
+    session that is the whole episode lost, with the tool having reported an
+    address for it.
+    """
+    root = _init_shelf(tmp_path)
+    result = shelve(
+        root,
+        slug="2026-08-03-Проверка Слага",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "тело"},
+        approx_tokens=100,
+    )
+
+    assert (root / result.address).is_file(), (
+        f"address {result.address!r} names a file that does not exist"
+    )
+    assert result.address == "docs/topics/2026-08-03-проверка-слага.md"
+
+    # The commit is the part that failed silently: `git add <нет такого пути>`
+    # leaves the episode untracked while shelve() returns without raising.
+    # Смотрим именно на эпизод: INDEX.md здесь не отслеживается (шелф ещё без
+    # базового коммита), и ассерт по пустому status ловил бы это, а не дефект.
+    assert result.committed and result.commit
+    committed = subprocess.run(
+        ["git", "-C", str(root), "show", "--name-only", "--format=", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "2026-08-03" in committed and result.address.split("/")[-1][:10] in committed
+    dirty = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain", "--", result.address],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert dirty == "", f"эпизод не доехал в коммит: {dirty!r}"
+
+
+def test_amend_finds_an_episode_stored_under_its_normalized_name(tmp_path):
+    """The amend guard derives the path the way docshelf does, not from the raw slug."""
+    root = _init_shelf(tmp_path)
+    slug = "2026-08-03-Проверка Слага"
+    shelve(
+        root,
+        slug=slug,
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "первая редакция"},
+        approx_tokens=100,
+    )
+
+    result = shelve(
+        root,
+        slug=slug,
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "вторая редакция"},
+        approx_tokens=100,
+        amend=True,
+    )
+
+    assert result.amended
+    episode = root / "docs" / "topics" / "2026-08-03-проверка-слага.md"
+    assert "вторая редакция" in episode.read_text(encoding="utf-8")
+    assert len(list((root / "docs" / "topics").glob("*.md"))) == 1
