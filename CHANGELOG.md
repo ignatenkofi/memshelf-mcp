@@ -44,6 +44,17 @@ once code ships.
   reference digest legitimately carries no decision cue, and `thin` must not turn
   into a blocking dialog. Also exposed as the `memshelf_lint_digest` MCP tool.
 
+- **`address` could name a file that was never written.** docshelf writes the
+  episode to `slugify(slug, max_len=80)`, while `shelve` assembled its returned
+  address from the raw slug. For a slug that is not already slug-shaped the two
+  part ways: `2026-08-03-Проверка Слага` lands at
+  `docs/topics/2026-08-03-проверка-слага.md`, and the caller is handed a path
+  that does not exist. The auto-commit stages that non-path, so `git add` finds
+  nothing and the episode stays **untracked** while `shelve` returns without
+  raising — in an ephemeral session, the episode lost with the container.
+  There is now one derivation of the path, feeding the amend guard, the returned
+  address and git staging alike.
+
 ### Fixed (one family, all five found by running the tool, not by its tests)
 
 Five defects reported over 2026-08-01 share a shape: the tool finishes, reports

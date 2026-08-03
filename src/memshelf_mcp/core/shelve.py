@@ -195,10 +195,17 @@ def shelve(
 
     # Resolve the target before any work: an amend of a slug that isn't there
     # must cost nothing and say so. The path is derived exactly the way
-    # docshelf will derive it, so a slug that slugifies differently is caught
-    # here rather than by writing a second, differently-named episode.
+    # docshelf will derive it (add_document gets title=slug and no `slug=`, so
+    # the stem is slugify(title, max_len=80) or "document"), and this one
+    # derivation then feeds the amend guard, the returned address and git
+    # staging. Держать вторую — как раз то, из-за чего `address` мог назвать
+    # несуществующий файл: он собирался из сырого слага, пока docshelf писал в
+    # нормализованный. Слаг вида «2026-08-03-Проверка Слага» уезжал в
+    # docs/topics/2026-08-03-проверка-слага.md, а вызывающему возвращался
+    # исходный путь, и `git add` по нему тихо не находил ничего.
     category = CATEGORY_BY_KIND[kind]
-    episode_path = root / "docs" / category / f"{slugify(slug, max_len=80) or 'document'}.md"
+    doc_stem = slugify(slug, max_len=80) or "document"
+    episode_path = root / "docs" / category / f"{doc_stem}.md"
     if amend and not episode_path.is_file():
         raise AmendTargetMissing(
             f"--amend: no episode {slug!r} on this shelf "
@@ -307,7 +314,7 @@ def shelve(
         elif sidecar.is_file() and sidecar.read_text(encoding="utf-8") != sidecar_before:
             sidecar.write_text(sidecar_before, encoding="utf-8")
 
-    address = f"docs/{category}/{slug}.md"
+    address = episode_path.relative_to(root).as_posix()
 
     # The ledger row is no longer written here — it is what `rebuild` will
     # render from this episode's frontmatter. Returned anyway so the caller

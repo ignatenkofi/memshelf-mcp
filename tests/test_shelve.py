@@ -514,3 +514,79 @@ def test_amend_still_enforces_the_digest_contract(tmp_path):
         )
     after = (tmp_path / "docs" / "topics" / "2026-08-02-thin.md").read_text(encoding="utf-8")
     assert after == before
+
+
+def test_address_names_the_file_that_was_actually_written(tmp_path):
+    """A slug that is not already slug-shaped must not desync path and address.
+
+    docshelf writes to ``slugify(slug, max_len=80)``; ``address`` used to be
+    assembled from the raw slug. For «2026-08-03-Проверка Слага» the two part
+    ways: the episode lands at ``2026-08-03-проверка-слага.md`` while the
+    caller is handed a path that does not exist — and the auto-commit stages
+    that non-path, so the episode silently stays uncommitted. In an ephemeral
+    session that is the whole episode lost, with the tool having reported an
+    address for it.
+    """
+    root = _init_shelf(tmp_path)
+    result = shelve(
+        root,
+        slug="2026-08-03-Проверка Слага",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "тело"},
+        approx_tokens=100,
+    )
+
+    assert (root / result.address).is_file(), (
+        f"address {result.address!r} names a file that does not exist"
+    )
+    assert result.address == "docs/topics/2026-08-03-проверка-слага.md"
+
+    # The commit is the part that failed silently: `git add <нет такого пути>`
+    # leaves the episode untracked while shelve() returns without raising.
+    # Смотрим именно на эпизод: INDEX.md здесь не отслеживается (шелф ещё без
+    # базового коммита), и ассерт по пустому status ловил бы это, а не дефект.
+    assert result.committed and result.commit
+    committed = subprocess.run(
+        ["git", "-C", str(root), "show", "--name-only", "--format=", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "2026-08-03" in committed and result.address.split("/")[-1][:10] in committed
+    dirty = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain", "--", result.address],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert dirty == "", f"эпизод не доехал в коммит: {dirty!r}"
+
+
+def test_amend_finds_an_episode_stored_under_its_normalized_name(tmp_path):
+    """The amend guard derives the path the way docshelf does, not from the raw slug."""
+    root = _init_shelf(tmp_path)
+    slug = "2026-08-03-Проверка Слага"
+    shelve(
+        root,
+        slug=slug,
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "первая редакция"},
+        approx_tokens=100,
+    )
+
+    result = shelve(
+        root,
+        slug=slug,
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "вторая редакция"},
+        approx_tokens=100,
+        amend=True,
+    )
+
+    assert result.amended
+    episode = root / "docs" / "topics" / "2026-08-03-проверка-слага.md"
+    assert "вторая редакция" in episode.read_text(encoding="utf-8")
+    assert len(list((root / "docs" / "topics").glob("*.md"))) == 1
