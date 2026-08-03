@@ -1,0 +1,32 @@
+version: 2
+
+# Из шести питоновских репо портфеля dependabot был у трёх. Разница видна
+# по пинам: у репозиториев с механизмом они актуальны, у остальных
+# разъехались молча — memshelf-mcp дошёл до actions/checkout@v4 и
+# setup-python@v5, на которых раннер уже печатает депрекейшн Node 20.
+# То есть «пины двигаются» держалось не на дисциплине, а на наличии
+# механизма.
+#
+# Обновления сгруппированы: одно предложение на экосистему вместо потока
+# почти одинаковых PR. Иначе подключение сразу даёт пачку, и первое же
+# утро уходит на её разбор.
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+    groups:
+      python-deps:
+        patterns: ["*"]
