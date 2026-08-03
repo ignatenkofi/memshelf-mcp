@@ -1,4 +1,4 @@
-"""FastMCP server exposing memshelf's tools over stdio.
+"""MCP server exposing memshelf's tools over stdio.
 
 A thin wrapper: each tool validates its input (pydantic), calls the typed entry
 point in ``tools.py``, and serializes the result. Tools: ``memshelf_init``
@@ -16,7 +16,7 @@ import json
 import logging
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from memshelf_mcp import __version__
 from memshelf_mcp.tools import (
@@ -58,7 +58,7 @@ _READ_ONLY = {
 }
 
 logger = logging.getLogger("memshelf_mcp")
-mcp = FastMCP("memshelf_mcp")
+mcp = MCPServer("memshelf_mcp")
 
 
 def _serialize(payload: Any) -> str:

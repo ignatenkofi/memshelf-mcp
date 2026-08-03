@@ -8,6 +8,39 @@ once code ships.
 
 ## [Unreleased]
 
+### Changed
+
+- **Ported the server to MCP SDK 2.x.** `FastMCP` (`mcp.server.fastmcp`) became
+  `MCPServer` (`mcp.server.mcpserver`) in 2.0.0; the `@mcp.tool` decorator kept
+  its `name`/`annotations` keywords, so the port is two lines. The pin moves to
+  `mcp>=2.0.0,<3` — a **floor**, not a raised ceiling: a 1.x install now fails
+  at import.
+
+  Done in step with `docshelf-mcp`, which ported the same night: memshelf
+  depends on it, and a hard floor on one side against a hard ceiling on the
+  other is an unsatisfiable pair (`pip install` of both from git returned
+  `ResolutionImpossible` before this change).
+
+### Added
+
+- **`tests/test_stdio_protocol.py` — a real client over the real transport.**
+  Three tests: handshake plus tool roster, a tool call whose answer must carry
+  this shelf's episode, and a silent server that must time out instead of
+  hanging.
+
+  They exist because the in-process suite cannot see the server. Measured, not
+  assumed: replacing `@mcp.tool` with a no-op decorator — all 14 registrations
+  gone, so a client sees an empty server — leaves **253 in-process tests green**
+  and fails only these. `test_server.py`'s `assert callable(getattr(server,
+  tool))` passes too, because a no-op decorator returns the function unchanged:
+  the assertion that reads like "the tools are registered" checks only that the
+  functions exist.
+
+- **`python -m memshelf_mcp`** entry point, mirroring docshelf. The console
+  script is not always on PATH — bare checkout, unactivated venv, a client
+  config that spawns the interpreter — and this is the path the protocol tests
+  drive, so what they exercise is what a desktop client uses.
+
 ### Fixed
 
 - **The digest contract was checked after the write, and nothing could fix it**
