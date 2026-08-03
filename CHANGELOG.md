@@ -43,6 +43,25 @@ once code ships.
 
 ### Fixed
 
+- **`rebuild` on a misspelled path created a second shelf and called it ok.**
+  The writers create their parents, so a typo in `--shelf` did not fail: it
+  made a fresh tree with an empty ledger and INDEX, answered `ok=True`, and
+  left the real shelf untouched — the operator reads "ok" and believes the
+  derived files were regenerated. `rebuild` now refuses a path that is not an
+  existing directory. Existence only, deliberately: shelves in the wild differ
+  (some carry `.docshelf.json`, some only `shelf.yml`), and a marker check
+  would reject working shelves to catch a typo.
+
+- **`purge` answered a misspelled path with "nothing expired".** Same shape,
+  worse consequence: a retention sweep that never looked reported
+  `count: 0, applied: False`, which is indistinguishable from a healthy shelf
+  with nothing to drop. Same guard, same reason.
+
+- **The rebuild report claimed a chart it had not drawn.** `write_chart`
+  returns `None` when the ledger has no rows, but `"stats.svg"` was appended
+  to `written` unconditionally — a small lie in the one field a caller reads
+  to find out what happened.
+
 - **The digest contract was checked after the write, and nothing could fix it**
   (#71). `shelve` printed `digest_warnings: ["thin"]` only once the episode was
   written, the ledger row accounted for and the auto-commit made — and then

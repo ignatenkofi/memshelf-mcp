@@ -311,6 +311,14 @@ def purge(shelf_root: str | Path, *, today: str | None = None, apply: bool = Fal
     from memshelf_mcp.core.rebuild import rebuild
 
     root = Path(shelf_root).expanduser().resolve()
+    if not root.is_dir():
+        # A typo in --shelf otherwise reads as good news: the candidate scan
+        # finds nothing, and the report says "0 expired, nothing applied" —
+        # indistinguishable from a shelf with no expired episodes. For a
+        # retention sweep that is the wrong way round: "I did not look" must
+        # not look like "there was nothing to find". Same guard, same reason,
+        # as in rebuild().
+        raise FileNotFoundError(f"not a shelf directory: {root}")
     now = today or _date.today().isoformat()
     report = PurgeReport(applied=apply)
 

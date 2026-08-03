@@ -252,3 +252,15 @@ def test_rollup_mode_stays_within_the_spec(tmp_path):
         if "2026-Q1-rollup" in line
     ][0]
     assert ledger_row.split("\t")[2] == "live"
+
+
+def test_purge_refuses_a_path_that_is_not_a_directory(tmp_path):
+    """ "I did not look" must not read like "there was nothing to find".
+
+    Before the guard, `purge` on a misspelled shelf path scanned nothing and
+    reported `expired: [], count: 0, applied: False` — indistinguishable from
+    a healthy shelf with no expired episodes. For a retention sweep that is
+    the wrong way round.
+    """
+    with pytest.raises(FileNotFoundError, match="not a shelf directory"):
+        purge(tmp_path / "typo-in-path")

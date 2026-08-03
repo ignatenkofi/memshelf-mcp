@@ -278,6 +278,15 @@ def rebuild(shelf_root: str | Path, *, check: bool = False) -> RebuildReport:
     the guard cannot pass on logic the bot does not run.
     """
     root = Path(shelf_root).expanduser().resolve()
+    if not root.is_dir():
+        # Without this, a typo in --shelf does not fail: the writers create
+        # their parents, so `rebuild` happily makes a fresh tree with an empty
+        # ledger and INDEX, answers ok=True, and leaves the real shelf
+        # untouched. The operator reads "ok" and believes the derived files
+        # were regenerated. Existence only, deliberately — shelves in the wild
+        # differ (some carry .docshelf.json, some only shelf.yml), and a
+        # marker check would reject working shelves to catch a typo.
+        raise FileNotFoundError(f"not a shelf directory: {root}")
     records, warnings = collect_episodes(root)
     report = RebuildReport(episodes=len(records), warnings=warnings)
 
@@ -307,8 +316,12 @@ def rebuild(shelf_root: str | Path, *, check: bool = False) -> RebuildReport:
         try:
             from memshelf_mcp.core.chart import write_chart
 
-            write_chart(root)
-            report.written.append("stats.svg")
+            # write_chart returns None when there is nothing to draw (no
+            # ledger rows yet). Appending unconditionally made the report
+            # claim a file that is not on disk — a small lie, but in the one
+            # field a caller uses to check what happened.
+            if write_chart(root) is not None:
+                report.written.append("stats.svg")
         except Exception as exc:  # noqa: BLE001 — cosmetic layer
             report.warnings.append(f"stats.svg not redrawn: {exc}")
 
