@@ -12,6 +12,27 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
 > steps are the fallback for hosts without `memshelf`; keep them in sync with
 > `core/shelve.py` when the contract changes.
 
+> **Required sections by kind.** The contract is enforced *before* anything is
+> written — by the tool and by the fallback alike — so a missing section costs
+> a failed call, not a broken episode. `Digest` is always required; on top of
+> it:
+>
+> | `kind` | required besides `Digest` |
+> |---|---|
+> | `topic` | `Decisions` |
+> | `session` | `Timeline`, `Open threads` |
+> | `research` | any one non-empty body section |
+>
+> Section names are matched exactly. Known sections render in this order:
+> `Decisions` → `Timeline` → `Artifacts` → `Open threads` → `Raw excerpts`;
+> anything else keeps insertion order after them. Source of truth —
+> `_REQUIRED_SECTIONS` in `core/episode.py`.
+>
+> This lives here, not only in step 2, because the tool path skips the body of
+> this skill: you read the pointer above, call `memshelf shelve`, and meet the
+> contract as an error. That happened on 2026-08-03 with a `topic` episode
+> written without `Decisions`.
+
 ## Prerequisites
 
 - `MEMSHELF_ROOT` env var (or an explicit path given by the user) points to
