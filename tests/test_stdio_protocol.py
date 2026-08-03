@@ -100,9 +100,9 @@ def _seeded_shelf(tmp_path: Path) -> Path:
         digest=(
             "Фикстура протокольного теста: эпизод существует затем, чтобы вызов "
             "инструмента по проводу возвращал состояние конкретной полки, а не "
-            "пустой, но корректно оформленный ответ. Проверяющий смотрит на слаг "
-            "этого эпизода в выдаче memshelf_index и убеждается, что сервер читал "
-            "именно тот каталог, который ему передали параметром."
+            "пустой, но корректно оформленный ответ. Проверяющий запрашивает этот "
+            "эпизод через memshelf_recall и убеждается, что сервер читал именно "
+            "тот каталог, который ему передали параметром."
         ),
         sections={"Decisions": "Полка засеяна одним эпизодом для проверки провода."},
         date="2026-08-03",
@@ -209,7 +209,6 @@ def test_a_server_that_never_answers_fails_instead_of_hanging():
     assert not any(isinstance(exc, AssertionError) for exc in raised)
     assert any(_looks_like_timeout(exc) for exc in raised), (
         "nothing in the failure says the request timed out, so the cap was not "
-        "what stopped it: "
-        + "; ".join(f"{type(exc).__name__}: {exc}" for exc in raised)
+        "what stopped it: " + "; ".join(f"{type(exc).__name__}: {exc}" for exc in raised)
     )
     assert elapsed < 60, f"waited {elapsed:.0f}s — the cap did not fire at all"
