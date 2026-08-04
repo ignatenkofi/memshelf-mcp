@@ -252,3 +252,145 @@ def test_rollup_mode_stays_within_the_spec(tmp_path):
         if "2026-Q1-rollup" in line
     ][0]
     assert ledger_row.split("\t")[2] == "live"
+
+
+def test_purge_refuses_a_path_that_is_not_a_directory(tmp_path):
+    """ "I did not look" must not read like "there was nothing to find".
+
+    Before the guard, `purge` on a misspelled shelf path scanned nothing and
+    reported `expired: [], count: 0, applied: False` — indistinguishable from
+    a healthy shelf with no expired episodes. For a retention sweep that is
+    the wrong way round.
+    """
+    with pytest.raises(FileNotFoundError, match="not a shelf directory"):
+        purge(tmp_path / "typo-in-path")
+
+
+def test_a_failed_archive_index_is_reported_not_swallowed(tmp_path, monkeypatch):
+    """A rollup whose archive INDEX did not render must say so.
+
+    `rebuild_archive_index` used to swallow the failure with a bare
+    ``except Exception: pass`` and return ``None``. Every other field of the
+    report still looked like success — episode written, count right — so the
+    caller had no way to learn that the file it points readers at is stale.
+
+    `rebuild()` already funnels the identical failure into `report.warnings`;
+    the archive path was the odd one out.
+    """
+    root = _shelf_with_three(tmp_path / "shelf")
+
+    import memshelf_mcp.core.archive as archive_mod
+
+    class _Exploding:
+        def __init__(self, *a, **kw):
+            pass
+
+        def rebuild_index(self):
+            raise RuntimeError("docshelf blew up rendering the archive INDEX")
+
+    monkeypatch.setattr("docshelf_mcp.core.shelf.Shelf", _Exploding)
+
+    report = archive_mod.rollup(
+        root, slug="2026-q1-rollup", digest=ROLLUP_DIGEST, until="2026-01-31"
+    )
+
+    assert report.warnings, "отказ рендера архивного INDEX не попал в отчёт"
+    assert any("archive/INDEX.md" in w for w in report.warnings), report.warnings
+    assert any("blew up" in w for w in report.warnings), (
+        "текст исходного исключения потерян — по отчёту не понять, что случилось"
+    )
+    # Всё остальное обязано отработать: гард сообщает, а не отменяет роллап.
+    assert report.archived, "роллап не выполнен — предупреждение не должно его отменять"
+
+
+def test_resolve_does_not_claim_a_stale_archive_index_as_regenerated(tmp_path, monkeypatch):
+    """`.is_file()` answers "a file is there", not "we wrote it".
+
+    With the rebuild failing and a **stale** ``archive/INDEX.md`` left by an
+    earlier run, the old code appended it to ``regenerated`` — the caller's one
+    field for "what actually happened" said the opposite of the truth.
+    """
+    from memshelf_mcp.core.archive import archive_root, rebuild_archive_index
+
+    root = _shelf_with_three(tmp_path / "shelf")
+    rollup(root, slug="2026-q1-rollup", digest=ROLLUP_DIGEST, until="2026-01-31")
+
+    stale = archive_root(root) / "INDEX.md"
+    assert stale.is_file(), "фикстура не воспроизводит случай: архивного INDEX нет"
+    stale.write_text("# устаревший INDEX\n", encoding="utf-8")
+
+    class _Exploding:
+        def __init__(self, *a, **kw):
+            pass
+
+        def rebuild_index(self):
+            raise RuntimeError("nope")
+
+    monkeypatch.setattr("docshelf_mcp.core.shelf.Shelf", _Exploding)
+
+    warnings = rebuild_archive_index(root)
+
+    assert warnings, "отказ не отражён в возвращённых предупреждениях"
+    # Файл на месте и НЕ обновлён — ровно та ситуация, в которой `.is_file()`
+    # раньше давала «regenerated».
+    assert stale.read_text(encoding="utf-8") == "# устаревший INDEX\n"
+
+
+def test_the_rollup_link_to_the_archive_actually_resolves(tmp_path):
+    """The rollup's pointer to the archived originals must be a live path.
+
+    The episode lands at `docs/topics/<slug>.md`; the archive sits at the shelf
+    root. A bare `archive/INDEX.md` therefore resolved to
+    `docs/topics/archive/INDEX.md` — dead in every rollup ever produced. This is
+    the one link that carries the whole mechanic: a rollup is only acceptable
+    because the originals stay reachable, and that claim is made *by this link*.
+
+    Asserted by resolving the href from the episode's own directory, not by
+    string-matching the expected prefix — a test that only checked for `../../`
+    would pass on a link that is wrong in some new way.
+    """
+    import re
+
+    root = _shelf_with_three(tmp_path / "shelf")
+    report = rollup(root, slug="2026-q1-rollup", digest=ROLLUP_DIGEST, until="2026-01-31")
+
+    episode = root / report.address
+    body = episode.read_text(encoding="utf-8")
+    hrefs = re.findall(r"\[`archive/INDEX\.md`\]\(([^)]+)\)", body)
+    assert hrefs, f"ссылка на архивный INDEX пропала из тела роллапа:\n{body}"
+
+    target = (episode.parent / hrefs[0]).resolve()
+    assert target.is_file(), (
+        f"ссылка {hrefs[0]!r} из {report.address} ведёт в {target}, которого нет"
+    )
+    # И ведёт именно в архивный INDEX, а не в какой-нибудь другой файл.
+    assert target == (root / "archive" / "INDEX.md").resolve(), target
+
+
+def test_rollup_reports_a_failed_PARENT_index_too(tmp_path, monkeypatch):
+    """Не только архивный INDEX: отказ родительского обязан доехать в отчёт.
+
+    `rebuild()` уже складывает этот отказ в свой `report.warnings`, но rollup
+    и purge звали его как `rebuild(root)` — без присваивания, — и выбрасывали
+    результат. То есть предупреждение о том, что INDEX.md полки (тот, что
+    едет в КАЖДУЮ сессию) не пересобрался, терялось ровно в тех отчётах,
+    которые для того и научили нести warnings.
+    """
+    root = _shelf_with_three(tmp_path / "shelf")
+
+    class _Exploding:
+        def __init__(self, *a, **kw):
+            pass
+
+        def rebuild_index(self):
+            raise RuntimeError("родительский INDEX не собрался")
+
+    monkeypatch.setattr("docshelf_mcp.core.shelf.Shelf", _Exploding)
+
+    report = rollup(root, slug="2026-q1-rollup", digest=ROLLUP_DIGEST, until="2026-01-31")
+
+    joined = " | ".join(report.warnings)
+    assert "INDEX.md not rebuilt" in joined, f"отказ родительского INDEX потерян: {report.warnings}"
+    assert "родительский INDEX не собрался" in joined, joined
+    # И архивный тоже — два разных предупреждения, не одно.
+    assert sum("INDEX" in w for w in report.warnings) >= 2, report.warnings

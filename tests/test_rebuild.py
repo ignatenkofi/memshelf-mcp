@@ -385,3 +385,35 @@ def test_adopt_refuses_a_malformed_date_from_the_old_ledger(tmp_path):
     episode = (tmp_path / "docs" / "topics" / "2026-07-22-note.md").read_text(encoding="utf-8")
     assert "date: 2026-07-22" in episode
     assert "2026-07-20..2026-07-22" not in episode
+
+
+def test_rebuild_refuses_a_path_that_is_not_a_directory(tmp_path):
+    """A typo in --shelf must fail, not create a second shelf.
+
+    The writers create their parents, so before this guard `rebuild` on a
+    misspelled path made a fresh tree with an empty ledger and INDEX, answered
+    ``ok=True``, and left the real shelf untouched — the operator reads "ok"
+    and believes the derived files were regenerated.
+    """
+    missing = tmp_path / "typo-in-path"
+
+    with pytest.raises(FileNotFoundError, match="not a shelf directory"):
+        rebuild(missing)
+
+    assert not missing.exists(), "rebuild created the directory it should have refused"
+
+
+def test_rebuild_does_not_claim_a_chart_it_did_not_draw(tmp_path):
+    """`written` must list what is on disk, not what was attempted.
+
+    `write_chart` draws nothing when the ledger has no rows, but the report
+    appended "stats.svg" unconditionally — a small lie in the one field a
+    caller reads to find out what happened.
+    """
+    _init(tmp_path)
+    report = rebuild(tmp_path)
+
+    assert report.written, "nothing was written at all — the test proves nothing"
+
+    for name in report.written:
+        assert (tmp_path / name).exists(), f"report claims {name}, which is not on disk"

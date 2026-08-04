@@ -64,6 +64,10 @@ class RollupReport:
     archived: list[str] = field(default_factory=list)
     index_tokens_before: int = 0
     index_tokens_after: int = 0
+    # A rollup whose archive INDEX failed to render still "succeeded" by every
+    # other field: the episode is written, the count is right. Without this the
+    # caller has no way to learn that the thing it points readers at is stale.
+    warnings: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -73,6 +77,7 @@ class RollupReport:
             "count": len(self.archived),
             "index_tokens_before": self.index_tokens_before,
             "index_tokens_after": self.index_tokens_after,
+            "warnings": self.warnings,
         }
 
 
@@ -81,6 +86,7 @@ class PurgeReport:
     expired: list[str] = field(default_factory=list)
     deleted: list[str] = field(default_factory=list)
     applied: bool = False
+    warnings: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -88,6 +94,7 @@ class PurgeReport:
             "deleted": self.deleted,
             "count": len(self.expired),
             "applied": self.applied,
+            "warnings": self.warnings,
             "note": (
                 "purge removes the working-tree file only — git history still "
                 "contains it. Real erasure is a deliberate filter-repo pass over "
@@ -235,9 +242,17 @@ def rollup(
         for episode_id, title in sorted(rolled)
     )
     body = dict(sections or {})
+    # The link target is relative to the episode file, which lands two levels
+    # down (`docs/topics/<slug>.md`), while the archive sits at the shelf root.
+    # Written as a bare `archive/INDEX.md` it resolved to
+    # `docs/topics/archive/INDEX.md` — dead in every rollup ever produced. That
+    # is not a cosmetic typo: this pointer *is* the rollup's promise that the
+    # originals stay reachable, and the whole mechanic rests on it. The label
+    # keeps the shelf-root path, because that is what the reader should type.
+    index_href = "../../" + f"{ARCHIVE_DIRNAME}/INDEX.md"
     body["Archived"] = (
         f"Свёрнуто эпизодов: {len(rolled)}. Полные тексты — в под-полке "
-        f"[`{ARCHIVE_DIRNAME}/INDEX.md`]({ARCHIVE_DIRNAME}/INDEX.md), "
+        f"[`{ARCHIVE_DIRNAME}/INDEX.md`]({index_href}), "
         "recall по id работает как обычно.\n\n" + covered
     )
     body.setdefault("Decisions", "См. дайджест: свод решений свёрнутого периода.")
@@ -264,24 +279,37 @@ def rollup(
     (root / address).write_text(compose_episode(frontmatter, digest, body), encoding="utf-8")
     report.address = address
 
-    rebuild(root)
-    rebuild_archive_index(root)
+    # Оба ребилда, а не только архивный: rebuild() уже складывает отказ
+    # рендера РОДИТЕЛЬСКОГО INDEX.md в свой report.warnings, и выбросить его
+    # здесь значило бы оставить ровно ту тишину, ради которой соседняя строка
+    # и появилась. Родительский INDEX важнее архивного — он в каждой сессии.
+    report.warnings.extend(rebuild(root).warnings)
+    report.warnings.extend(rebuild_archive_index(root))
     report.index_tokens_after = _index_tokens(root)
     return report
 
 
-def rebuild_archive_index(shelf_root: str | Path) -> None:
+def rebuild_archive_index(shelf_root: str | Path) -> list[str]:
     """Render the archive sub-shelf's own ``.meta.json`` files and INDEX.
 
     Deliberately not ``rebuild()``: the archive has no ledger and no chart of
     its own — accounting is the parent's, whole, and a second ledger would
     double-count exactly the numbers a rollup must leave untouched.
+
+    Returns warnings; an empty list means everything was rendered. It used to
+    return ``None`` and swallow the INDEX failure with a bare ``pass``, which
+    let ``resolve`` report ``archive/INDEX.md`` as regenerated on the strength
+    of a **stale** file left by an earlier run — the caller's one field for
+    "what actually happened" said the opposite of the truth. ``rebuild()``
+    already collects the same failure into ``report.warnings``; this brings the
+    archive path in line with it.
     """
     from memshelf_mcp.core.rebuild import collect_episodes, render_meta
 
     root = archive_root(Path(shelf_root).expanduser().resolve())
     if not (root / "docs").is_dir():
-        return
+        return []
+    warnings: list[str] = []
     records, _ = collect_episodes(root)
     for category in sorted(set(CATEGORY_BY_KIND.values())):
         directory = root / "docs" / category
@@ -297,8 +325,9 @@ def rebuild_archive_index(shelf_root: str | Path) -> None:
         from docshelf_mcp.core.shelf import Shelf
 
         Shelf(root).rebuild_index()
-    except Exception:  # noqa: BLE001 — a shelf without docshelf keeps its files
-        pass
+    except Exception as exc:  # noqa: BLE001 — mirrors rebuild(): report, never hide
+        warnings.append(f"archive/INDEX.md not rebuilt: {exc}")
+    return warnings
 
 
 def purge(shelf_root: str | Path, *, today: str | None = None, apply: bool = False) -> PurgeReport:
@@ -311,6 +340,14 @@ def purge(shelf_root: str | Path, *, today: str | None = None, apply: bool = Fal
     from memshelf_mcp.core.rebuild import rebuild
 
     root = Path(shelf_root).expanduser().resolve()
+    if not root.is_dir():
+        # A typo in --shelf otherwise reads as good news: the candidate scan
+        # finds nothing, and the report says "0 expired, nothing applied" —
+        # indistinguishable from a shelf with no expired episodes. For a
+        # retention sweep that is the wrong way round: "I did not look" must
+        # not look like "there was nothing to find". Same guard, same reason,
+        # as in rebuild().
+        raise FileNotFoundError(f"not a shelf directory: {root}")
     now = today or _date.today().isoformat()
     report = PurgeReport(applied=apply)
 
@@ -337,6 +374,9 @@ def purge(shelf_root: str | Path, *, today: str | None = None, apply: bool = Fal
             report.deleted.append(str(path.relative_to(root)))
 
     if apply and report.deleted:
-        rebuild(root)
-        rebuild_archive_index(root)
+        # См. rollup: предупреждения обоих ребилдов, иначе удалённый эпизод
+        # исчезает с диска, но остаётся в непересобранном INDEX — и отчёт
+        # purge об этом молчит.
+        report.warnings.extend(rebuild(root).warnings)
+        report.warnings.extend(rebuild_archive_index(root))
     return report

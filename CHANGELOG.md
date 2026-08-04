@@ -10,6 +10,112 @@ once code ships.
 
 ### Fixed
 
+- **The parent `INDEX.md` failure was still silent — the earlier fix was half
+  of one.** `rollup` and `purge` called `rebuild(root)` without binding its
+  return value, so the `RebuildReport.warnings` it already collects (including
+  `INDEX.md not rebuilt: …`) went on the floor *one line above* the archive
+  warnings that were being carefully forwarded. The parent INDEX is the file
+  that rides in **every** session, so losing its failure notice mattered more
+  than losing the archive one. Both call sites now extend from both rebuilds;
+  the regression test demands two distinct INDEX warnings and fails if either
+  is dropped. Found by an adversarial read of this branch's own diff.
+
+- **Every rollup ever produced linked to a path that does not exist.** The
+  rollup episode lands at `docs/topics/<slug>.md`; the archive sub-shelf sits
+  at the shelf root. The body was written with a bare `archive/INDEX.md`, which
+  a Markdown reader resolves against the episode's own directory — i.e.
+  `docs/topics/archive/INDEX.md`. Dead, in every rollup, since the feature
+  shipped.
+
+  Not a cosmetic typo: this pointer *is* the rollup's promise. Collapsing N
+  INDEX lines into one is only acceptable because the originals stay
+  reachable, and that claim is made by this single link. Now `../../archive/
+  INDEX.md`, with the label still showing the shelf-root path because that is
+  what a reader would type. The regression test resolves the href from the
+  episode's own directory rather than matching the expected prefix — a test
+  that only looked for `../../` would pass on a link wrong in some new way.
+
+  Found by a portfolio-wide sweep for relative Markdown links that point at
+  nothing (3723 links checked across 28 repositories).
+
+
+- **`rebuild_archive_index` swallowed its failure, and `resolve` reported the
+  resulting stale file as regenerated.** The archive INDEX rebuild was wrapped
+  in a bare `except Exception: pass` justified as "a shelf without docshelf
+  keeps its files" — but `docshelf-mcp` is a hard dependency here, and eight
+  other modules import the same symbol unguarded, so the case it defended
+  against cannot occur. What the handler actually caught was every real
+  failure, silently.
+
+  The damage showed up one caller away. `resolve` decided what to report with
+  `if (root / "archive" / "INDEX.md").is_file()` — which answers "a file is
+  there", not "we wrote it". A failed rebuild plus a stale INDEX from an
+  earlier run therefore produced `regenerated: ["archive/INDEX.md"]`: the
+  caller's one field for *what actually happened* said the opposite of the
+  truth, on the conflict-resolution path where the shelf's own working rules
+  tell the agent to trust the tool.
+
+  `rebuild()` already funnelled the identical failure into `report.warnings`;
+  the archive path was the odd one out. It now returns warnings instead of
+  `None`, `RollupReport` and `PurgeReport` carry a `warnings` field through to
+  `as_dict()`, and `resolve` claims the file only when the rebuild reported
+  nothing wrong. Two regression tests cover both halves; both fail against the
+  previous code.
+
+### Changed
+
+- **Ported the server to MCP SDK 2.x.** `FastMCP` (`mcp.server.fastmcp`) became
+  `MCPServer` (`mcp.server.mcpserver`) in 2.0.0; the `@mcp.tool` decorator kept
+  its `name`/`annotations` keywords, so the port is two lines. The pin moves to
+  `mcp>=2.0.0,<3` — a **floor**, not a raised ceiling: a 1.x install now fails
+  at import.
+
+  Done in step with `docshelf-mcp`, which ported the same night: memshelf
+  depends on it, and a hard floor on one side against a hard ceiling on the
+  other is an unsatisfiable pair (`pip install` of both from git returned
+  `ResolutionImpossible` before this change).
+
+### Added
+
+- **`tests/test_stdio_protocol.py` — a real client over the real transport.**
+  Three tests: handshake plus tool roster, a tool call whose answer must carry
+  this shelf's episode, and a silent server that must time out instead of
+  hanging.
+
+  They exist because the in-process suite cannot see the server. Measured, not
+  assumed: replacing `@mcp.tool` with a no-op decorator — all 14 registrations
+  gone, so a client sees an empty server — leaves **253 in-process tests green**
+  and fails only these. `test_server.py`'s `assert callable(getattr(server,
+  tool))` passes too, because a no-op decorator returns the function unchanged:
+  the assertion that reads like "the tools are registered" checks only that the
+  functions exist.
+
+- **`python -m memshelf_mcp`** entry point, mirroring docshelf. The console
+  script is not always on PATH — bare checkout, unactivated venv, a client
+  config that spawns the interpreter — and this is the path the protocol tests
+  drive, so what they exercise is what a desktop client uses.
+
+### Fixed
+
+- **`rebuild` on a misspelled path created a second shelf and called it ok.**
+  The writers create their parents, so a typo in `--shelf` did not fail: it
+  made a fresh tree with an empty ledger and INDEX, answered `ok=True`, and
+  left the real shelf untouched — the operator reads "ok" and believes the
+  derived files were regenerated. `rebuild` now refuses a path that is not an
+  existing directory. Existence only, deliberately: shelves in the wild differ
+  (some carry `.docshelf.json`, some only `shelf.yml`), and a marker check
+  would reject working shelves to catch a typo.
+
+- **`purge` answered a misspelled path with "nothing expired".** Same shape,
+  worse consequence: a retention sweep that never looked reported
+  `count: 0, applied: False`, which is indistinguishable from a healthy shelf
+  with nothing to drop. Same guard, same reason.
+
+- **The rebuild report claimed a chart it had not drawn.** `write_chart`
+  returns `None` when the ledger has no rows, but `"stats.svg"` was appended
+  to `written` unconditionally — a small lie in the one field a caller reads
+  to find out what happened.
+
 - **The digest contract was checked after the write, and nothing could fix it**
   (#71). `shelve` printed `digest_warnings: ["thin"]` only once the episode was
   written, the ledger row accounted for and the auto-commit made — and then
