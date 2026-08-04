@@ -8,6 +8,18 @@ once code ships.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-04
+
+Cut because **the published 0.1.0 has a dead MCP server entry point.** That
+sdist declares `mcp>=1.2.0` with no ceiling and its `server.py` imports
+`mcp.server.fastmcp`, which 2.0.0 removed — so a fresh `pip install
+memshelf-mcp` resolves mcp 2.x and the `memshelf-mcp` console script dies at
+import with `ModuleNotFoundError: No module named 'mcp.server.fastmcp'`. The
+`memshelf` CLI kept working, because `cli.py` never imports the server; that is
+why a smoke test of the installed package looked fine. The code fix (the SDK
+2.x port and the major ceilings below) has been on main since; only the release
+was missing.
+
 ### Fixed
 
 - **The parent `INDEX.md` failure was still silent — the earlier fix was half
