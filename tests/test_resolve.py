@@ -357,3 +357,70 @@ def test_split_marker_sides_diff3():
     ours, theirs = _split_marker_sides(text)
     assert ours == "common\nours-line\ntail\n"
     assert theirs == "common\ntheirs-line\ntail\n"
+
+
+def test_resolve_does_not_report_a_stale_archive_index_as_regenerated(tmp_path, monkeypatch):
+    """Половина фикса жила без теста: откат resolve.py оставлял сьюту зелёной.
+
+    `resolve` решал, что писать в `regenerated`, по `.is_file()` — а это ответ
+    на вопрос «файл есть», не «мы его записали». Устаревший `archive/INDEX.md`
+    от прошлого прогона проходил эту проверку, и единственное поле, по которому
+    вызывающий узнаёт, ЧТО произошло, сообщало обратное правде — на пути
+    разбора конфликтов, где рабочие правила полки велят доверять инструменту.
+
+    Здесь тот же сценарий, что в соседнем тесте с непустым архивом, но рендер
+    архивного INDEX сломан: файл на диске остаётся (старый), а в regenerated
+    его быть не должно — зато предупреждение обязано попасть в notes.
+    """
+    root = _init_shelf(tmp_path)
+    _shelve(root, "2026-07-20-old-one", DIGEST_A, "Старый эпизод")
+    rebuild(root)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "seed")
+
+    _git(root, "checkout", "-q", "-b", "session-a")
+    rollup(root, until="2026-07-25", slug="2026-07-25-rollup", digest=DIGEST_B, date="2026-07-25")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "a: rollup")
+
+    _git(root, "checkout", "-q", "main")
+    _shelve(root, "2026-07-29-storage-wal", DIGEST_B, "Хранилище на WAL")
+    rebuild(root)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "main: shelve")
+
+    merge = _git(root, "merge", "session-a", check=False)
+    assert merge.returncode != 0, "expected the derived-file conflict"
+
+    stale = root / "archive" / "INDEX.md"
+    assert stale.is_file(), "фикстура не воспроизводит случай: архивного INDEX нет"
+    stale.write_text("# устаревший INDEX\n", encoding="utf-8")
+
+    from pathlib import Path as _Path
+
+    real_shelf = Shelf
+
+    class _ExplodingArchiveShelf:
+        """Настоящий Shelf для родителя, взрыв — только на архивной под-полке."""
+
+        def __init__(self, path, *a, **kw):
+            self._path = _Path(path)
+            self._inner = real_shelf(path, *a, **kw)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        def rebuild_index(self):
+            if self._path.name == "archive":
+                raise RuntimeError("архивный INDEX не собрался")
+            return self._inner.rebuild_index()
+
+    monkeypatch.setattr("docshelf_mcp.core.shelf.Shelf", _ExplodingArchiveShelf)
+
+    result = resolve_shelf(root)
+
+    assert "archive/INDEX.md" not in result.regenerated, (
+        f"устаревший архивный INDEX объявлен перезаписанным: {result.regenerated}"
+    )
+    assert any("archive/INDEX.md not rebuilt" in n for n in result.notes), result.notes
+    assert stale.read_text(encoding="utf-8") == "# устаревший INDEX\n", "файл всё же переписан"
