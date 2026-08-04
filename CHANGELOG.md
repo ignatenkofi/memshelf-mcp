@@ -10,6 +10,25 @@ once code ships.
 
 ### Fixed
 
+- **Every rollup ever produced linked to a path that does not exist.** The
+  rollup episode lands at `docs/topics/<slug>.md`; the archive sub-shelf sits
+  at the shelf root. The body was written with a bare `archive/INDEX.md`, which
+  a Markdown reader resolves against the episode's own directory — i.e.
+  `docs/topics/archive/INDEX.md`. Dead, in every rollup, since the feature
+  shipped.
+
+  Not a cosmetic typo: this pointer *is* the rollup's promise. Collapsing N
+  INDEX lines into one is only acceptable because the originals stay
+  reachable, and that claim is made by this single link. Now `../../archive/
+  INDEX.md`, with the label still showing the shelf-root path because that is
+  what a reader would type. The regression test resolves the href from the
+  episode's own directory rather than matching the expected prefix — a test
+  that only looked for `../../` would pass on a link wrong in some new way.
+
+  Found by a portfolio-wide sweep for relative Markdown links that point at
+  nothing (3723 links checked across 28 repositories).
+
+
 - **`rebuild_archive_index` swallowed its failure, and `resolve` reported the
   resulting stale file as regenerated.** The archive INDEX rebuild was wrapped
   in a bare `except Exception: pass` justified as "a shelf without docshelf

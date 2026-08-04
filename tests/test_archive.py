@@ -334,3 +334,34 @@ def test_resolve_does_not_claim_a_stale_archive_index_as_regenerated(tmp_path, m
     # Файл на месте и НЕ обновлён — ровно та ситуация, в которой `.is_file()`
     # раньше давала «regenerated».
     assert stale.read_text(encoding="utf-8") == "# устаревший INDEX\n"
+
+
+def test_the_rollup_link_to_the_archive_actually_resolves(tmp_path):
+    """The rollup's pointer to the archived originals must be a live path.
+
+    The episode lands at `docs/topics/<slug>.md`; the archive sits at the shelf
+    root. A bare `archive/INDEX.md` therefore resolved to
+    `docs/topics/archive/INDEX.md` — dead in every rollup ever produced. This is
+    the one link that carries the whole mechanic: a rollup is only acceptable
+    because the originals stay reachable, and that claim is made *by this link*.
+
+    Asserted by resolving the href from the episode's own directory, not by
+    string-matching the expected prefix — a test that only checked for `../../`
+    would pass on a link that is wrong in some new way.
+    """
+    import re
+
+    root = _shelf_with_three(tmp_path / "shelf")
+    report = rollup(root, slug="2026-q1-rollup", digest=ROLLUP_DIGEST, until="2026-01-31")
+
+    episode = root / report.address
+    body = episode.read_text(encoding="utf-8")
+    hrefs = re.findall(r"\[`archive/INDEX\.md`\]\(([^)]+)\)", body)
+    assert hrefs, f"ссылка на архивный INDEX пропала из тела роллапа:\n{body}"
+
+    target = (episode.parent / hrefs[0]).resolve()
+    assert target.is_file(), (
+        f"ссылка {hrefs[0]!r} из {report.address} ведёт в {target}, которого нет"
+    )
+    # И ведёт именно в архивный INDEX, а не в какой-нибудь другой файл.
+    assert target == (root / "archive" / "INDEX.md").resolve(), target

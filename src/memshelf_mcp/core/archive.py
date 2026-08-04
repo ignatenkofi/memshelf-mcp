@@ -242,9 +242,17 @@ def rollup(
         for episode_id, title in sorted(rolled)
     )
     body = dict(sections or {})
+    # The link target is relative to the episode file, which lands two levels
+    # down (`docs/topics/<slug>.md`), while the archive sits at the shelf root.
+    # Written as a bare `archive/INDEX.md` it resolved to
+    # `docs/topics/archive/INDEX.md` — dead in every rollup ever produced. That
+    # is not a cosmetic typo: this pointer *is* the rollup's promise that the
+    # originals stay reachable, and the whole mechanic rests on it. The label
+    # keeps the shelf-root path, because that is what the reader should type.
+    index_href = "../../" + f"{ARCHIVE_DIRNAME}/INDEX.md"
     body["Archived"] = (
         f"Свёрнуто эпизодов: {len(rolled)}. Полные тексты — в под-полке "
-        f"[`{ARCHIVE_DIRNAME}/INDEX.md`]({ARCHIVE_DIRNAME}/INDEX.md), "
+        f"[`{ARCHIVE_DIRNAME}/INDEX.md`]({index_href}), "
         "recall по id работает как обычно.\n\n" + covered
     )
     body.setdefault("Decisions", "См. дайджест: свод решений свёрнутого периода.")
