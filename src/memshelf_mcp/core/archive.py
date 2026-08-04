@@ -279,7 +279,11 @@ def rollup(
     (root / address).write_text(compose_episode(frontmatter, digest, body), encoding="utf-8")
     report.address = address
 
-    rebuild(root)
+    # Оба ребилда, а не только архивный: rebuild() уже складывает отказ
+    # рендера РОДИТЕЛЬСКОГО INDEX.md в свой report.warnings, и выбросить его
+    # здесь значило бы оставить ровно ту тишину, ради которой соседняя строка
+    # и появилась. Родительский INDEX важнее архивного — он в каждой сессии.
+    report.warnings.extend(rebuild(root).warnings)
     report.warnings.extend(rebuild_archive_index(root))
     report.index_tokens_after = _index_tokens(root)
     return report
@@ -370,6 +374,9 @@ def purge(shelf_root: str | Path, *, today: str | None = None, apply: bool = Fal
             report.deleted.append(str(path.relative_to(root)))
 
     if apply and report.deleted:
-        rebuild(root)
+        # См. rollup: предупреждения обоих ребилдов, иначе удалённый эпизод
+        # исчезает с диска, но остаётся в непересобранном INDEX — и отчёт
+        # purge об этом молчит.
+        report.warnings.extend(rebuild(root).warnings)
         report.warnings.extend(rebuild_archive_index(root))
     return report

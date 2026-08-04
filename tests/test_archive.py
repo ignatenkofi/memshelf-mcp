@@ -365,3 +365,32 @@ def test_the_rollup_link_to_the_archive_actually_resolves(tmp_path):
     )
     # И ведёт именно в архивный INDEX, а не в какой-нибудь другой файл.
     assert target == (root / "archive" / "INDEX.md").resolve(), target
+
+
+def test_rollup_reports_a_failed_PARENT_index_too(tmp_path, monkeypatch):
+    """Не только архивный INDEX: отказ родительского обязан доехать в отчёт.
+
+    `rebuild()` уже складывает этот отказ в свой `report.warnings`, но rollup
+    и purge звали его как `rebuild(root)` — без присваивания, — и выбрасывали
+    результат. То есть предупреждение о том, что INDEX.md полки (тот, что
+    едет в КАЖДУЮ сессию) не пересобрался, терялось ровно в тех отчётах,
+    которые для того и научили нести warnings.
+    """
+    root = _shelf_with_three(tmp_path / "shelf")
+
+    class _Exploding:
+        def __init__(self, *a, **kw):
+            pass
+
+        def rebuild_index(self):
+            raise RuntimeError("родительский INDEX не собрался")
+
+    monkeypatch.setattr("docshelf_mcp.core.shelf.Shelf", _Exploding)
+
+    report = rollup(root, slug="2026-q1-rollup", digest=ROLLUP_DIGEST, until="2026-01-31")
+
+    joined = " | ".join(report.warnings)
+    assert "INDEX.md not rebuilt" in joined, f"отказ родительского INDEX потерян: {report.warnings}"
+    assert "родительский INDEX не собрался" in joined, joined
+    # И архивный тоже — два разных предупреждения, не одно.
+    assert sum("INDEX" in w for w in report.warnings) >= 2, report.warnings
