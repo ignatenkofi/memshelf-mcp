@@ -10,6 +10,16 @@ once code ships.
 
 ### Fixed
 
+- **The parent `INDEX.md` failure was still silent — the earlier fix was half
+  of one.** `rollup` and `purge` called `rebuild(root)` without binding its
+  return value, so the `RebuildReport.warnings` it already collects (including
+  `INDEX.md not rebuilt: …`) went on the floor *one line above* the archive
+  warnings that were being carefully forwarded. The parent INDEX is the file
+  that rides in **every** session, so losing its failure notice mattered more
+  than losing the archive one. Both call sites now extend from both rebuilds;
+  the regression test demands two distinct INDEX warnings and fails if either
+  is dropped. Found by an adversarial read of this branch's own diff.
+
 - **Every rollup ever produced linked to a path that does not exist.** The
   rollup episode lands at `docs/topics/<slug>.md`; the archive sub-shelf sits
   at the shelf root. The body was written with a bare `archive/INDEX.md`, which
