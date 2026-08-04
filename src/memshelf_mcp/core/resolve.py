@@ -284,8 +284,13 @@ def resolve_shelf(shelf_root: str | Path, *, commit: bool = False) -> ResolveRes
         # The archive sub-shelf keeps its own INDEX, which `rebuild` does not
         # touch — forgetting it leaves a rolled-up shelf's archive index right
         # only because a human last committed it (#64).
-        rebuild_archive_index(root)
-        if (root / "archive" / "INDEX.md").is_file():
+        # `.is_file()` alone answers "a file is there", not "we wrote it": a
+        # stale INDEX from an earlier run passes that test just as well. Claim
+        # it only when the rebuild reported nothing wrong, and surface the
+        # warning otherwise.
+        index_warnings = rebuild_archive_index(root)
+        result.notes.extend(index_warnings)
+        if not index_warnings and (root / "archive" / "INDEX.md").is_file():
             result.regenerated.append("archive/INDEX.md")
         if git:
             for rel in dict.fromkeys(list(DERIVED_PATHS) + conflicted_derived):

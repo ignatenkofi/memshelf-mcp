@@ -8,6 +8,31 @@ once code ships.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`rebuild_archive_index` swallowed its failure, and `resolve` reported the
+  resulting stale file as regenerated.** The archive INDEX rebuild was wrapped
+  in a bare `except Exception: pass` justified as "a shelf without docshelf
+  keeps its files" — but `docshelf-mcp` is a hard dependency here, and eight
+  other modules import the same symbol unguarded, so the case it defended
+  against cannot occur. What the handler actually caught was every real
+  failure, silently.
+
+  The damage showed up one caller away. `resolve` decided what to report with
+  `if (root / "archive" / "INDEX.md").is_file()` — which answers "a file is
+  there", not "we wrote it". A failed rebuild plus a stale INDEX from an
+  earlier run therefore produced `regenerated: ["archive/INDEX.md"]`: the
+  caller's one field for *what actually happened* said the opposite of the
+  truth, on the conflict-resolution path where the shelf's own working rules
+  tell the agent to trust the tool.
+
+  `rebuild()` already funnelled the identical failure into `report.warnings`;
+  the archive path was the odd one out. It now returns warnings instead of
+  `None`, `RollupReport` and `PurgeReport` carry a `warnings` field through to
+  `as_dict()`, and `resolve` claims the file only when the rebuild reported
+  nothing wrong. Two regression tests cover both halves; both fail against the
+  previous code.
+
 ### Changed
 
 - **Ported the server to MCP SDK 2.x.** `FastMCP` (`mcp.server.fastmcp`) became

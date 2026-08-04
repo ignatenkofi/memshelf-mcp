@@ -264,3 +264,73 @@ def test_purge_refuses_a_path_that_is_not_a_directory(tmp_path):
     """
     with pytest.raises(FileNotFoundError, match="not a shelf directory"):
         purge(tmp_path / "typo-in-path")
+
+
+def test_a_failed_archive_index_is_reported_not_swallowed(tmp_path, monkeypatch):
+    """A rollup whose archive INDEX did not render must say so.
+
+    `rebuild_archive_index` used to swallow the failure with a bare
+    ``except Exception: pass`` and return ``None``. Every other field of the
+    report still looked like success — episode written, count right — so the
+    caller had no way to learn that the file it points readers at is stale.
+
+    `rebuild()` already funnels the identical failure into `report.warnings`;
+    the archive path was the odd one out.
+    """
+    root = _shelf_with_three(tmp_path / "shelf")
+
+    import memshelf_mcp.core.archive as archive_mod
+
+    class _Exploding:
+        def __init__(self, *a, **kw):
+            pass
+
+        def rebuild_index(self):
+            raise RuntimeError("docshelf blew up rendering the archive INDEX")
+
+    monkeypatch.setattr("docshelf_mcp.core.shelf.Shelf", _Exploding)
+
+    report = archive_mod.rollup(
+        root, slug="2026-q1-rollup", digest=ROLLUP_DIGEST, until="2026-01-31"
+    )
+
+    assert report.warnings, "отказ рендера архивного INDEX не попал в отчёт"
+    assert any("archive/INDEX.md" in w for w in report.warnings), report.warnings
+    assert any("blew up" in w for w in report.warnings), (
+        "текст исходного исключения потерян — по отчёту не понять, что случилось"
+    )
+    # Всё остальное обязано отработать: гард сообщает, а не отменяет роллап.
+    assert report.archived, "роллап не выполнен — предупреждение не должно его отменять"
+
+
+def test_resolve_does_not_claim_a_stale_archive_index_as_regenerated(tmp_path, monkeypatch):
+    """`.is_file()` answers "a file is there", not "we wrote it".
+
+    With the rebuild failing and a **stale** ``archive/INDEX.md`` left by an
+    earlier run, the old code appended it to ``regenerated`` — the caller's one
+    field for "what actually happened" said the opposite of the truth.
+    """
+    from memshelf_mcp.core.archive import archive_root, rebuild_archive_index
+
+    root = _shelf_with_three(tmp_path / "shelf")
+    rollup(root, slug="2026-q1-rollup", digest=ROLLUP_DIGEST, until="2026-01-31")
+
+    stale = archive_root(root) / "INDEX.md"
+    assert stale.is_file(), "фикстура не воспроизводит случай: архивного INDEX нет"
+    stale.write_text("# устаревший INDEX\n", encoding="utf-8")
+
+    class _Exploding:
+        def __init__(self, *a, **kw):
+            pass
+
+        def rebuild_index(self):
+            raise RuntimeError("nope")
+
+    monkeypatch.setattr("docshelf_mcp.core.shelf.Shelf", _Exploding)
+
+    warnings = rebuild_archive_index(root)
+
+    assert warnings, "отказ не отражён в возвращённых предупреждениях"
+    # Файл на месте и НЕ обновлён — ровно та ситуация, в которой `.is_file()`
+    # раньше давала «regenerated».
+    assert stale.read_text(encoding="utf-8") == "# устаревший INDEX\n"
