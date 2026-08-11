@@ -1,0 +1,22 @@
+title: memshelf-mcp
+description: "Put your agent's memory on a shelf, hand it the index."
+remote_theme: pages-themes/cayman@v0.2.0
+plugins:
+  - jekyll-remote-theme
+  - jekyll-seo-tag
+
+# GitHub Pages site config
+url: "https://ignatenkofi.github.io"
+baseurl: "/memshelf-mcp"
+
+# SEO
+author: ignatenkofi
+twitter:
+  card: summary
+
+# Hide non-site files from the rendered site
+exclude:
+  - README.md
+  - vendor
+  - Gemfile
+  - Gemfile.lock
