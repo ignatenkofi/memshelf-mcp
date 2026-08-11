@@ -2,9 +2,10 @@
 
 > Put your agent's memory on a shelf, hand it the index.
 
+[![PyPI](https://img.shields.io/pypi/v/memshelf-mcp)](https://pypi.org/project/memshelf-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/memshelf-mcp)](https://pypi.org/project/memshelf-mcp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-M0%20complete%20%E2%86%92%20M1%20tools%20shipped-blue.svg)](docs/demo.md)
-[![MCP](https://img.shields.io/badge/MCP%20server-shelve%20%C2%B7%20recall%20%C2%B7%20index%20%C2%B7%20search%20%C2%B7%20stats%20%C2%B7%20resolve%20%C2%B7%20doctor-purple.svg)](src/memshelf_mcp/server.py)
+[![Docs](https://img.shields.io/badge/docs-ignatenkofi.github.io%2Fmemshelf--mcp-blue.svg)](https://ignatenkofi.github.io/memshelf-mcp/)
 [![Sibling: docshelf](https://img.shields.io/badge/sibling-docshelf--mcp-green.svg)](https://github.com/ignatenkofi/docshelf-mcp)
 
 ```text
@@ -18,14 +19,6 @@
  |__________|______|______|______|______|_____|
         memory shelves for AI agents
 ```
-
-**Status: M0 complete (Cases A + B), M1 tool surface shipped.** The pattern
-was validated with zero code on a live shelf — measured numbers in
-[`docs/demo.md`](docs/demo.md) — and the M1 server/CLI now enforces it:
-`memshelf_shelve` / `recall` / `index` / `search` / `stats` / `doctor`, plus a
-Claude Code plugin ([`adapters/claude-code/`](adapters/claude-code/)). Sibling
-project of [docshelf-mcp](https://github.com/ignatenkofi/docshelf-mcp),
-which provides the storage/index layer.
 
 ## What this is
 
@@ -44,12 +37,28 @@ in context, bodies fetched on demand — to the agent's own working memory:
 Positioning in one sentence: *claude-mem's loop, git's substrate, docshelf's
 navigation* — episodic memory you can grep, diff, review, and carry between
 hosts. Private and local by default: the standard storage mode is a local
-git repo with **no remote configured**.
+git repo with **no remote configured**. The tool is public; the memory
+never is.
+
+## Measured, not promised
+
+One week of dogfooding on the live shelf — full numbers and methodology in
+[`docs/demo.md`](docs/demo.md):
+
+| Measure | Result |
+|---|---|
+| Episodes on the shelf | 34 |
+| Standing cost in every session (INDEX + digests) | ~8.6K tokens |
+| Shelved mass those episodes replace | ~1.9M tokens — **≈220 : 1** |
+| One question answered from memory | ~1.8K tokens (INDEX + one episode) |
+| Recall test: fresh agent, INDEX path only | **5 / 5** — zero misses, zero over-fetch |
+
+Tokens are counted as chars/4 everywhere, so the *ratios* are
+estimator-independent; absolute counts move with the tokenizer.
 
 ## Quick start
 
-As an **MCP server** (tools `memshelf_init` / `shelve` / `recall` / `index` /
-`search` / `stats` / `rebuild` / `rollup` / `purge` / `resolve` / `doctor`):
+As an **MCP server**:
 
 ```bash
 # Claude Code
@@ -65,172 +74,126 @@ claude mcp add memshelf -- uvx memshelf-mcp
 }
 ```
 
-Or from the **shell** (`pip install memshelf-mcp`) — the same loop, no MCP:
+As a **Claude Code plugin** — [`adapters/claude-code/`](adapters/claude-code/):
+a `/shelve` skill plus SessionStart / SessionEnd / PreCompact hooks.
+
+Or from the **shell** (`pip install memshelf-mcp`, Python ≥ 3.10) — the same
+loop, no MCP:
 
 ```bash
 memshelf init   --shelf ~/my-shelf --name "My working memory"
 memshelf shelve --shelf ~/my-shelf --slug 2026-07-23-topic --kind topic \
   --digest "What was decided, what was rejected and why, what stays open." \
   --section "Decisions=..."
-memshelf recall  --shelf ~/my-shelf --id 2026-07-23-topic --section Decisions --log
-memshelf rebuild --shelf ~/my-shelf  # render the derived files from the episodes
-
-memshelf lint-digest --digest "..."          # check the contract, write nothing
-memshelf shelve ... --amend                  # rewrite an episode already shelved
-memshelf stats   --shelf ~/my-shelf  # claimed + realized savings
-memshelf advise  --shelf ~/my-shelf  # where the window went; proposals only
-memshelf doctor  --shelf ~/my-shelf  # exit 1 on integrity errors
+memshelf recall --shelf ~/my-shelf --id 2026-07-23-topic --section Decisions --log
+memshelf stats  --shelf ~/my-shelf   # claimed + realized savings
+memshelf doctor --shelf ~/my-shelf   # exit 1 on integrity errors
 ```
 
-### Getting the digest right is a loop, not a gate
+## Tool surface
 
-The digest is the only thing read at recall before fetching the body, so a weak
-one devalues the whole episode. Two commands make fixing it cheap (#71):
+One verb per job; the same names over MCP (`memshelf_*`) and in the CLI:
 
-```bash
-# Before writing anything: same validator `shelve` runs, no side effects.
-memshelf lint-digest --digest "$(cat draft.txt)"
-memshelf lint-digest --strict --digest-file draft.txt   # warnings fail too
-```
+| Tool | What it does |
+|---|---|
+| `init` | Create (or top up) a memory shelf: docshelf layout, fixed categories |
+| `shelve` | Offload one closed topic as a durable, indexed episode; `--amend` rewrites in place |
+| `lint_digest` | Validate a digest against the contract without touching the shelf |
+| `import` | Retro-shelve a whole exported dialog without pulling it through context |
+| `index` | Return the shelf INDEX — the small recall entry point |
+| `recall` | Fetch an episode by id, or a single `## Section` of it |
+| `search` | Grep the shelf; returns matching episodes |
+| `stats` | The shelf's token economy: standing cost vs shelved mass, claimed vs realized |
+| `advise` | What your context is made of and what you could put down — proposals only |
+| `rebuild` | Regenerate every derived file from the episodes |
+| `rollup` | Archive a period behind one digest-of-digests |
+| `purge` | Drop episodes past `retain_until`, then reindex — dry run by default |
+| `resolve` | Settle multi-writer conflicts: regenerate derived, union the recall log |
+| `doctor` | Diagnose: episode schema, digest contract at rest, secret shapes, index bloat |
 
-Errors block a shelve; warnings do not, and `--strict` is what turns them into
-a failure for a caller that wants that. The default stays permissive on purpose
-— a pure reference digest legitimately carries no decision marker, and `thin`
-must not make it unwritable.
+## The rules the tools enforce
 
-```bash
-# After writing: rewrite in place, same slug.
-memshelf shelve --shelf ~/my-shelf --slug 2026-07-23-topic --kind topic \
-  --digest "..." --section "Decisions=..." --amend
-```
+**The digest is a contract, not a convention.** It is the only thing read at
+recall before fetching a body, so a weak one devalues the whole episode.
+`lint_digest` runs the same validator as `shelve` with no side effects
+(`--strict` turns warnings into failures); errors block a shelve, warnings do
+not — a pure reference digest legitimately carries no decision marker. A
+rejected digest is a feature: the tool prints exactly what to fix and writes
+nothing.
 
-`--amend` runs the whole pipeline again — redaction, the digest contract,
-composition — so an amended episode is exactly as guarded as a fresh one, which
-a hand-edit of the file never is. Because the ledger row is derived (below),
-rewriting the one episode recomputes the one row instead of adding a second:
-the reason a new slug was the wrong workaround goes away with it. Amending a
-slug that is not on the shelf is an error, not a create — that is a typo, and
-creating it silently would leave you believing you fixed an episode that still
-carries the old text.
+**`--amend` re-runs the whole pipeline** — redaction, the digest contract,
+composition — so an amended episode is exactly as guarded as a fresh one,
+which a hand-edit of the file never is. Amending a slug that is not on the
+shelf is an error, not a create.
 
-### The episode is the source; everything else is output
+**The episode is the source; everything else is output.** `ledger.tsv`,
+`INDEX.md`, `stats.svg` and each category's `.meta.json` are derived:
+`shelve` writes and commits the episode alone, `rebuild` renders the rest —
+delete all four and `rebuild` restores them byte-identically. That is what
+makes two sessions shelving in parallel a non-event: the merge is clean by
+construction. On a shared shelf, let a bot own the derived files on `main` —
+ready-to-copy workflows in [`adapters/shelf-repo/`](adapters/shelf-repo/);
+`rebuild --adopt` migrates an older shelf once, `rebuild --check` is the
+CI guard.
 
-`ledger.tsv`, `INDEX.md`, `stats.svg` and each category's `.meta.json` are
-**derived** (#58): `shelve` writes and commits the episode alone, and
-`memshelf rebuild` renders the four from `docs/`. That is what makes two
-sessions shelving in parallel a non-event — they no longer touch the same four
-files in the same places, so the merge is clean by construction. Delete all
-four and `rebuild` restores them byte-identically. "Writes the episode alone"
-is literal: `shelve` restores the category's `.meta.json` sidecar to the state
-it found it in, so a clean tree after a shelve holds exactly one new file
-(#69).
-
-On a shared shelf, let a bot own them on `main` and guard PRs against touching
-derived paths — ready-to-copy workflows are in
-[`adapters/shelf-repo/`](adapters/shelf-repo/). A shelf written before this
-split adopts it once:
-
-```bash
-memshelf rebuild --shelf ~/my-shelf --adopt   # move date/notes/title into the episodes
-memshelf rebuild --shelf ~/my-shelf --check   # the guard: exit 1 if anything drifted
-```
-
-### Where did my window go?
-
-`memshelf advise` answers the question the project was founded on — *a dead
-topic has been occupying 30K tokens for forty minutes* — and answers it with
-**proposals**. It writes nothing.
-
-The tool cannot see your window, so you tell it what is in there; it does the
-part you cannot do about yourself:
+**`advise` proposes, never writes.** It answers the question the project was
+founded on — *a dead topic has been occupying 30K tokens for forty minutes*.
+The tool cannot see your window, so you tell it what is in there:
 
 ```bash
 memshelf advise --shelf ~/my-shelf \
-  --occupant 'CLAUDE.md stack=18000,kind=instructions' \
   --occupant 'auth refactor=42000,closed' \
-  --occupant 'current work=51000,live' \
   --occupant 'search dump=9000,idle=18' \
   --occupant 'Case B verdict=12000,live,episode=2026-07-22-case-b-verdict'
 ```
 
-You get a breakdown — static overhead / **memshelf's own cost** / live /
-reclaimable — and ranked proposals: `shelve` the closed topic and the idle
-dump, `drop` the one that is already on the shelf (recall it if you need it),
-`rollup` when INDEX itself is what got fat. Run it with no occupants at all
-for the first-run view of the shelf; it will say the window side is missing
-rather than report it clean.
+Three things keep it honest: it **counts itself** (INDEX + digests are in the
+report, not left out of it), it **verifies** `episode=` claims before
+proposing a drop, and it **reports net** — a topic too small to pay for its
+own digest is not proposed at all.
 
-Three things keep it honest:
+**Rollup shrinks navigation and nothing else.** When `doctor` warns
+`index-bloat`, `rollup` collapses a period into one digest-of-digests and
+moves the originals to `archive/` — still reachable by `recall` and `search`,
+every ledger row intact. The rollup digest is yours, not the tool's:
+synthesizing a quarter is the part a tool cannot do.
 
-- **It counts itself.** INDEX + digests are what memshelf takes out of every
-  session, and that number is in the report, not left out of it.
-- **It verifies "already shelved".** Claim an `episode=` that isn't on the
-  shelf and it refuses the drop out loud — that is the one mistake here that
-  destroys work.
-- **It reports net.** Shelving adds a digest and an INDEX line to every later
-  session, so proposals subtract that, and a topic too small to pay for its
-  own digest is not proposed at all.
+**`purge` deletes the working tree, not history.** Retention is opt-in per
+episode (`--retain-until`); `purge` is a dry run until `--apply` — and even
+then git history still has the file. Real erasure is a deliberate
+`filter-repo` pass over the whole repository, never a side effect of a tool
+call, and the purge report says so.
 
-### Keeping INDEX readable as the shelf grows
+**`resolve` regenerates derived paths, never merges them** — a derived file
+has no history, only a current correct value. The one file it unions is
+`recall-log.tsv`, because a recall is an event, not a fact about the
+episodes. Conflicting *episodes* are content, not mechanics: `resolve`
+reports them and steps aside.
 
-`INDEX.md` is the one file that rides in *every* session, so it grows with the
-episode count while the per-session budget does not. `doctor` warns
-(`index-bloat`) once it crosses the budget; two mechanics answer that warning
-(#15):
+The design rationale behind each rule lives in
+[`docs/DECISIONS.md`](docs/DECISIONS.md) and
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-```bash
-# Collapse a period into one digest-of-digests; originals move to archive/
-memshelf rollup --shelf ~/my-shelf --slug 2026-Q1-rollup --until 2026-03-31 \
-  --display-title "Роллап Q1" \
-  --digest "What the quarter decided, what it rejected, what stays open."
+## One memory, multiple AIs
 
-# Retention is opt-in per episode, and purge is a dry run by default
-memshelf shelve --shelf ~/my-shelf ... --retain-until 2027-01-01
-memshelf purge  --shelf ~/my-shelf            # list what expired
-memshelf purge  --shelf ~/my-shelf --apply    # delete it, then reindex
-```
+The memory is **vendor-portable, and that is a measured fact**, not a design
+intention: the same live shelf has been read and cross-written by Claude Code
+(Anthropic) and Gemini CLI (Google) through one `shelf-spec` server —
+protocol and field notes in [`docs/portability.md`](docs/portability.md).
 
-A rollup shrinks **navigation and nothing else**: the originals move into
-`archive/` — a sub-shelf with its own INDEX, outside the parent's `docs/` —
-so N INDEX lines become one. Nothing is deleted, `recall --id` and `search`
-still reach them, and every ledger row survives, because an archived episode
-still holds the mass it saved. The rollup episode lists every id it hid.
+## Status
 
-The rollup *digest* is yours, not the tool's: synthesizing a quarter of
-digests is the part a tool cannot do, so it takes the same digest contract
-`shelve` enforces.
-
-`purge` deletes the working-tree file — **git history still has it**. Real
-erasure is a deliberate `filter-repo` pass over the whole repository, never a
-side effect of a tool call, and the purge report says so.
-
-`resolve` stays for what remains genuinely conflicting — the same episode
-written on both sides, or a shelf that has not adopted the bot yet:
-
-```bash
-memshelf resolve --shelf ~/my-shelf            # regenerate derived, union the recall log, doctor
-memshelf resolve --shelf ~/my-shelf --commit   # same + complete the merge commit
-```
-
-A conflict in a derived path is resolved by **regenerating** it, never by
-merging the two sides: a derived file has no history, only a current correct
-value, so a union of two versions is not the sum of two truths (#64). The one
-file `resolve` still merges is `recall-log.tsv` — nothing regenerates a recall
-log, because a recall is an event, not a fact about the episodes.
-
-Conflicting *episodes* are content, not mechanics — `resolve` reports
-them and steps aside.
-
-A rejected digest is a feature: the tool prints exactly what to fix and
-writes nothing. Measured results from a week of dogfooding are in
-[`docs/demo.md`](docs/demo.md).
-
-The memory is **vendor-portable, and that is now a measured fact**, not a
-design intention: the same live shelf has been read and cross-written by
-Claude Code (Anthropic) and Gemini CLI (Google) through one `shelf-spec`
-server — protocol and field notes in [`docs/portability.md`](docs/portability.md).
+M0 complete: the pattern was validated with zero code on a live shelf —
+retro-import of months of material, then a week of shelve-at-close
+([`docs/M0.md`](docs/M0.md)). M1 shipped the server/CLI that enforces it,
+plus the Claude Code plugin. Next milestones with exit criteria:
+[`docs/ROADMAP.md`](docs/ROADMAP.md); release history:
+[`CHANGELOG.md`](CHANGELOG.md).
 
 ## Documents
+
+Rendered site: <https://ignatenkofi.github.io/memshelf-mcp/> — including the
+week-report infographic from the dogfood shelf.
 
 | Doc | What it covers |
 |---|---|
@@ -239,9 +202,9 @@ server — protocol and field notes in [`docs/portability.md`](docs/portability.
 | [`docs/LANDSCAPE.md`](docs/LANDSCAPE.md) | Prior-art survey (2026-07), platform built-ins, positioning, risks |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Milestones M0–M3 with exit criteria |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Decision log |
-| [`docs/M0.md`](docs/M0.md) | M0 experiment protocol and results (complete): cases, token ledger, recall test |
+| [`docs/M0.md`](docs/M0.md) | M0 experiment protocol and results: cases, token ledger, recall test |
 | [`docs/demo.md`](docs/demo.md) | Measured numbers from the dogfood shelf: compression, recall test, doctor findings |
-| [`docs/portability.md`](docs/portability.md) | **One memory, multiple AIs** — the 2026-07-27 experiment: the dogfood shelf read and written by Claude Code (Anthropic) and Gemini CLI (Google) through the same shelf-spec server |
+| [`docs/portability.md`](docs/portability.md) | One memory, multiple AIs: the cross-vendor experiment |
 | [`docs/examples/`](docs/examples/) | A worked episode file and a memory-shelf INDEX |
 | [`adapters/claude-code/`](adapters/claude-code/) | Claude Code plugin: `/shelve` skill + SessionStart/SessionEnd/PreCompact hooks |
 
@@ -263,8 +226,8 @@ historical snapshot.
   ~3.7K tokens vs 1.2M per question). memshelf was born as
   [RFC-0001](https://github.com/ignatenkofi/docshelf-mcp/tree/main/docs/rfc/0001-memshelf)
   in its repo and reuses its splitter/indexer/read/search verbatim.
-- The dogfood memory shelf is a private repo — by design (MANIFEST
-  principle 5): the tool is public, the memory never is.
+- The dogfood memory shelf is a private repo — by design
+  ([MANIFEST](docs/MANIFEST.md) principle 5).
 
 ## License
 
