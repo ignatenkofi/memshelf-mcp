@@ -17,6 +17,8 @@ import logging
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult, TextContent
 
 from memshelf_mcp import __version__
 from memshelf_mcp.tools import (
@@ -58,7 +60,11 @@ _READ_ONLY = {
 }
 
 logger = logging.getLogger("memshelf_mcp")
-mcp = MCPServer("memshelf_mcp")
+
+# Every wrapper below takes one typed model, so the SDK derives a schema that
+# nests the real arguments under `params`. Named here because both behaviours of
+# `_ToolBoundary` key off it.
+_ARGUMENT_ENVELOPE = "params"
 
 
 def _serialize(payload: Any) -> str:
@@ -68,6 +74,73 @@ def _serialize(payload: Any) -> str:
 def _error_response(exc: Exception, tool: str) -> str:
     logger.warning("%s: %s", tool, exc)
     return _serialize({"status": "error", "error": str(exc), "type": type(exc).__name__})
+
+
+def _accept_flat_arguments(tool: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Wrap flat arguments in the envelope this tool's schema asks for.
+
+    Driven by the tool's own schema rather than by a blanket rule: only a tool
+    whose single required property *is* the envelope gets the treatment, so a
+    tool that one day takes its fields directly is untouched, and a caller who
+    legitimately passes something named ``params`` is never second-guessed.
+    """
+    schema = tool.parameters or {}
+    if schema.get("required") != [_ARGUMENT_ENVELOPE]:
+        return arguments
+    if _ARGUMENT_ENVELOPE in arguments:
+        return arguments
+    return {_ARGUMENT_ENVELOPE: arguments}
+
+
+class _ToolBoundary(MCPServer):
+    """Holds the error-envelope contract at the edge the wrappers cannot reach.
+
+    Every tool below catches its own failures and returns ``{"status": "error",
+    …}``, because an exception escaping a tool becomes a protocol-level error and
+    the caller gets a transport failure instead of the payload the tool
+    documents. Input validation runs *before* the wrapper is entered, though, so
+    that half of the contract was enforced by nobody: a malformed call — every
+    bad call a model makes, plus the ordinary "no shelf configured yet" that a
+    fresh desktop install hits first — came back as plain text, and a caller
+    written against the envelope met a ``JSONDecodeError`` (#85).
+
+    Two things happen here, both at that same boundary:
+
+    * a flat argument object is accepted as well as the nested one (#84). The
+      published schema still nests under ``params``; this only means a caller who
+      wrote the obvious shape gets an answer instead of an error naming a field
+      that appears nowhere in the tool's documented interface. Whether the
+      *published* shape should flatten is a wire-contract decision and stays with
+      the owner in #84 — this makes guessing wrong survivable, not moot.
+    * a validation failure leaves as the same JSON envelope every other failure
+      uses, rather than as a transport error.
+
+    An unknown tool is left alone: that is a protocol error about a tool this
+    server does not have, not a failure of one it does.
+    """
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: Any | None = None,
+    ) -> Any:
+        tool = self._tool_manager.get_tool(name)
+        if tool is None:
+            return await super().call_tool(name, arguments, context)
+        try:
+            return await super().call_tool(name, _accept_flat_arguments(tool, arguments), context)
+        except ToolError as exc:
+            # `ToolError` wraps the pydantic failure. The cause carries the type
+            # worth reporting, so the envelope names `ValidationError` instead of
+            # the SDK's transport-shaped wrapper.
+            reported = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
+            return CallToolResult(
+                content=[TextContent(type="text", text=_error_response(reported, name))]
+            )
+
+
+mcp = _ToolBoundary("memshelf_mcp")
 
 
 @mcp.tool(

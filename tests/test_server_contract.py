@@ -13,10 +13,18 @@ would surface only to whoever called that one tool.
 
 The roster is discovered, not listed: a tool added without the wrapper is
 caught the day it lands rather than the day someone updates this file.
+
+The wrappers are only half the boundary, though. Input validation runs *before*
+a wrapper is entered, so until #85 a malformed call left as plain text — and
+this file could not see it: ``_placeholder`` only ever builds **valid** inputs,
+so the tests above pass while the whole invalid-input class stays uncovered. The
+last two tests drive ``call_tool`` instead of the functions, which is the only
+path where validation happens at all.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import types
 from typing import Any, get_type_hints
@@ -24,6 +32,16 @@ from typing import Any, get_type_hints
 import pytest
 
 from memshelf_mcp import server
+
+
+def _call_over_the_boundary(tool_name: str, arguments: dict[str, Any]) -> str:
+    """Call a tool the way the transport does, and return the text it answered.
+
+    ``server.mcp.call_tool`` rather than the wrapper function: validation lives
+    between the two, and it is the thing under test here.
+    """
+    result = asyncio.run(server.mcp.call_tool(tool_name, arguments))
+    return "".join(block.text for block in result.content if getattr(block, "text", None))
 
 
 def _tool_functions() -> dict[str, types.FunctionType]:
@@ -111,3 +129,58 @@ def test_the_error_envelope_carries_a_diagnosis(tmp_path):
     assert payload["status"] == "error", payload
     assert payload["error"], "error text is empty — nothing to act on"
     assert payload["type"], "exception type missing — nothing to branch on"
+
+
+@pytest.mark.parametrize(
+    ("label", "arguments"),
+    [
+        # A field of the wrong type: the shape of every malformed call a model
+        # makes.
+        ("wrong type", {"params": {"shelf_path": 5}}),
+        # No shelf anywhere — what a fresh desktop install hits first, since the
+        # model-level check for "neither argument nor $MEMSHELF_SHELF_PATH" is
+        # itself a validation error.
+        ("no shelf configured", {}),
+    ],
+)
+def test_invalid_input_returns_the_envelope_too(label: str, arguments: dict[str, Any], monkeypatch):
+    """Validation failures are failures: they leave through the same envelope.
+
+    Before #85 these came back as plain text (``Error executing tool …: 1
+    validation error …``), so a caller written against the documented envelope —
+    the desktop bundle check, for one — got a ``JSONDecodeError`` instead of a
+    diagnosis. The parametrized test above cannot reach this: its inputs are
+    valid by construction.
+    """
+    monkeypatch.delenv("MEMSHELF_SHELF_PATH", raising=False)
+
+    raw = _call_over_the_boundary("memshelf_index", arguments)
+
+    payload = json.loads(raw)  # the assertion is that this line does not raise
+    assert payload["status"] == "error", payload
+    assert payload["error"], f"{label}: error text is empty — nothing to act on"
+    assert payload["type"] == "ValidationError", payload
+
+
+def test_flat_arguments_are_accepted_as_well_as_nested(tmp_path, monkeypatch):
+    """The obvious call shape must work, not merely fail informatively (#84).
+
+    Every tool's published schema nests its arguments under ``params``, which is
+    not what most MCP servers publish and not what the tool description implies;
+    a caller who writes them flat used to get an error about a field that appears
+    nowhere in the documented interface.
+
+    Asserted against the *same* answer the nested form gives, rather than merely
+    "no crash": a flat call that quietly reached a different shelf — or none —
+    would satisfy a weaker assertion.
+    """
+    monkeypatch.delenv("MEMSHELF_SHELF_PATH", raising=False)
+    missing = str(tmp_path / "no-such-shelf")
+
+    flat = json.loads(_call_over_the_boundary("memshelf_index", {"shelf_path": missing}))
+    nested = json.loads(
+        _call_over_the_boundary("memshelf_index", {"params": {"shelf_path": missing}})
+    )
+
+    assert flat == nested, (flat, nested)
+    assert missing in flat["error"], flat
