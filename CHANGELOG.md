@@ -10,6 +10,27 @@ once code ships.
 
 ### Added
 
+- **`doctor` tells a lagging renderer from a stopped one: `derived-stale`**
+  (#89). `no-ledger-row` meant two things — *the renderer has not run yet*
+  (normal one second after a shelve, resolves itself) and *the renderer cannot
+  run* (nothing resolves it, and every shelve adds to the pile). A warning that
+  means both means neither, and it is self-concealing: the shelf's rules
+  correctly say the fresh case must not be hand-fixed, so the documented
+  response to the only visible symptom of a dead renderer was to ignore it.
+  Nine episodes accumulated that way on the dogfood shelf before anyone looked.
+
+  Episodes uncounted **while `ledger.tsv` itself has not been rewritten for
+  `DERIVED_STALE_AFTER_HOURS`** (a day) is now one shelf-level error naming the
+  episodes. The clock is the commit that last touched `ledger.tsv` — not the
+  episode dates, which say nothing on an unmerged branch, and not the file
+  mtime, which a fresh clone rewrites. The per-episode warnings are unchanged;
+  they are right about the fresh case.
+
+  `check_shelf` grows `now=` and `stale_after_hours=` because a guard about
+  elapsed time has to be drivable to fail at all. Run against the live shelf it
+  was written for: `error derived-stale — 10 episode(s) have no ledger row and
+  the derived layer has not been rewritten for 32h`.
+
 - **memshelf installs into Claude Desktop as an `.mcpb` extension** —
   `adapters/claude-desktop/`. Two bundles, because Claude Desktop ships a Node
   runtime and not a Python one, and macOS's own `python3` is 3.9, below this
