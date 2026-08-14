@@ -44,10 +44,13 @@ def _placeholder(model, shelf_path: str):
     """
     values: dict[str, Any] = {}
     for field_name, field in model.model_fields.items():
-        if not field.is_required():
-            continue
+        # `shelf_path` is optional (it falls back to $MEMSHELF_SHELF_PATH), but
+        # this test must aim every call at a shelf that is not there — the whole
+        # point is a doomed call. So it is filled in before the required check.
         if field_name == "shelf_path":
             values[field_name] = shelf_path
+            continue
+        if not field.is_required():
             continue
         annotation = field.annotation
         if annotation is int:
