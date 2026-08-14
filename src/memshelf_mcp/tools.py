@@ -7,10 +7,11 @@ lets the CLI and the tests reuse it without importing the MCP SDK.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from memshelf_mcp.core.advisor import (
     DEFAULT_BUDGET_TOKENS,
@@ -32,9 +33,50 @@ from memshelf_mcp.core.resolve import resolve_shelf
 from memshelf_mcp.core.shelve import shelve
 from memshelf_mcp.core.stats import banner, compute_stats, episode_mass
 
+SHELF_PATH_ENV = "MEMSHELF_SHELF_PATH"
 
-class ShelveInput(BaseModel):
-    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+_SHELF_PATH_DESCRIPTION = (
+    "Path to an initialized memory shelf. Optional: when omitted, the shelf named "
+    f"by ${SHELF_PATH_ENV} is used. Pass it explicitly to address a different shelf "
+    "than that default."
+)
+
+
+def default_shelf_path() -> str:
+    """The shelf a call falls back to when it names none (empty when unset).
+
+    Read per call, not at import: a host may set the variable after the process
+    starts, and the tests flip it between cases.
+    """
+    return os.environ.get(SHELF_PATH_ENV, "").strip()
+
+
+class ShelfScopedInput(BaseModel):
+    """Base for every input addressed at one shelf.
+
+    An explicit ``shelf_path`` always wins; ``$MEMSHELF_SHELF_PATH`` fills in when
+    the call names none. That split is what a packaged host needs: Claude Desktop
+    can only configure an extension through the environment, so the bundle carries
+    one *global* shelf, and a project overrides it by naming its own path in the
+    call. Neither present is an error with a fixable message, not a path of ``''``.
+    """
+
+    shelf_path: str = Field(default="", description=_SHELF_PATH_DESCRIPTION)
+
+    @model_validator(mode="after")
+    def _resolve_shelf_path(self) -> ShelfScopedInput:
+        resolved = self.shelf_path.strip() or default_shelf_path()
+        if not resolved:
+            raise ValueError(
+                "no shelf to work on: pass shelf_path, or set "
+                f"{SHELF_PATH_ENV} to the shelf directory in the host's configuration."
+            )
+        if resolved != self.shelf_path:
+            self.shelf_path = resolved
+        return self
+
+
+class ShelveInput(ShelfScopedInput):
     slug: str = Field(
         description="Latin, date-prefixed episode id / filename, e.g. 2026-07-22-auth-refactor."
     )
@@ -118,8 +160,7 @@ def run_shelve(params: ShelveInput) -> dict:
     }
 
 
-class RecallInput(BaseModel):
-    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+class RecallInput(ShelfScopedInput):
     episode_id: str = Field(description="Episode id / slug, e.g. 2026-07-22-auth-refactor.")
     section: str | None = Field(
         default=None, description="Optional H2 section to fetch alone, e.g. 'Decisions'."
@@ -131,12 +172,11 @@ class RecallInput(BaseModel):
     )
 
 
-class IndexInput(BaseModel):
-    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+class IndexInput(ShelfScopedInput):
+    """Nothing beyond the shelf: INDEX is small and read whole."""
 
 
-class SearchInput(BaseModel):
-    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+class SearchInput(ShelfScopedInput):
     query: str = Field(description="Space-separated tokens; a hit must contain all of them.")
     max_results: int = 10
 
@@ -184,8 +224,8 @@ def run_search(params: SearchInput) -> dict:
     }
 
 
-class StatsInput(BaseModel):
-    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+class StatsInput(ShelfScopedInput):
+    """Nothing beyond the shelf: the accounting covers all of it."""
 
 
 def run_stats(params: StatsInput) -> dict:
@@ -201,8 +241,12 @@ def run_stats(params: StatsInput) -> dict:
     return payload
 
 
-class InitInput(BaseModel):
-    shelf_path: str = Field(description="Directory to create (or top up) the shelf in.")
+class InitInput(ShelfScopedInput):
+    shelf_path: str = Field(
+        default="",
+        description="Directory to create (or top up) the shelf in. Optional: when "
+        f"omitted, ${SHELF_PATH_ENV} is used.",
+    )
     name: str = "Memory shelf"
     storage: Literal["plain", "git-local", "git-remote"] = "git-local"
     remote: str | None = Field(
@@ -254,8 +298,7 @@ def run_lint_digest(params: LintDigestInput) -> dict:
     }
 
 
-class DoctorInput(BaseModel):
-    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+class DoctorInput(ShelfScopedInput):
     check_remote: bool = Field(
         default=False,
         description="Also probe git remotes and fail the shelf if any is publicly "
@@ -270,8 +313,7 @@ def run_doctor(params: DoctorInput) -> dict:
     return check_shelf(params.shelf_path, check_remote=params.check_remote).as_dict()
 
 
-class ResolveInput(BaseModel):
-    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+class ResolveInput(ShelfScopedInput):
     commit: bool = Field(
         default=False,
         description="Commit the resolution (inside a merge this completes the "
@@ -286,8 +328,7 @@ def run_resolve(params: ResolveInput) -> dict:
     return resolve_shelf(params.shelf_path, commit=params.commit).as_dict()
 
 
-class RebuildInput(BaseModel):
-    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+class RebuildInput(ShelfScopedInput):
     check: bool = Field(
         default=False,
         description="Verify instead of write: report which derived files would "
@@ -316,8 +357,7 @@ def run_rebuild(params: RebuildInput) -> dict:
     return payload
 
 
-class RollupInput(BaseModel):
-    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+class RollupInput(ShelfScopedInput):
     slug: str = Field(description="Latin slug/id of the rollup episode, e.g. 2026-Q2-rollup.")
     digest: str = Field(
         description="The digest-of-digests — YOUR synthesis of the period, not the tool's. "
@@ -355,8 +395,7 @@ def run_rollup(params: RollupInput) -> dict:
     ).as_dict()
 
 
-class PurgeInput(BaseModel):
-    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+class PurgeInput(ShelfScopedInput):
     apply: bool = Field(
         default=False,
         description="Actually delete. Default is a dry run that only lists what expired.",
@@ -393,8 +432,7 @@ class OccupantInput(BaseModel):
     )
 
 
-class AdviseInput(BaseModel):
-    shelf_path: str = Field(description="Path to an initialized memory shelf.")
+class AdviseInput(ShelfScopedInput):
     occupants: list[OccupantInput] = Field(
         default_factory=list,
         description="What is in your context right now. Empty is valid — you then get the "
