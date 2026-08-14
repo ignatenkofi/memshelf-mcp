@@ -9,6 +9,7 @@ dist/
 venv/
 
 # Tooling caches
+.build-cache/
 .pytest_cache/
 .ruff_cache/
 .coverage

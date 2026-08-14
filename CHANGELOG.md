@@ -8,6 +8,40 @@ once code ships.
 
 ## [Unreleased]
 
+### Added
+
+- **memshelf installs into Claude Desktop as an `.mcpb` extension** —
+  `adapters/claude-desktop/`. Two bundles, because Claude Desktop ships a Node
+  runtime and not a Python one, and macOS's own `python3` is 3.9, below this
+  project's floor: an ~85 KB bundle on `server.type: "uv"` (manifest 0.4, the
+  host provides Python) and an ~23 MB one on `server.type: "python"` (manifest
+  0.3) carrying a pruned python-build-standalone interpreter plus every
+  dependency. Neither needs anything installed on the machine.
+
+  `build.py` generates the manifests rather than storing them: the version comes
+  from `__init__.py` and the tool roster is parsed out of `server.py`, so a tool
+  added or renamed cannot go missing from a bundle. docshelf is vendored without
+  its dependency tree — it declares `pymupdf4llm`, ~200 MB of PDF ingestion that
+  a memory shelf never reaches, and memshelf imports one docshelf module that
+  needs none of it.
+
+  `try_bundle.py` checks a built bundle by *starting* it: it unpacks the zip,
+  expands the manifest's own `${__dirname}`/`${user_config.*}` templates, spawns
+  exactly the command `mcp_config` declares and speaks MCP to it. That is what
+  catches an over-pruned interpreter, wheels built for the wrong ABI, or a
+  `mcp_config` path pointing at a file that is not in the zip — none of which
+  `mcp validate` can see. The `linux-x86_64` build target exists so that path
+  can be run on a build machine and in CI.
+
+- **A default shelf: `$MEMSHELF_SHELF_PATH`.** Every shelf-scoped tool input now
+  accepts an omitted `shelf_path` and falls back to that variable, so a packaged
+  host — which can only configure an extension through the environment — can
+  carry one global shelf. Precedence is the point: an explicit `shelf_path`
+  always wins, which is how a project pins a shelf of its own while the setting
+  covers everything else. Neither present stays an error, now one that names the
+  variable to set instead of writing to `""`. The CLI is unchanged; `--shelf`
+  remains required there.
+
 ## [0.2.0] — 2026-08-04
 
 Cut because **the published 0.1.0 has a dead MCP server entry point.** That

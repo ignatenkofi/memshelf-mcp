@@ -74,6 +74,11 @@ claude mcp add memshelf -- uvx memshelf-mcp
 }
 ```
 
+As a **Claude Desktop extension** — [`adapters/claude-desktop/`](adapters/claude-desktop/):
+an `.mcpb` bundle installed from *Settings → Extensions*, with a **Default
+shelf** setting so calls need not repeat the path. Nothing has to be installed
+alongside it — not even Python.
+
 As a **Claude Code plugin** — [`adapters/claude-code/`](adapters/claude-code/):
 a `/shelve` skill plus SessionStart / SessionEnd / PreCompact hooks.
 
@@ -207,6 +212,7 @@ week-report infographic from the dogfood shelf.
 | [`docs/portability.md`](docs/portability.md) | One memory, multiple AIs: the cross-vendor experiment |
 | [`docs/examples/`](docs/examples/) | A worked episode file and a memory-shelf INDEX |
 | [`adapters/claude-code/`](adapters/claude-code/) | Claude Code plugin: `/shelve` skill + SessionStart/SessionEnd/PreCompact hooks |
+| [`adapters/claude-desktop/`](adapters/claude-desktop/) | Claude Desktop `.mcpb` extension: builder, bundle checker, default-shelf setting |
 
 ## Origin
 

@@ -41,3 +41,22 @@ jobs:
           ruff format --check .
       - name: Tests
         run: pytest -q
+
+  bundle:
+    # The desktop bundle is assembled by a script and checked by starting it —
+    # `mcpb validate` reads the manifest and would not notice an over-pruned
+    # interpreter, a wheel built for the wrong ABI, or an `mcp_config` path that
+    # is not in the zip. A bundle can only be started on the platform it targets,
+    # so CI builds the linux one; every mistake in the shared machinery fails
+    # identically on the macOS target.
+    name: desktop bundle · build + run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: python3 adapters/claude-desktop/build.py --variant standalone --target linux-x86_64 --out dist
+      - name: Start it and talk MCP to it
+        run: python3 adapters/claude-desktop/try_bundle.py dist/*-linux-x86_64.mcpb
