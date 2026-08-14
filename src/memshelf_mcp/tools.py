@@ -142,6 +142,11 @@ def run_shelve(params: ShelveInput) -> dict:
         "committed": result.committed,
         "commit": result.commit,
         "amended": result.amended,
+        # Set only when an amend changed the kind and therefore moved the
+        # episode between categories: the caller's previous address stopped
+        # being valid, and a move reported by nothing is a move that looks like
+        # a write (#90).
+        "moved_from": result.moved_from,
         "redaction": {
             "total": result.redaction.total,
             "counts": result.redaction.counts,

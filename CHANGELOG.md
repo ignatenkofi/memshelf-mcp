@@ -56,6 +56,21 @@ was missing.
 
 ### Fixed
 
+- **`shelve --amend` could not change an episode's `kind`, and blamed the slug
+  for it** (#90). The target was resolved from the *new* kind's category and
+  looked for only there, so a kind change always read as `AmendTargetMissing:
+  no episode … on this shelf`. That is the one correction amend is genuinely
+  needed for — `kind` decides which sections `doctor` demands — and the
+  workaround that did work (shelve without `--amend`, then delete the old file
+  by hand) left the same episode in two categories, and two ledger rows for one
+  slug, whenever its second half was skipped.
+
+  A slug is the ledger key for the whole shelf, so the lookup now spans
+  categories: a kind change moves the file, stages both ends in the commit, and
+  reports `moved_from`. The same lookup makes the non-amend case honest —
+  shelving a slug that already exists under a different kind is now refused with
+  the path it was found at, instead of quietly writing a second copy.
+
 - **The parent `INDEX.md` failure was still silent — the earlier fix was half
   of one.** `rollup` and `purge` called `rebuild(root)` without binding its
   return value, so the `RebuildReport.warnings` it already collects (including

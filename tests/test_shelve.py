@@ -590,3 +590,132 @@ def test_amend_finds_an_episode_stored_under_its_normalized_name(tmp_path):
     episode = root / "docs" / "topics" / "2026-08-03-проверка-слага.md"
     assert "вторая редакция" in episode.read_text(encoding="utf-8")
     assert len(list((root / "docs" / "topics").glob("*.md"))) == 1
+
+
+# ── #90: an amend that changes the kind changes the category ──────────────
+#
+# `kind` decides which sections doctor demands, so correcting a wrong kind is
+# one of the few things amend is genuinely needed for — and it was the one
+# thing amend refused, because it resolved the target from the *new* kind and
+# looked only there. The manual path (shelve without --amend, then delete the
+# old file by hand) is what these tests exist to make unnecessary: skipping its
+# second half left one episode in two categories and two ledger rows.
+
+
+def _session_episode(root, slug="2026-08-13-recount"):
+    shelve(
+        root,
+        slug=slug,
+        kind="session",
+        digest=GOOD_DIGEST,
+        sections={"Timeline": "10:00 started", "Open threads": "none"},
+        approx_tokens=1000,
+        date="2026-08-13",
+    )
+    return root / "docs" / "sessions" / f"{slug}.md"
+
+
+def test_amend_moves_the_episode_when_the_kind_changes(tmp_path):
+    root = _init_shelf(tmp_path)
+    was = _session_episode(root)
+    assert was.is_file()
+
+    result = shelve(
+        root,
+        slug="2026-08-13-recount",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "kind corrected"},
+        approx_tokens=1000,
+        date="2026-08-13",
+        amend=True,
+    )
+
+    now = root / "docs" / "topics" / "2026-08-13-recount.md"
+    assert now.is_file(), "the episode did not land under the new kind"
+    assert not was.exists(), "the old file survived — that is the duplicate this prevents"
+    assert result.address == "docs/topics/2026-08-13-recount.md"
+    assert result.moved_from == "docs/sessions/2026-08-13-recount.md"
+    assert "kind: topic" in now.read_text(encoding="utf-8")
+
+
+def test_the_move_leaves_one_episode_and_one_ledger_row(tmp_path):
+    """The reason the move matters: a slug is the ledger key for the whole shelf."""
+    root = _init_shelf(tmp_path)
+    _session_episode(root)
+    shelve(
+        root,
+        slug="2026-08-13-recount",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "kind corrected"},
+        approx_tokens=1000,
+        date="2026-08-13",
+        amend=True,
+    )
+
+    rebuild(root)
+    rows = (root / "ledger.tsv").read_text(encoding="utf-8").splitlines()[1:]
+    slugs = [row.split("\t")[1] for row in rows]
+    assert slugs.count("2026-08-13-recount") == 1, slugs
+    episodes = list((root / "docs").glob("*/2026-08-13-recount.md"))
+    assert len(episodes) == 1, episodes
+
+
+def test_the_move_is_committed_as_a_move(tmp_path):
+    """Both ends staged: otherwise history records the duplicate instead."""
+    root = _init_shelf(tmp_path)
+    _session_episode(root)
+    shelve(
+        root,
+        slug="2026-08-13-recount",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "kind corrected"},
+        approx_tokens=1000,
+        date="2026-08-13",
+        amend=True,
+    )
+
+    changed = subprocess.run(
+        ["git", "-C", str(root), "show", "--name-status", "--format=", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert "docs/sessions/2026-08-13-recount.md" in changed, changed
+    assert "docs/topics/2026-08-13-recount.md" in changed, changed
+
+
+def test_amend_of_a_slug_absent_from_every_category_still_fails(tmp_path):
+    """Widening the lookup must not turn a typo'd slug into a create."""
+    root = _init_shelf(tmp_path)
+    with pytest.raises(AmendTargetMissing) as exc:
+        shelve(
+            root,
+            slug="2026-08-13-never-written",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            date="2026-08-13",
+            amend=True,
+        )
+    # The message must name where it looked; the old one named one directory and
+    # blamed the slug, which is exactly what made a kind change unreadable.
+    assert "docs/sessions" in str(exc.value), exc.value
+
+
+def test_shelving_the_same_slug_under_another_kind_without_amend_is_refused(tmp_path):
+    """Without --amend this used to write a second copy and say nothing."""
+    root = _init_shelf(tmp_path)
+    _session_episode(root)
+    with pytest.raises(Exception) as exc:
+        shelve(
+            root,
+            slug="2026-08-13-recount",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "a second copy"},
+            date="2026-08-13",
+        )
+    assert "amend" in str(exc.value).lower()
+    assert not (root / "docs" / "topics" / "2026-08-13-recount.md").exists()
