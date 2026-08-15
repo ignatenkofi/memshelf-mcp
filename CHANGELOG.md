@@ -104,6 +104,21 @@ was missing.
   with the same code shipping five ways (PyPI, uvx, plugin, two bundles), "which
   build is this" is the question `serverInfo` exists to answer.
 
+- **`shelve --amend` could not change an episode's `kind`, and blamed the slug
+  for it** (#90). The target was resolved from the *new* kind's category and
+  looked for only there, so a kind change always read as `AmendTargetMissing:
+  no episode … on this shelf`. That is the one correction amend is genuinely
+  needed for — `kind` decides which sections `doctor` demands — and the
+  workaround that did work (shelve without `--amend`, then delete the old file
+  by hand) left the same episode in two categories, and two ledger rows for one
+  slug, whenever its second half was skipped.
+
+  A slug is the ledger key for the whole shelf, so the lookup now spans
+  categories: a kind change moves the file, stages both ends in the commit, and
+  reports `moved_from`. The same lookup makes the non-amend case honest —
+  shelving a slug that already exists under a different kind is now refused with
+  the path it was found at, instead of quietly writing a second copy.
+
 - **The "return errors, never raise" contract did not cover bad input** (#85).
   Validation runs before a wrapper is entered, so a malformed call left as plain
   text (`Error executing tool …: 1 validation error …`) and a caller written
