@@ -91,6 +91,31 @@ class ShelveResult:
     commit: str | None = None
     warnings: list[str] = field(default_factory=list)
     amended: bool = False
+    #: Set when an amend changed the episode's kind and therefore its category:
+    #: the old path, relative to the shelf root. The caller needs it because the
+    #: episode's address changed under them — and because "the file moved" is
+    #: not visible in `address` alone.
+    moved_from: str | None = None
+
+
+def _category_dirs() -> list[str]:
+    """The shelf's episode directories, in a stable order for error messages."""
+    return [f"docs/{category}" for category in sorted(set(CATEGORY_BY_KIND.values()))]
+
+
+def _find_episode(root: Path, doc_stem: str) -> Path | None:
+    """Where this slug already lives on the shelf, whatever kind it was shelved as.
+
+    Returns the first match in ``CATEGORY_BY_KIND`` order. A shelf with the same
+    stem in two categories is already broken (two ledger rows for one slug), and
+    picking a winner here is not the place to fix that — doctor's ledger checks
+    are.
+    """
+    for category in sorted(set(CATEGORY_BY_KIND.values())):
+        candidate = root / "docs" / category / f"{doc_stem}.md"
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _first_sentence(text: str, cap: int = 200) -> str:
@@ -206,11 +231,46 @@ def shelve(
     category = CATEGORY_BY_KIND[kind]
     doc_stem = slugify(slug, max_len=80) or "document"
     episode_path = root / "docs" / category / f"{doc_stem}.md"
-    if amend and not episode_path.is_file():
-        raise AmendTargetMissing(
-            f"--amend: no episode {slug!r} on this shelf "
-            f"({episode_path.relative_to(root).as_posix()} does not exist). "
-            "Check the slug, or shelve it without --amend to create it."
+
+    # A slug identifies an episode on the whole shelf, not within one category —
+    # it is the ledger key, so the same slug living in two categories is two
+    # ledger rows for one episode. The lookup therefore spans categories, and
+    # both branches below need that answer (#90).
+    found_at = _find_episode(root, doc_stem)
+    moved_from: str | None = None
+
+    if amend:
+        if found_at is None:
+            raise AmendTargetMissing(
+                f"--amend: no episode {slug!r} on this shelf "
+                f"(no {doc_stem}.md under {', '.join(_category_dirs())}). "
+                "Check the slug, or shelve it without --amend to create it."
+            )
+        if found_at != episode_path:
+            # A kind change *is* a category change: the field decides which
+            # sections doctor demands, so correcting a wrong kind is one of the
+            # few things amend is genuinely needed for. Refusing here (which is
+            # what resolving the target from the new kind alone used to do) left
+            # only a manual path — shelve without --amend, then delete the old
+            # file by hand — and a caller who skipped the second half ended up
+            # with one episode in two categories.
+            #
+            # Decided here, performed at the write below: everything between is
+            # redaction and the digest contract, and both can refuse the shelve.
+            # A move done here would survive that refusal — the episode would
+            # land in the new category still carrying its old text, while the
+            # caller is told nothing happened.
+            moved_from = found_at.relative_to(root).as_posix()
+    elif found_at is not None and found_at != episode_path:
+        # Not an amend, and the slug is already on the shelf under another
+        # category. docshelf's own guard cannot see this — it checks the target
+        # path — so without this the write succeeds and leaves a duplicate.
+        raise EpisodeExists(
+            f"episode {slug!r} is already on this shelf at "
+            f"{found_at.relative_to(root).as_posix()}, under a different kind. "
+            "Pass --amend (CLI) / amend=True to rewrite it under "
+            f"kind={kind!r} — the file is moved, so the shelf keeps one episode "
+            "and one ledger row."
         )
 
     # The shelf's own machine-readable POLICY pack (#16) layers onto the builtin
@@ -268,6 +328,15 @@ def shelve(
         retain_until=retain_until,
     )
     markdown = compose_episode(frontmatter, digest, sections)
+
+    # The kind change decided above is performed here, after everything that can
+    # still refuse this shelve — redaction, the digest contract, and the section
+    # contract inside `compose_episode`. A refused amend must leave the shelf
+    # exactly as it found it; a move done at decision time would outlive the
+    # refusal and strand the episode in the new category with its old text.
+    if moved_from is not None:
+        episode_path.parent.mkdir(parents=True, exist_ok=True)
+        (root / moved_from).rename(episode_path)
 
     # Layer 1 — write through docshelf.
     shelf = Shelf(root)
@@ -331,7 +400,11 @@ def shelve(
     committed, sha = False, None
     if autocommit and (root / ".git").exists():
         subject = f"shelve: {slug} (amend)" if amend else f"shelve: {slug}"
-        committed, sha = git_commit(root, subject, paths=[address])
+        # A move needs both ends staged, or the commit carries the new file and
+        # leaves the old one in the tree — the same duplicate the move exists to
+        # prevent, only now recorded in history.
+        staged = [address] if moved_from is None else [address, moved_from]
+        committed, sha = git_commit(root, subject, paths=staged)
 
     return ShelveResult(
         address=address,
@@ -344,4 +417,5 @@ def shelve(
         commit=sha,
         warnings=warnings,
         amended=amend,
+        moved_from=moved_from,
     )
