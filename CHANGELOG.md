@@ -8,7 +8,39 @@ once code ships.
 
 ## [Unreleased]
 
+### Documentation
+
+- **Said in the docs what only the code comments knew: `no-ledger-row` and
+  `stale-index` right after a `shelve` are normal on *every* branch, `main`
+  included** (#80). The shelf's own guidance excused them "on a branch", a
+  reader on `main` read that literally, rebuilt and committed the derived files
+  by hand — and got the merge conflict #58 exists to prevent. README and
+  ARCHITECTURE now state the intermediate state, its branch-independence, and
+  the one action that must not be taken; `doctor`'s own `fix` line says the same
+  where a reader actually meets the finding.
+
 ### Added
+
+- **`doctor` tells a lagging renderer from a stopped one: `derived-stale`**
+  (#89). `no-ledger-row` meant two things — *the renderer has not run yet*
+  (normal one second after a shelve, resolves itself) and *the renderer cannot
+  run* (nothing resolves it, and every shelve adds to the pile). A warning that
+  means both means neither, and it is self-concealing: the shelf's rules
+  correctly say the fresh case must not be hand-fixed, so the documented
+  response to the only visible symptom of a dead renderer was to ignore it.
+  Nine episodes accumulated that way on the dogfood shelf before anyone looked.
+
+  Episodes uncounted **while `ledger.tsv` itself has not been rewritten for
+  `DERIVED_STALE_AFTER_HOURS`** (a day) is now one shelf-level error naming the
+  episodes. The clock is the commit that last touched `ledger.tsv` — not the
+  episode dates, which say nothing on an unmerged branch, and not the file
+  mtime, which a fresh clone rewrites. The per-episode warnings are unchanged;
+  they are right about the fresh case.
+
+  `check_shelf` grows `now=` and `stale_after_hours=` because a guard about
+  elapsed time has to be drivable to fail at all. Run against the live shelf it
+  was written for: `error derived-stale — 10 episode(s) have no ledger row and
+  the derived layer has not been rewritten for 32h`.
 
 - **memshelf installs into Claude Desktop as an `.mcpb` extension** —
   `adapters/claude-desktop/`. Two bundles, because Claude Desktop ships a Node
@@ -39,8 +71,16 @@ once code ships.
   carry one global shelf. Precedence is the point: an explicit `shelf_path`
   always wins, which is how a project pins a shelf of its own while the setting
   covers everything else. Neither present stays an error, now one that names the
-  variable to set instead of writing to `""`. The CLI is unchanged; `--shelf`
-  remains required there.
+  variable to set instead of writing to `""`.
+
+  **The CLI honours it too** (#86). It landed MCP-side first, and an asymmetry
+  where the variable works for the tools and is ignored by the CLI reads as a
+  bug to whoever sets it — the CLI being the documented portability surface, and
+  so the one most likely to be scripted around. `--shelf` is optional on every
+  subcommand, resolved through the same `default_shelf_path()`, and an implicit
+  shelf announces itself on stderr (`memshelf: shelf from $MEMSHELF_SHELF_PATH:
+  …`). The announcement is what makes it safe: the footgun in a script is
+  silence, not the fallback. Neither present exits 2 naming both ways to fix it.
 
 ## [0.2.0] — 2026-08-04
 
@@ -55,6 +95,14 @@ why a smoke test of the installed package looked fine. The code fix (the SDK
 was missing.
 
 ### Fixed
+
+- **`serverInfo.version` was empty in every handshake** (#83). `MCPServer` takes
+  a `version` keyword and nothing passed it, so hosts displayed memshelf without
+  a version — and the defect was invisible from inside the process, where the
+  SDK's default empty string keeps every test green. The assertion now lives in
+  the stdio test that drives a real client, and compares against `__version__`:
+  with the same code shipping five ways (PyPI, uvx, plugin, two bundles), "which
+  build is this" is the question `serverInfo` exists to answer.
 
 - **`resolve` counted ledger rows by spelling, not by meaning** (#78). The
   union compared whole strings, so one row written with and without its

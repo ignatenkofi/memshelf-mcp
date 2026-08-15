@@ -11,8 +11,10 @@ modes and ``docs/M0.md``.
 from __future__ import annotations
 
 import re
+import subprocess
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from memshelf_mcp.core.archive import archived_episodes
@@ -26,6 +28,21 @@ from memshelf_mcp.core.remote import PRIVATE, PUBLIC, configured_remotes, remote
 # ROADMAP M2 keeps INDEX under ~10 KB; at chars/4 that is ~2500 tokens injected
 # every session, so warn past it.
 INDEX_BUDGET_TOKENS = 2500
+
+# How long the derived layer may lag before "not rendered yet" becomes "not
+# being rendered" (#89). A day, because rendering is push-triggered: with the
+# bot, a push to main starts it; without one, `rebuild` is part of shelving.
+# Either way an episode still uncounted after a full day is not waiting for
+# anything.
+#
+# The threshold is the whole point, because two states produced one signal. A
+# shelve one second ago and a renderer dead since Tuesday both showed
+# `warning no-ledger-row` — and the shelf's own rules say, correctly, that the
+# fresh one must not be fixed by hand. So the documentation trained the reader
+# to look past the only visible symptom of the second, and the longer the
+# renderer stayed down, the more confidently the warning was dismissed. Nine
+# episodes piled up that way on the dogfood shelf before anyone noticed.
+DERIVED_STALE_AFTER_HOURS = 24
 
 # Digest/body mismatch sampling (write-only-memory guard, ARCHITECTURE Failure
 # modes). A digest that shares almost no vocabulary with the episode it
@@ -170,6 +187,94 @@ def _ledger_rows(path: Path) -> list[tuple[int, list[str]]]:
         (n, line.split("\t"))
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
         if n > 1 and line.strip()
+    ]
+
+
+def _parse_git_timestamp(line: str) -> datetime | None:
+    """Parse git's ``%cI``, in both spellings, on every supported Python.
+
+    Two spellings because git prints ``+00:00`` in one environment and a
+    trailing ``Z`` in another (git 2.54 on the CI runner did the latter for a
+    commit made in UTC; the development container did the former), and Python
+    3.10's ``fromisoformat`` — the floor this package supports — rejects ``Z``.
+    That combination is invisible from a UTC-offset machine: it turned every
+    `doctor` run on 3.10 into a ``ValueError`` while the local suite stayed
+    green, and the CI matrix is what caught it.
+
+    Returns ``None`` rather than raising: a clock this check cannot read must
+    cost the caller the *freshness* finding, not the whole diagnosis.
+    """
+    try:
+        return datetime.fromisoformat(re.sub(r"Z$", "+00:00", line))
+    except ValueError:
+        return None
+
+
+def _derived_layer_age_hours(root: Path, now: datetime) -> float | None:
+    """How long since `ledger.tsv` was last written, in hours (``None`` if never).
+
+    Read from git — the commit that last touched the file — rather than from its
+    mtime, because a fresh clone or a checkout rewrites mtimes and would report
+    a shelf abandoned in June as rendered a minute ago. mtime is the fallback
+    for a shelf that is not a git repository at all, where it is the only clock
+    there is.
+
+    Deliberately *not* keyed on the bot's commit message: a shelf whose owner
+    runs `rebuild` by hand has no bot and the same question ("is the accounting
+    keeping up?") still applies to it.
+    """
+    stamp: datetime | None = None
+    if (root / ".git").exists():
+        proc = subprocess.run(
+            ["git", "-C", str(root), "log", "-1", "--format=%cI", "--", "ledger.tsv"],
+            capture_output=True,
+            text=True,
+        )
+        line = proc.stdout.strip()
+        if proc.returncode == 0 and line:
+            stamp = _parse_git_timestamp(line)
+    if stamp is None:
+        ledger = root / "ledger.tsv"
+        if not ledger.is_file():
+            return None
+        stamp = datetime.fromtimestamp(ledger.stat().st_mtime, tz=timezone.utc)
+    return (now - stamp).total_seconds() / 3600
+
+
+def _check_derived_freshness(
+    root: Path, uncounted: list[str], now: datetime, stale_after_hours: float
+) -> list[Finding]:
+    """Tell "the renderer has not run yet" apart from "the renderer cannot run" (#89).
+
+    The per-episode ``no-ledger-row`` warnings stay exactly as they are — they
+    are right for the fresh case, and the advice attached to them ("do not fix
+    this by hand") is right too. This adds the shelf-level finding the fresh
+    case cannot produce: episodes uncounted *while the derived layer itself has
+    not moved for a day* mean the accounting is not lagging, it is stopped.
+
+    One finding for the shelf rather than one per episode: the diagnosis is
+    about the renderer, and N copies of it would bury the episode list they are
+    trying to deliver.
+    """
+    if not uncounted:
+        return []
+    age = _derived_layer_age_hours(root, now)
+    if age is None or age < stale_after_hours:
+        return []
+    shown = ", ".join(sorted(uncounted)[:3])
+    if len(uncounted) > 3:
+        shown += f", … (+{len(uncounted) - 3})"
+    return [
+        Finding(
+            "error",
+            "derived-stale",
+            "ledger.tsv",
+            f"{len(uncounted)} episode(s) have no ledger row and the derived layer has not "
+            f"been rewritten for {age:.0f}h — the renderer is not lagging, it is stopped: "
+            f"{shown}",
+            "check the derived-files job (a dead runner, a failing step) and rerun it; "
+            "on a shelf without one, run `memshelf rebuild --shelf .`",
+        )
     ]
 
 
@@ -375,11 +480,17 @@ def _check_episode(
     return out
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def check_shelf(
     shelf_root: str | Path,
     *,
     check_remote: bool = False,
     remote_prober: Callable[[str], tuple[str, str]] | None = None,
+    now: datetime | None = None,
+    stale_after_hours: float = DERIVED_STALE_AFTER_HOURS,
 ) -> DoctorReport:
     """Diagnose a memory shelf. Offline and deterministic by default.
 
@@ -388,6 +499,11 @@ def check_shelf(
     error. The probe hits the network, which is why it is opt-in. ``remote_prober``
     overrides the default probe (one url -> ``(verdict, detail)``) — the seam the
     tests inject through.
+
+    ``now`` and ``stale_after_hours`` are the seam for the one check that is not
+    a pure function of the files (#89): whether the derived layer has stopped
+    being rewritten. A guard about elapsed time has to be drivable from the test
+    to fail at all — its whole content is what happens after a day.
     """
     from docshelf_mcp.core.shelf import Shelf
 
@@ -418,6 +534,7 @@ def check_shelf(
 
     ledger_ids = _ledger_ids(root / "ledger.tsv")
     seen: set[str] = set()
+    uncounted: list[str] = []
     episodes = 0
     # Archived episodes (#15) are out of the INDEX, not out of the shelf: they
     # keep their ledger rows, so a doctor blind to `archive/` would report every
@@ -430,15 +547,29 @@ def check_shelf(
         seen.add(stem)
         findings.extend(_check_episode(root, rel, pack.patterns))
         if stem not in ledger_ids:
+            uncounted.append(rel)
             findings.append(
                 Finding(
                     "warning",
                     "no-ledger-row",
                     rel,
                     "episode has no ledger.tsv row (its savings go uncounted)",
-                    "re-shelve via the tool, or add a ledger row",
+                    # The advice carries more weight than the finding (#80).
+                    # This warning is the *normal* state one second after a
+                    # shelve, on any branch — `main` included — and the wrong
+                    # response to it, rebuilding and committing the derived files
+                    # by hand, recreates the exact conflict class #58 removed.
+                    # That happened on 2026-08-08: the docs excused the warning
+                    # "on a branch", the reader was looking at main, and the
+                    # merge conflict followed.
+                    "expected right after a shelve, on any branch including main — "
+                    "the derived files are rendered by `rebuild` (a bot, on shelves "
+                    "that have one), so wait for it rather than committing them by "
+                    "hand; on a shelf without a bot, run `memshelf rebuild --shelf .`",
                 )
             )
+
+    findings.extend(_check_derived_freshness(root, uncounted, now or _utc_now(), stale_after_hours))
 
     for orphan in sorted(ledger_ids - seen):
         findings.append(

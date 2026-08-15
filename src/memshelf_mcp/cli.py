@@ -23,6 +23,7 @@ from memshelf_mcp.core.init import InitError
 from memshelf_mcp.core.recall import EpisodeNotFound
 from memshelf_mcp.core.shelve import AmendTargetMissing, DigestContractError, EpisodeExists
 from memshelf_mcp.tools import (
+    SHELF_PATH_ENV,
     AdviseInput,
     DoctorInput,
     ImportInput,
@@ -38,6 +39,7 @@ from memshelf_mcp.tools import (
     SearchInput,
     ShelveInput,
     StatsInput,
+    default_shelf_path,
     run_advise,
     run_doctor,
     run_import,
@@ -53,6 +55,33 @@ from memshelf_mcp.tools import (
     run_shelve,
     run_stats,
 )
+
+_SHELF_HELP = (
+    "Path to the shelf. Optional: falls back to $MEMSHELF_SHELF_PATH when omitted; "
+    "an explicit path always wins over it."
+)
+
+
+def _resolve_shelf(value: str | None) -> str | None:
+    """Fill an omitted ``--shelf`` from ``$MEMSHELF_SHELF_PATH``, and say when it did.
+
+    One resolver for every subcommand, reading the variable through
+    ``tools.default_shelf_path()`` — the same function the MCP inputs use. The
+    variable was honoured by the tools and ignored here, which reads as a bug to
+    whoever sets it and then tries the CLI (#86), and the CLI is the surface most
+    likely to be scripted around.
+
+    The note on stderr is what makes honouring it safe: an implicit shelf in a
+    script is a footgun exactly when it is silent. stderr rather than stdout,
+    because these commands print JSON that gets piped.
+    """
+    if value:
+        return value
+    resolved = default_shelf_path()
+    if not resolved:
+        return None
+    print(f"memshelf: shelf from ${SHELF_PATH_ENV}: {resolved}", file=sys.stderr)
+    return resolved
 
 
 def _parse_sections(items: list[str]) -> dict[str, str]:
@@ -331,7 +360,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sh = sub.add_parser("shelve", help="Shelve one episode to the shelf.")
-    sh.add_argument("--shelf", required=True, help="Path to an initialized shelf.")
+    sh.add_argument("--shelf", help=_SHELF_HELP)
     sh.add_argument("--slug", required=True, help="Latin date-prefixed id, e.g. 2026-07-22-topic.")
     sh.add_argument("--kind", required=True, choices=["topic", "research", "session"])
     sh.add_argument("--digest", required=True, help="The <=120-word digest.")
@@ -382,7 +411,7 @@ def build_parser() -> argparse.ArgumentParser:
     ld.set_defaults(func=_cmd_lint_digest)
 
     rc = sub.add_parser("recall", help="Recall an episode, or one section of it.")
-    rc.add_argument("--shelf", required=True, help="Path to the shelf.")
+    rc.add_argument("--shelf", help=_SHELF_HELP)
     rc.add_argument("--id", required=True, help="Episode id / slug.")
     rc.add_argument("--section", help="Fetch only this H2 section (e.g. Decisions).")
     rc.add_argument("--max-bytes", type=int, default=100_000)
@@ -392,17 +421,17 @@ def build_parser() -> argparse.ArgumentParser:
     rc.set_defaults(func=_cmd_recall)
 
     ix = sub.add_parser("index", help="Print the shelf INDEX.")
-    ix.add_argument("--shelf", required=True, help="Path to the shelf.")
+    ix.add_argument("--shelf", help=_SHELF_HELP)
     ix.set_defaults(func=_cmd_index)
 
     se = sub.add_parser("search", help="Grep the shelf for episodes.")
-    se.add_argument("--shelf", required=True, help="Path to the shelf.")
+    se.add_argument("--shelf", help=_SHELF_HELP)
     se.add_argument("--query", required=True, help="Space-separated tokens (all must match).")
     se.add_argument("--max-results", type=int, default=10)
     se.set_defaults(func=_cmd_search)
 
     st = sub.add_parser("stats", help="Token accounting for the shelf.")
-    st.add_argument("--shelf", required=True, help="Path to the shelf.")
+    st.add_argument("--shelf", help=_SHELF_HELP)
     st.add_argument("--banner", action="store_true", help="Print the one-line summary only.")
     st.add_argument(
         "--chart", action="store_true", help="(Re)draw stats.svg at the shelf root and exit."
@@ -413,7 +442,7 @@ def build_parser() -> argparse.ArgumentParser:
         "advise",
         help="Where the context window went, and what could be put down (proposals only).",
     )
-    ad.add_argument("--shelf", required=True, help="Path to the shelf.")
+    ad.add_argument("--shelf", help=_SHELF_HELP)
     ad.add_argument(
         "--occupant",
         action="append",
@@ -449,7 +478,7 @@ def build_parser() -> argparse.ArgumentParser:
     ad.set_defaults(func=_cmd_advise)
 
     it = sub.add_parser("init", help="Bootstrap a memory shelf (idempotent).")
-    it.add_argument("--shelf", required=True, help="Directory for the shelf.")
+    it.add_argument("--shelf", help=_SHELF_HELP)
     it.add_argument("--name", default="Memory shelf")
     it.add_argument("--storage", choices=["plain", "git-local", "git-remote"], default="git-local")
     it.add_argument("--remote", help="Remote URL (git-remote mode only; private repos).")
@@ -459,7 +488,7 @@ def build_parser() -> argparse.ArgumentParser:
         "resolve",
         help="Resolve multi-writer merge conflicts: union appends, rebuild derived, doctor.",
     )
-    rv.add_argument("--shelf", required=True, help="Path to the shelf.")
+    rv.add_argument("--shelf", help=_SHELF_HELP)
     rv.add_argument(
         "--commit",
         action="store_true",
@@ -468,7 +497,7 @@ def build_parser() -> argparse.ArgumentParser:
     rv.set_defaults(func=_cmd_resolve)
 
     dc = sub.add_parser("doctor", help="Check shelf integrity (exit 1 on errors).")
-    dc.add_argument("--shelf", required=True, help="Path to the shelf.")
+    dc.add_argument("--shelf", help=_SHELF_HELP)
     dc.add_argument(
         "--check-remote",
         action="store_true",
@@ -480,7 +509,7 @@ def build_parser() -> argparse.ArgumentParser:
         "rebuild",
         help="Regenerate derived files (ledger/INDEX/.meta/stats) from the episodes.",
     )
-    rb.add_argument("--shelf", required=True, help="Path to the shelf.")
+    rb.add_argument("--shelf", help=_SHELF_HELP)
     rb.add_argument(
         "--check",
         action="store_true",
@@ -499,7 +528,7 @@ def build_parser() -> argparse.ArgumentParser:
         "rollup",
         help="Collapse a period into one digest-of-digests; originals move to archive/.",
     )
-    ru.add_argument("--shelf", required=True, help="Path to the shelf.")
+    ru.add_argument("--shelf", help=_SHELF_HELP)
     ru.add_argument("--slug", required=True, help="Latin slug/id of the rollup episode.")
     ru.add_argument(
         "--digest",
@@ -521,7 +550,7 @@ def build_parser() -> argparse.ArgumentParser:
     ru.set_defaults(func=_cmd_rollup)
 
     pu = sub.add_parser("purge", help="Delete episodes whose retain_until has passed.")
-    pu.add_argument("--shelf", required=True, help="Path to the shelf.")
+    pu.add_argument("--shelf", help=_SHELF_HELP)
     pu.add_argument("--apply", action="store_true", help="Actually delete (default: dry run).")
     pu.add_argument("--today", help="Treat this ISO date as today.")
     pu.set_defaults(func=_cmd_purge)
@@ -548,6 +577,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # Resolved here rather than as an argparse default: the variable is read per
+    # call on the MCP side too, because a host may set it after the process
+    # starts — and an argparse default would freeze it at import.
+    if hasattr(args, "shelf"):
+        args.shelf = _resolve_shelf(args.shelf)
+        if args.shelf is None:
+            print(
+                f"memshelf {args.command}: no shelf to work on — pass --shelf, or set "
+                f"${SHELF_PATH_ENV} to the shelf directory.",
+                file=sys.stderr,
+            )
+            return 2
     return args.func(args)
 
 

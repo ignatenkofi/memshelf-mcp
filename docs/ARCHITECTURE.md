@@ -246,6 +246,21 @@ that a shelf's bot owns on `main` while PRs carry episodes. An append-only
 ledger written by every shelve was the multi-writer conflict class: two
 sessions, two topics, one unmergeable line.
 
+**The intermediate state is normal, and it is not branch-specific** (#80).
+Between a `shelve` and the next `rebuild` the shelf legitimately holds an
+episode with no ledger row and an `INDEX.md` that does not mention it — so
+`doctor` reports `no-ledger-row` and `stale-index` seconds after a perfectly
+correct shelve, on `main` exactly as on a branch. The one wrong response is to
+regenerate and commit the derived files by hand: that recreates the conflict
+class this split exists to remove. Not hypothetical — it happened on
+2026-08-08, on `main`, to a reader who had been told those warnings were a
+branch phenomenon. Wait for the renderer; on a shelf without a bot, run
+`rebuild` as its own commit.
+
+Persisting for a *day* while episodes keep arriving is a different state — the
+renderer is stopped, not lagging — and `doctor` separates the two with
+`derived-stale` at error severity (#89).
+
 That reclassification changes how a conflict in those files is resolved.
 Before #58 they were append-only, so a union lost nothing. After it they are a
 pure function of `docs/` ⊕ `archive/docs/`, and merging two versions of a

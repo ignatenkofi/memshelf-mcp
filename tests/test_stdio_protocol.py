@@ -37,6 +37,7 @@ from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 from mcp import ClientSession, StdioServerParameters  # noqa: E402
 from mcp.client.stdio import stdio_client  # noqa: E402
 
+from memshelf_mcp import __version__  # noqa: E402
 from memshelf_mcp.core.shelve import shelve  # noqa: E402
 
 # A cold interpreter plus the handshake is seconds, not milliseconds, and CI
@@ -127,6 +128,15 @@ def test_client_completes_the_handshake_and_sees_every_tool(tmp_path: Path):
             async with ClientSession(read, write, read_timeout_seconds=WIRE_TIMEOUT) as session:
                 init = await session.initialize()
                 assert init.server_info.name
+
+                # `serverInfo.version` is invisible from inside the process: the
+                # SDK defaults it to "" and every in-process test stays green on
+                # the empty string, so the handshake is the only place this can
+                # be caught (#83). Compared against the package version rather
+                # than merely being non-empty — "some version" and "this build's
+                # version" are different claims, and the second is the one a host
+                # relies on once the same code ships five ways.
+                assert init.server_info.version == __version__, init.server_info
 
                 names = {tool.name for tool in (await session.list_tools()).tools}
                 assert {
