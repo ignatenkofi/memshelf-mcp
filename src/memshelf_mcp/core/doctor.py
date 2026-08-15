@@ -554,7 +554,18 @@ def check_shelf(
                     "no-ledger-row",
                     rel,
                     "episode has no ledger.tsv row (its savings go uncounted)",
-                    "re-shelve via the tool, or add a ledger row",
+                    # The advice carries more weight than the finding (#80).
+                    # This warning is the *normal* state one second after a
+                    # shelve, on any branch — `main` included — and the wrong
+                    # response to it, rebuilding and committing the derived files
+                    # by hand, recreates the exact conflict class #58 removed.
+                    # That happened on 2026-08-08: the docs excused the warning
+                    # "on a branch", the reader was looking at main, and the
+                    # merge conflict followed.
+                    "expected right after a shelve, on any branch including main — "
+                    "the derived files are rendered by `rebuild` (a bot, on shelves "
+                    "that have one), so wait for it rather than committing them by "
+                    "hand; on a shelf without a bot, run `memshelf rebuild --shelf .`",
                 )
             )
 
