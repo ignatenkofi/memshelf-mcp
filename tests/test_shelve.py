@@ -7,6 +7,7 @@ pytest.importorskip("docshelf_mcp")
 
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
+from memshelf_mcp.core.episode import EpisodeError  # noqa: E402
 from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.shelve import (  # noqa: E402
     AmendTargetMissing,
@@ -718,4 +719,36 @@ def test_shelving_the_same_slug_under_another_kind_without_amend_is_refused(tmp_
             date="2026-08-13",
         )
     assert "amend" in str(exc.value).lower()
+    assert not (root / "docs" / "topics" / "2026-08-13-recount.md").exists()
+
+
+def test_a_refused_amend_does_not_move_the_episode(tmp_path):
+    """The move must not outlive a refusal — found by reading this PR's own diff.
+
+    Between deciding the move and writing the file there are two gates that can
+    still reject the shelve: redaction/the digest contract, and the section
+    contract inside `compose_episode`. A move performed at decision time
+    survives both refusals: the caller is told the shelve failed, and the
+    episode is meanwhile sitting in the new category carrying its old text —
+    which is worse than either outcome the caller can reason about.
+    """
+    root = _init_shelf(tmp_path)
+    was = _session_episode(root)
+    before = was.read_text(encoding="utf-8")
+
+    with pytest.raises(EpisodeError):
+        shelve(
+            root,
+            slug="2026-08-13-recount",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            # kind=topic requires ## Decisions; `compose_episode` refuses — and it
+            # runs *after* the move would have been decided.
+            sections={"Findings": "no Decisions section"},
+            date="2026-08-13",
+            amend=True,
+        )
+
+    assert was.is_file(), "the episode moved despite the shelve being refused"
+    assert was.read_text(encoding="utf-8") == before
     assert not (root / "docs" / "topics" / "2026-08-13-recount.md").exists()

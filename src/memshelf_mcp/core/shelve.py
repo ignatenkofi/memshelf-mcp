@@ -254,9 +254,13 @@ def shelve(
             # only a manual path — shelve without --amend, then delete the old
             # file by hand — and a caller who skipped the second half ended up
             # with one episode in two categories.
+            #
+            # Decided here, performed at the write below: everything between is
+            # redaction and the digest contract, and both can refuse the shelve.
+            # A move done here would survive that refusal — the episode would
+            # land in the new category still carrying its old text, while the
+            # caller is told nothing happened.
             moved_from = found_at.relative_to(root).as_posix()
-            episode_path.parent.mkdir(parents=True, exist_ok=True)
-            found_at.rename(episode_path)
     elif found_at is not None and found_at != episode_path:
         # Not an amend, and the slug is already on the shelf under another
         # category. docshelf's own guard cannot see this — it checks the target
@@ -324,6 +328,15 @@ def shelve(
         retain_until=retain_until,
     )
     markdown = compose_episode(frontmatter, digest, sections)
+
+    # The kind change decided above is performed here, after everything that can
+    # still refuse this shelve — redaction, the digest contract, and the section
+    # contract inside `compose_episode`. A refused amend must leave the shelf
+    # exactly as it found it; a move done at decision time would outlive the
+    # refusal and strand the episode in the new category with its old text.
+    if moved_from is not None:
+        episode_path.parent.mkdir(parents=True, exist_ok=True)
+        (root / moved_from).rename(episode_path)
 
     # Layer 1 — write through docshelf.
     shelf = Shelf(root)
