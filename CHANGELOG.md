@@ -140,6 +140,26 @@ was missing.
   takes over. Either way the shelf is blocked; the message an operator reads
   differs.
 
+- **The "return errors, never raise" contract did not cover bad input** (#85).
+  Validation runs before a wrapper is entered, so a malformed call left as plain
+  text (`Error executing tool …: 1 validation error …`) and a caller written
+  against the documented envelope met a `JSONDecodeError` — which is how this
+  was found, in the desktop bundle check. The class is not exotic: it is every
+  bad call a model makes, plus the ordinary "no shelf configured yet" a fresh
+  install hits first. Validation failures now leave through the same
+  `{"status": "error", …}` envelope, naming `ValidationError` as the type.
+
+  The contract test could not have caught it — `_placeholder` builds only valid
+  inputs — so it grew two invalid-input cases that drive `call_tool` rather than
+  the wrapper functions. Both fail against the previous code.
+
+- **A flat argument object is accepted as well as the nested one** (#84).
+  Callers who wrote arguments the way nearly every other MCP server publishes
+  them got an error about a field called `params` that appears nowhere in the
+  tool's documented interface. The **published** schema is unchanged — whether
+  it should flatten is a wire-contract decision, and #84 stays open for it; this
+  only makes guessing wrong survivable.
+
 - **The parent `INDEX.md` failure was still silent — the earlier fix was half
   of one.** `rollup` and `purge` called `rebuild(root)` without binding its
   return value, so the `RebuildReport.warnings` it already collects (including
