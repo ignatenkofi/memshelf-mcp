@@ -56,6 +56,27 @@ was missing.
 
 ### Fixed
 
+- **`resolve` counted ledger rows by spelling, not by meaning** (#78). The
+  union compared whole strings, so one row written with and without its
+  trailing empty `notes` column counted as two — the pair that survived a live
+  `resolve` on the dogfood shelf and had to be deleted by hand. Counting now
+  runs on the cells with trailing empties dropped, and the **widest** spelling
+  is the one written: `ledger.tsv` has six columns (shelf-spec v0 § 4.4) and
+  `doctor` calls a five-cell row malformed, so preferring the narrow spelling
+  would trade a duplicate-row finding for a malformed-row finding.
+
+  Only trailing empties are normalised — a middle empty cell shifts every
+  column after it and stays a real difference. Both that and the #62 invariant
+  (identical rows are events, never collapsed) have their own tests.
+
+  The issue's open question — would `doctor` have caught the pair? — is now
+  answered by two tests rather than by reasoning: **yes, but not by the rule
+  one would expect.** The pair is five cells against six, so the column-count
+  check fires and skips that row before the `episode_id` uniqueness check
+  (#63) can see it. Repair the column count by hand and the duplicate check
+  takes over. Either way the shelf is blocked; the message an operator reads
+  differs.
+
 - **The parent `INDEX.md` failure was still silent — the earlier fix was half
   of one.** `rollup` and `purge` called `rebuild(root)` without binding its
   return value, so the `RebuildReport.warnings` it already collects (including

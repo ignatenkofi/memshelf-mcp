@@ -149,6 +149,47 @@ def _rows(text: str | None, header_line: str) -> list[str]:
     return [line for line in (text or "").splitlines() if line.strip() and line != header_line]
 
 
+def _row_key(row: str) -> tuple[str, ...]:
+    """A row's identity for counting: its cells, minus trailing empty ones.
+
+    Two rows differing **only** by a trailing empty column are one row written
+    by two writers, not two rows. `resolve` left exactly this pair on the live
+    shelf (#78):
+
+    ``…-atlas-native-first-session\\tlive\\t700\\t184\\t`` and the same line
+    without the final tab — an empty ``notes`` spelled two ways. Whole-row
+    comparison sees two strings, so the ledger ends up with two rows for one
+    episode and the duplicate has to be deleted by hand.
+
+    Same family as #62, where the differing cell was a *derived* column: the
+    general rule is that counting must run on what a row means, not on how it
+    is spelled. Only **trailing** empties are ignored — an empty cell in the
+    middle shifts every column after it and is a real difference.
+    """
+    cells = row.split("\t")
+    while cells and cells[-1] == "":
+        cells.pop()
+    return tuple(cells)
+
+
+def _canonical(rows: list[str]) -> dict[tuple[str, ...], str]:
+    """The spelling to emit per row identity: the one with the most cells.
+
+    Width decides because the schema does. `ledger.tsv` is six columns
+    (shelf-spec v0 § 4.4) and `doctor` calls a five-cell row malformed, so when
+    two spellings of one row disagree, the one carrying the trailing empty cell
+    is the valid one. Preferring the narrow spelling would trade a
+    duplicate-row finding for a malformed-row finding.
+    """
+    best: dict[tuple[str, ...], str] = {}
+    for row in rows:
+        key = _row_key(row)
+        current = best.get(key)
+        if current is None or row.count("\t") > current.count("\t"):
+            best[key] = row
+    return best
+
+
 def _union_tsv(ours: str | None, theirs: str | None, header: str, base: str | None = None) -> str:
     """Three-way multiset union of an append-only log.
 
@@ -159,6 +200,10 @@ def _union_tsv(ours: str | None, theirs: str | None, header: str, base: str | No
     the same section legitimately write byte-identical rows — a set union would
     drop one and undercount the realized savings the log exists to measure.
 
+    Rows are counted by ``_row_key``, not by their text, so one row written by
+    two writers — with and without the trailing empty column — counts once
+    (#78).
+
     Without ``base`` (the marker fallback, where git's stage 1 is gone) the
     multiset is approximated by ``max`` of the two counts: still never fewer
     rows than either side had, which a set union could not promise.
@@ -167,11 +212,13 @@ def _union_tsv(ours: str | None, theirs: str | None, header: str, base: str | No
     base_rows = _rows(base, header_line)
     ours_rows = _rows(ours, header_line)
     theirs_rows = _rows(theirs, header_line)
+    canonical = _canonical(ours_rows + theirs_rows)
 
-    def _counts(rows: list[str]) -> dict[str, int]:
-        out: dict[str, int] = {}
+    def _counts(rows: list[str]) -> dict[tuple[str, ...], int]:
+        out: dict[tuple[str, ...], int] = {}
         for row in rows:
-            out[row] = out.get(row, 0) + 1
+            key = _row_key(row)
+            out[key] = out.get(key, 0) + 1
         return out
 
     base_counts = _counts(base_rows)
@@ -179,25 +226,27 @@ def _union_tsv(ours: str | None, theirs: str | None, header: str, base: str | No
     theirs_counts = _counts(theirs_rows)
 
     merged: list[str] = []
-    emitted: dict[str, int] = {}
+    emitted: dict[tuple[str, ...], int] = {}
 
-    def _target(row: str) -> int:
+    def _target(key: tuple[str, ...]) -> int:
         if base is None:
-            return max(ours_counts.get(row, 0), theirs_counts.get(row, 0))
+            return max(ours_counts.get(key, 0), theirs_counts.get(key, 0))
         # base + (ours - base) + (theirs - base), floored at each side's count.
         return max(
-            ours_counts.get(row, 0) + theirs_counts.get(row, 0) - base_counts.get(row, 0),
-            ours_counts.get(row, 0),
-            theirs_counts.get(row, 0),
+            ours_counts.get(key, 0) + theirs_counts.get(key, 0) - base_counts.get(key, 0),
+            ours_counts.get(key, 0),
+            theirs_counts.get(key, 0),
         )
 
     # Ours keeps its order (minimal diff); the other branch's surplus lands at
-    # the tail.
+    # the tail. What gets written is the canonical spelling of the row, so a
+    # side that wrote it narrow does not decide the file's shape.
     for row in ours_rows + theirs_rows:
-        seen = emitted.get(row, 0)
-        if seen < _target(row):
-            emitted[row] = seen + 1
-            merged.append(row)
+        key = _row_key(row)
+        seen = emitted.get(key, 0)
+        if seen < _target(key):
+            emitted[key] = seen + 1
+            merged.append(canonical.get(key, row))
     return header + "".join(row + "\n" for row in merged)
 
 
