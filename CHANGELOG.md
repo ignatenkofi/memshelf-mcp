@@ -71,8 +71,16 @@ once code ships.
   carry one global shelf. Precedence is the point: an explicit `shelf_path`
   always wins, which is how a project pins a shelf of its own while the setting
   covers everything else. Neither present stays an error, now one that names the
-  variable to set instead of writing to `""`. The CLI is unchanged; `--shelf`
-  remains required there.
+  variable to set instead of writing to `""`.
+
+  **The CLI honours it too** (#86). It landed MCP-side first, and an asymmetry
+  where the variable works for the tools and is ignored by the CLI reads as a
+  bug to whoever sets it — the CLI being the documented portability surface, and
+  so the one most likely to be scripted around. `--shelf` is optional on every
+  subcommand, resolved through the same `default_shelf_path()`, and an implicit
+  shelf announces itself on stderr (`memshelf: shelf from $MEMSHELF_SHELF_PATH:
+  …`). The announcement is what makes it safe: the footgun in a script is
+  silence, not the fallback. Neither present exits 2 naming both ways to fix it.
 
 ## [0.2.0] — 2026-08-04
 
