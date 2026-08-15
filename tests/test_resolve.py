@@ -19,6 +19,7 @@ pytest.importorskip("docshelf_mcp")
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
 from memshelf_mcp.core.archive import rollup  # noqa: E402
+from memshelf_mcp.core.doctor import check_shelf  # noqa: E402
 from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.resolve import (  # noqa: E402
     _split_marker_sides,
@@ -335,6 +336,94 @@ def test_union_tsv_keeps_duplicate_rows_and_header():
     lines = merged.splitlines()
     assert lines[0] == "episode_id\tsection\ttokens"
     assert lines[1:] == ["ep-a\tDigest\t50", "ep-b\tDigest\t60", "ep-b\tDigest\t60"]
+
+
+LEDGER_HEADER = "date\tepisode_id\tmode\tapprox_tokens_in\tdigest_tokens\tnotes\n"
+LEDGER_ROW = "2026-08-05\t2026-08-05-atlas-native-first-session\tlive\t700\t184"
+
+
+def test_union_collapses_rows_that_differ_only_by_a_trailing_empty_column():
+    """#78: the same row spelled with and without the trailing tab is one row.
+
+    The live pair from the shelf: an empty ``notes`` written by two writers,
+    one of which ended the line after the fifth cell. Whole-row comparison
+    counted two rows for one episode, and the duplicate came out of the ledger
+    by hand.
+    """
+    ours = LEDGER_HEADER + LEDGER_ROW + "\t\n"
+    theirs = LEDGER_HEADER + LEDGER_ROW + "\n"
+
+    rows = _union_tsv(ours, theirs, LEDGER_HEADER).splitlines()[1:]
+
+    assert len(rows) == 1, rows
+    # The six-column spelling wins: shelf-spec v0 § 4.4 has six columns and
+    # doctor calls a five-cell row malformed, so collapsing to the narrow one
+    # would trade one finding for another.
+    assert rows[0] == LEDGER_ROW + "\t", rows
+
+
+def test_a_middle_empty_cell_is_still_a_real_difference():
+    """Guard on the guard: only *trailing* empties are spelling, not content.
+
+    An empty cell in the middle shifts every column after it — collapsing that
+    pair would merge two genuinely different rows.
+    """
+    header = "a\tb\tc\n"
+    ours = header + "1\t\t3\n"
+    theirs = header + "1\t2\t3\n"
+
+    rows = _union_tsv(ours, theirs, header).splitlines()[1:]
+
+    assert sorted(rows) == ["1\t\t3", "1\t2\t3"], rows
+
+
+def test_repeated_recalls_still_count_twice_after_normalisation():
+    """The #62 invariant must survive the #78 fix: identical rows are events."""
+    header = "episode_id\tsection\ttokens\n"
+    ours = header + "ep-a\tDigest\t50\nep-a\tDigest\t50\n"
+    theirs = header + "ep-a\tDigest\t50\n"
+
+    rows = _union_tsv(ours, theirs, header).splitlines()[1:]
+
+    assert rows.count("ep-a\tDigest\t50") == 2, rows
+
+
+def test_doctor_catches_the_pair_the_union_used_to_leave(tmp_path):
+    """The issue asks whether doctor would have caught it. It would — but not
+    by the rule one would expect, and the difference is worth pinning.
+
+    The pair is *five* cells against six, so the column-count check fires first
+    and that row is skipped — the ``episode_id`` uniqueness check added in #63
+    never sees it. Both findings are errors and both name ``ledger.tsv``, so
+    the shelf is blocked either way; what an operator reads, though, is "wrong
+    number of columns", not "duplicate episode".
+    """
+    root = _init_shelf(tmp_path)
+    (root / "ledger.tsv").write_text(
+        LEDGER_HEADER + LEDGER_ROW + "\t\n" + LEDGER_ROW + "\n", encoding="utf-8"
+    )
+
+    report = check_shelf(root)
+
+    assert not report.ok
+    malformed = [f for f in report.findings if f.code == "ledger-malformed"]
+    assert malformed, [f.code for f in report.findings]
+    assert "expected 6 tab-separated columns" in malformed[0].detail, malformed[0].detail
+
+
+def test_doctor_catches_the_duplicate_once_both_rows_are_well_formed(tmp_path):
+    """And the other half: repair the column count by hand and the duplicate
+    check takes over, rather than the pair becoming invisible."""
+    root = _init_shelf(tmp_path)
+    (root / "ledger.tsv").write_text(
+        LEDGER_HEADER + LEDGER_ROW + "\t\n" + LEDGER_ROW + "\t\n", encoding="utf-8"
+    )
+
+    report = check_shelf(root)
+
+    assert not report.ok
+    detail = next(f for f in report.findings if f.code == "ledger-malformed").detail
+    assert "already recorded" in detail, detail
 
 
 def test_union_tsv_without_base_never_loses_a_side():
