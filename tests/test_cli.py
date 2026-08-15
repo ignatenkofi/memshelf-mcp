@@ -252,3 +252,49 @@ def test_cli_amend_of_a_missing_slug_fails_without_writing(tmp_path, capsys):
     assert main(_shelve_argv(root, "--amend")) == 1
     assert "no episode" in capsys.readouterr().err
     assert not (tmp_path / "docs" / "topics" / "2026-08-02-retry.md").exists()
+
+
+# ── #86: the CLI honours $MEMSHELF_SHELF_PATH ─────────────────────────────
+#
+# The default-shelf fallback landed in tools.py, so every MCP tool resolved an
+# omitted shelf_path from the variable while `--shelf` stayed required here —
+# an asymmetry that reads as a bug to whoever sets the variable and then tries
+# the CLI, which is the surface most likely to be scripted around.
+
+
+def test_cli_falls_back_to_the_shelf_path_variable(tmp_path, capsys, monkeypatch):
+    _init(tmp_path)
+    monkeypatch.setenv("MEMSHELF_SHELF_PATH", str(tmp_path))
+
+    assert main(["rebuild"]) == 0
+    assert main(["stats", "--banner"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.strip().splitlines()[-1].startswith("memshelf: 0 episodes")
+    # Silence would be the footgun: an implicit shelf must say which one it is,
+    # and say it on stderr so piped JSON stays parseable.
+    assert f"shelf from $MEMSHELF_SHELF_PATH: {tmp_path}" in captured.err
+
+
+def test_an_explicit_shelf_wins_over_the_variable(tmp_path, capsys, monkeypatch):
+    """Precedence is the point: a project pins its own shelf over the default."""
+    named = tmp_path / "named"
+    named.mkdir()
+    _init(named)
+    monkeypatch.setenv("MEMSHELF_SHELF_PATH", str(tmp_path / "not-this-one"))
+
+    assert main(["doctor", "--shelf", str(named)]) == 0
+
+    captured = capsys.readouterr()
+    assert "not-this-one" not in captured.out + captured.err
+    assert "shelf from $MEMSHELF_SHELF_PATH" not in captured.err
+
+
+def test_neither_present_is_an_error_that_names_both_ways(tmp_path, capsys, monkeypatch):
+    """Making --shelf optional must not turn a forgotten shelf into a default."""
+    monkeypatch.delenv("MEMSHELF_SHELF_PATH", raising=False)
+
+    assert main(["index"]) == 2
+
+    err = capsys.readouterr().err
+    assert "--shelf" in err and "MEMSHELF_SHELF_PATH" in err
