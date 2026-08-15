@@ -8,6 +8,17 @@ once code ships.
 
 ## [Unreleased]
 
+### Documentation
+
+- **Said in the docs what only the code comments knew: `no-ledger-row` and
+  `stale-index` right after a `shelve` are normal on *every* branch, `main`
+  included** (#80). The shelf's own guidance excused them "on a branch", a
+  reader on `main` read that literally, rebuilt and committed the derived files
+  by hand — and got the merge conflict #58 exists to prevent. README and
+  ARCHITECTURE now state the intermediate state, its branch-independence, and
+  the one action that must not be taken; `doctor`'s own `fix` line says the same
+  where a reader actually meets the finding.
+
 ### Added
 
 - **memshelf installs into Claude Desktop as an `.mcpb` extension** —
