@@ -56,6 +56,14 @@ was missing.
 
 ### Fixed
 
+- **`serverInfo.version` was empty in every handshake** (#83). `MCPServer` takes
+  a `version` keyword and nothing passed it, so hosts displayed memshelf without
+  a version — and the defect was invisible from inside the process, where the
+  SDK's default empty string keeps every test green. The assertion now lives in
+  the stdio test that drives a real client, and compares against `__version__`:
+  with the same code shipping five ways (PyPI, uvx, plugin, two bundles), "which
+  build is this" is the question `serverInfo` exists to answer.
+
 - **The "return errors, never raise" contract did not cover bad input** (#85).
   Validation runs before a wrapper is entered, so a malformed call left as plain
   text (`Error executing tool …: 1 validation error …`) and a caller written

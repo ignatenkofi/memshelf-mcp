@@ -140,7 +140,12 @@ class _ToolBoundary(MCPServer):
             )
 
 
-mcp = _ToolBoundary("memshelf_mcp")
+# The version travels in the `initialize` response as `serverInfo.version` — the
+# one place a host can say *which* memshelf it is talking to. The same code ships
+# four ways now (PyPI, uvx, the Claude Code plugin, two desktop bundles), so
+# "which version is installed" stops being answerable from the install method the
+# moment a bundle is copied between machines (#83).
+mcp = _ToolBoundary("memshelf_mcp", version=__version__)
 
 
 @mcp.tool(
