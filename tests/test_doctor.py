@@ -8,7 +8,7 @@ pytest.importorskip("docshelf_mcp")
 
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
-from memshelf_mcp.core.doctor import check_shelf  # noqa: E402
+from memshelf_mcp.core.doctor import _parse_git_timestamp, check_shelf  # noqa: E402
 from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.shelve import shelve  # noqa: E402
 
@@ -622,3 +622,30 @@ def test_an_old_but_complete_shelf_is_not_stale(tmp_path):
     report = check_shelf(root, now=datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc))
 
     assert "derived-stale" not in _codes(report), report.as_dict()
+
+
+@pytest.mark.parametrize(
+    "printed",
+    [
+        "2026-08-10T09:00:00+00:00",  # what git prints in the dev container
+        "2026-08-10T09:00:00Z",  # what git 2.54 printed on the CI runner
+        "2026-08-10T11:00:00+02:00",  # and any other offset
+    ],
+)
+def test_git_timestamps_parse_in_both_spellings(printed):
+    """Both spellings, because the environment picks one and CI picked the other.
+
+    Python 3.10's `fromisoformat` — this package's floor — rejects the trailing
+    `Z`, so the first version of this check raised `ValueError` on every doctor
+    run under a UTC-offset environment while the dev container stayed green. An
+    end-to-end test cannot cover this: it exercises whatever spelling the local
+    git happens to use.
+    """
+    parsed = _parse_git_timestamp(printed)
+    assert parsed is not None, printed
+    assert parsed.utctimetuple()[:5] == (2026, 8, 10, 9, 0)
+
+
+def test_an_unreadable_timestamp_costs_the_finding_not_the_diagnosis():
+    """A clock we cannot read must not take doctor down with it."""
+    assert _parse_git_timestamp("not a date") is None

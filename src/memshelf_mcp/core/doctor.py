@@ -190,6 +190,26 @@ def _ledger_rows(path: Path) -> list[tuple[int, list[str]]]:
     ]
 
 
+def _parse_git_timestamp(line: str) -> datetime | None:
+    """Parse git's ``%cI``, in both spellings, on every supported Python.
+
+    Two spellings because git prints ``+00:00`` in one environment and a
+    trailing ``Z`` in another (git 2.54 on the CI runner did the latter for a
+    commit made in UTC; the development container did the former), and Python
+    3.10's ``fromisoformat`` — the floor this package supports — rejects ``Z``.
+    That combination is invisible from a UTC-offset machine: it turned every
+    `doctor` run on 3.10 into a ``ValueError`` while the local suite stayed
+    green, and the CI matrix is what caught it.
+
+    Returns ``None`` rather than raising: a clock this check cannot read must
+    cost the caller the *freshness* finding, not the whole diagnosis.
+    """
+    try:
+        return datetime.fromisoformat(re.sub(r"Z$", "+00:00", line))
+    except ValueError:
+        return None
+
+
 def _derived_layer_age_hours(root: Path, now: datetime) -> float | None:
     """How long since `ledger.tsv` was last written, in hours (``None`` if never).
 
@@ -212,7 +232,7 @@ def _derived_layer_age_hours(root: Path, now: datetime) -> float | None:
         )
         line = proc.stdout.strip()
         if proc.returncode == 0 and line:
-            stamp = datetime.fromisoformat(line)
+            stamp = _parse_git_timestamp(line)
     if stamp is None:
         ledger = root / "ledger.tsv"
         if not ledger.is_file():
