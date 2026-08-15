@@ -1,4 +1,6 @@
+import os
 import subprocess
+from datetime import datetime, timezone
 
 import pytest
 
@@ -6,7 +8,7 @@ pytest.importorskip("docshelf_mcp")
 
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
-from memshelf_mcp.core.doctor import check_shelf  # noqa: E402
+from memshelf_mcp.core.doctor import _parse_git_timestamp, check_shelf  # noqa: E402
 from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.shelve import shelve  # noqa: E402
 
@@ -524,3 +526,126 @@ def test_years_are_not_shared_vocabulary(tmp_path):
 
     words = _content_words("2026 отчёт 07-09 регламент 1234")
     assert words == {"отчёт", "регламент"}
+
+
+# ── #89: "not rendered yet" vs "not being rendered" ───────────────────────
+#
+# Both states produced one signal — `warning no-ledger-row` — and the shelf's
+# own rules say the fresh one must not be fixed by hand, so the documented
+# response to the only visible symptom of a dead renderer was: ignore it. Nine
+# episodes piled up that way before anyone looked.
+#
+# The pair below is the guard: it has to fire on a shelf whose derived layer
+# stopped moving, and stay quiet on one shelved a minute ago. Without both
+# halves it is another check that cannot fail.
+
+
+def _shelf_with_an_uncounted_episode(root):
+    """A shelf holding one episode that has no ledger row yet.
+
+    Which is the *normal* state right after a shelve, since #58: the episode is
+    the input, `ledger.tsv` is the renderer's output.
+    """
+    _init(root)
+    shelve(
+        root,
+        slug="2026-08-13-uncounted",
+        kind="topic",
+        digest=(
+            "The renderer writes ledger.tsv from the episodes, so a freshly shelved "
+            "episode has no row until it runs. The decided approach keeps that warning "
+            "as it is. Open: nothing."
+        ),
+        sections={"Decisions": "kept"},
+        approx_tokens=1000,
+        date="2026-08-13",
+    )
+    return root
+
+
+def _commit_ledger_at(root, when: str, *, regenerate: bool = True):
+    """Commit `ledger.tsv` with `when` as its commit date — the shelf's clock.
+
+    ``regenerate=False`` keeps whatever the renderer just wrote, for the case
+    where the accounting is complete and only the date is old.
+    """
+    if regenerate:
+        (root / "ledger.tsv").write_text(
+            "date\tepisode_id\tmode\tapprox_tokens_in\tdigest_tokens\tnotes\n", encoding="utf-8"
+        )
+    env = {"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+    subprocess.run(["git", "-C", str(root), "add", "ledger.tsv"], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "commit", "-q", "-m", "chore: regenerate derived files"],
+        check=True,
+        env={**os.environ, **env},
+    )
+
+
+def test_a_derived_layer_that_stopped_moving_is_an_error(tmp_path):
+    root = _shelf_with_an_uncounted_episode(tmp_path)
+    _commit_ledger_at(root, "2026-08-10T09:00:00+00:00")
+
+    report = check_shelf(root, now=datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc))
+
+    assert "derived-stale" in _codes(report), report.as_dict()
+    finding = next(f for f in report.findings if f.code == "derived-stale")
+    assert finding.level == "error"
+    # The episode list is the payload: a diagnosis with no subject is a mood.
+    assert "2026-08-13-uncounted" in finding.detail
+    # And the old warning stays, because it is right about each episode.
+    assert "no-ledger-row" in _codes(report)
+
+
+def test_a_shelf_shelved_a_minute_ago_stays_a_warning(tmp_path):
+    """The other half. A guard that fires here would train people to ignore it."""
+    root = _shelf_with_an_uncounted_episode(tmp_path)
+    _commit_ledger_at(root, "2026-08-14T19:30:00+00:00")
+
+    report = check_shelf(root, now=datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc))
+
+    assert "derived-stale" not in _codes(report), report.as_dict()
+    assert "no-ledger-row" in _codes(report)
+    assert report.as_dict()["errors"] == 0
+
+
+def test_an_old_but_complete_shelf_is_not_stale(tmp_path):
+    """Age alone is not the finding — an uncounted episode is what makes it one.
+
+    A shelf nobody has touched in a month is fine; its accounting is complete.
+    Without this the check would red every dormant shelf and mean nothing.
+    """
+    root = _shelf_with_an_uncounted_episode(tmp_path)
+    rebuild(root)  # the renderer catches up: every episode now has a row
+    _commit_ledger_at(root, "2026-07-01T09:00:00+00:00", regenerate=False)
+
+    report = check_shelf(root, now=datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc))
+
+    assert "derived-stale" not in _codes(report), report.as_dict()
+
+
+@pytest.mark.parametrize(
+    "printed",
+    [
+        "2026-08-10T09:00:00+00:00",  # what git prints in the dev container
+        "2026-08-10T09:00:00Z",  # what git 2.54 printed on the CI runner
+        "2026-08-10T11:00:00+02:00",  # and any other offset
+    ],
+)
+def test_git_timestamps_parse_in_both_spellings(printed):
+    """Both spellings, because the environment picks one and CI picked the other.
+
+    Python 3.10's `fromisoformat` — this package's floor — rejects the trailing
+    `Z`, so the first version of this check raised `ValueError` on every doctor
+    run under a UTC-offset environment while the dev container stayed green. An
+    end-to-end test cannot cover this: it exercises whatever spelling the local
+    git happens to use.
+    """
+    parsed = _parse_git_timestamp(printed)
+    assert parsed is not None, printed
+    assert parsed.utctimetuple()[:5] == (2026, 8, 10, 9, 0)
+
+
+def test_an_unreadable_timestamp_costs_the_finding_not_the_diagnosis():
+    """A clock we cannot read must not take doctor down with it."""
+    assert _parse_git_timestamp("not a date") is None
