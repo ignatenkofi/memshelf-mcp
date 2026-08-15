@@ -141,6 +141,23 @@ ready-to-copy workflows in [`adapters/shelf-repo/`](adapters/shelf-repo/);
 `rebuild --adopt` migrates an older shelf once, `rebuild --check` is the
 CI guard.
 
+Two consequences worth stating plainly, because getting them wrong costs a
+merge conflict:
+
+* **`doctor` reports `no-ledger-row` and `stale-index` immediately after a
+  correct `shelve` — on every branch, `main` included.** Nothing is broken:
+  the episode is written, the derived files are not rendered yet. They clear on
+  the next `rebuild` — the bot's run, on a shelf that has one.
+* **Do not rebuild and commit the derived files by hand to silence them.**
+  That is exactly the conflict class the split removes: a hand-regenerated
+  `ledger.tsv`/`INDEX.md`/`stats.svg` meets the bot's, and the merge stops
+  being clean by construction. Wait for the renderer; on a shelf without a bot,
+  run `memshelf rebuild --shelf .` as its own step.
+
+If those warnings persist for a *day* while episodes keep arriving, that is a
+different state — the renderer is not lagging, it is stopped — and `doctor`
+says so separately, as `derived-stale` at error severity.
+
 **`advise` proposes, never writes.** It answers the question the project was
 founded on — *a dead topic has been occupying 30K tokens for forty minutes*.
 The tool cannot see your window, so you tell it what is in there:
