@@ -1,6 +1,6 @@
 import os
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -8,9 +8,11 @@ pytest.importorskip("docshelf_mcp")
 
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
+from memshelf_mcp.cli import main as cli_main  # noqa: E402
 from memshelf_mcp.core.doctor import _parse_git_timestamp, check_shelf  # noqa: E402
 from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.shelve import shelve  # noqa: E402
+from memshelf_mcp.tools import DoctorInput, run_doctor  # noqa: E402
 
 
 def _init(root):
@@ -622,6 +624,34 @@ def test_an_old_but_complete_shelf_is_not_stale(tmp_path):
     report = check_shelf(root, now=datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc))
 
     assert "derived-stale" not in _codes(report), report.as_dict()
+
+
+def test_the_stale_threshold_is_the_shelfs_to_pick(tmp_path):
+    """#89 left the threshold a parameter; a shelf must be able to say "six
+    hours of renderer silence is an outage here" without editing the library.
+    One fixture read through two thresholds — only the number moves the
+    verdict, which is what proves the knob is connected end to end."""
+    root = _shelf_with_an_uncounted_episode(tmp_path)
+    twelve_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
+    _commit_ledger_at(root, twelve_hours_ago)
+
+    lenient = run_doctor(DoctorInput(shelf_path=str(root)))
+    strict = run_doctor(DoctorInput(shelf_path=str(root), derived_stale_after_hours=6))
+
+    assert "derived-stale" not in {f["code"] for f in lenient["findings"]}, lenient
+    assert "derived-stale" in {f["code"] for f in strict["findings"]}, strict
+
+
+def test_the_stale_threshold_flag_moves_the_exit_code(tmp_path, capsys):
+    """CI and the pre-push habit read nothing but the exit code, so the CLI
+    flag has to reach all the way down to it."""
+    root = _shelf_with_an_uncounted_episode(tmp_path)
+    twelve_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
+    _commit_ledger_at(root, twelve_hours_ago)
+
+    assert cli_main(["doctor", "--shelf", str(root)]) == 0
+    assert cli_main(["doctor", "--shelf", str(root), "--derived-stale-hours", "6"]) == 1
+    capsys.readouterr()  # the JSON reports are not this test's subject
 
 
 @pytest.mark.parametrize(

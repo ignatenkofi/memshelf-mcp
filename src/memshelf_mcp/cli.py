@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from memshelf_mcp import __version__
 from memshelf_mcp.core.advisor import DEFAULT_BUDGET_TOKENS, STALE_AFTER_TURNS
 from memshelf_mcp.core.archive import ArchiveError
+from memshelf_mcp.core.doctor import DERIVED_STALE_AFTER_HOURS
 from memshelf_mcp.core.episode import EpisodeError
 from memshelf_mcp.core.importer import TranscriptError
 from memshelf_mcp.core.init import InitError
@@ -280,7 +281,13 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
-    result = run_doctor(DoctorInput(shelf_path=args.shelf, check_remote=args.check_remote))
+    result = run_doctor(
+        DoctorInput(
+            shelf_path=args.shelf,
+            check_remote=args.check_remote,
+            derived_stale_after_hours=args.derived_stale_hours,
+        )
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["errors"] == 0 else 1  # non-zero on errors, for CI / hooks
 
@@ -502,6 +509,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--check-remote",
         action="store_true",
         help="Probe git remotes; fail on a publicly visible one (needs network).",
+    )
+    dc.add_argument(
+        "--derived-stale-hours",
+        type=float,
+        default=DERIVED_STALE_AFTER_HOURS,
+        help="Hours the derived layer may go unrewritten with uncounted episodes "
+        "before `derived-stale` fires (default %(default)s; #89). A shelf whose "
+        "renderer normally answers in minutes should pick a much shorter one.",
     )
     dc.set_defaults(func=_cmd_doctor)
 
