@@ -22,7 +22,7 @@ from memshelf_mcp.core.advisor import (
 from memshelf_mcp.core.archive import purge as purge_shelf
 from memshelf_mcp.core.archive import rollup as rollup_shelf
 from memshelf_mcp.core.digest import validate_digest
-from memshelf_mcp.core.doctor import check_shelf
+from memshelf_mcp.core.doctor import DERIVED_STALE_AFTER_HOURS, check_shelf
 from memshelf_mcp.core.importer import discover as import_discover
 from memshelf_mcp.core.importer import extract as import_extract
 from memshelf_mcp.core.init import init_shelf
@@ -309,13 +309,25 @@ class DoctorInput(ShelfScopedInput):
         description="Also probe git remotes and fail the shelf if any is publicly "
         "visible (MANIFEST principle 8). Off by default because it hits the network.",
     )
+    derived_stale_after_hours: float = Field(
+        default=DERIVED_STALE_AFTER_HOURS,
+        gt=0,
+        description="Hours the derived layer may go unrewritten with uncounted "
+        "episodes before `derived-stale` fires (#89). A shelf picks its own "
+        "threshold — a bot that renders in minutes deserves a far shorter one "
+        "than the day-long default.",
+    )
 
 
 def run_doctor(params: DoctorInput) -> dict:
     """Check shelf integrity: schema, digest contract, secrets at rest, ledger,
     INDEX budget, plus docshelf's structural checks. Optionally (``check_remote``)
     gate on remote visibility."""
-    return check_shelf(params.shelf_path, check_remote=params.check_remote).as_dict()
+    return check_shelf(
+        params.shelf_path,
+        check_remote=params.check_remote,
+        stale_after_hours=params.derived_stale_after_hours,
+    ).as_dict()
 
 
 class ResolveInput(ShelfScopedInput):

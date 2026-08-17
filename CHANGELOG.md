@@ -21,6 +21,16 @@ once code ships.
 
 ### Added
 
+- **The `derived-stale` threshold is now the shelf's to pick:
+  `memshelf doctor --derived-stale-hours N` and `derived_stale_after_hours` on
+  the `memshelf_doctor` tool** (#89, main-memshelf#137). The check shipped with
+  its day-long default reachable only from Python — `check_shelf` had the seam,
+  the CLI and the MCP tool did not — so every shelf was stuck with 24 hours no
+  matter how fast its renderer normally answers. A day is exactly the delay
+  that hid the 2026-08-13 renderer outage on the dogfood shelf; that shelf now
+  records 6 hours, and other shelves can pick their own number without editing
+  the library. Default unchanged.
+
 - **`doctor` tells a lagging renderer from a stopped one: `derived-stale`**
   (#89). `no-ledger-row` meant two things — *the renderer has not run yet*
   (normal one second after a shelve, resolves itself) and *the renderer cannot
