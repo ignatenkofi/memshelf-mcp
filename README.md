@@ -89,7 +89,7 @@ loop, no MCP:
 memshelf init   --shelf ~/my-shelf --name "My working memory"
 memshelf shelve --shelf ~/my-shelf --slug 2026-07-23-topic --kind topic \
   --digest "What was decided, what was rejected and why, what stays open." \
-  --section "Decisions=..."
+  --section "Decisions=What was decided, and what was rejected instead — one line each."
 memshelf recall --shelf ~/my-shelf --id 2026-07-23-topic --section Decisions --log
 memshelf stats  --shelf ~/my-shelf   # claimed + realized savings
 memshelf doctor --shelf ~/my-shelf   # exit 1 on integrity errors
