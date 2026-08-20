@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from memshelf_mcp.core.advisor import (
     DEFAULT_BUDGET_TOKENS,
@@ -60,6 +60,15 @@ class ShelfScopedInput(BaseModel):
     one *global* shelf, and a project overrides it by naming its own path in the
     call. Neither present is an error with a fixable message, not a path of ``''``.
     """
+
+    # An unknown key is a failed call, not a fussy one (#104). pydantic's default
+    # is `extra='ignore'`, and `_accept_flat_arguments` wraps a flat call into
+    # `params` before validation, so a misspelled flag used to be dropped in
+    # silence — and the tool then ran the flag's *other* behaviour and reported
+    # success. `memshelf_rebuild(chek=True)` wrote instead of checking. Refusing
+    # the call is the only outcome that cannot be mistaken for the one asked for;
+    # the error names the key, so the typo is one line away from fixed.
+    model_config = ConfigDict(extra="forbid")
 
     shelf_path: str = Field(default="", description=_SHELF_PATH_DESCRIPTION)
 
@@ -275,6 +284,9 @@ def run_init(params: InitInput) -> dict:
 
 
 class LintDigestInput(BaseModel):
+    # Unknown keys are refused here too — the note on `ShelfScopedInput` (#104).
+    model_config = ConfigDict(extra="forbid")
+
     digest: str = Field(description="The digest text to check. Nothing is written.")
     strict: bool = Field(
         default=False,
@@ -432,6 +444,9 @@ def run_purge(params: PurgeInput) -> dict:
 class OccupantInput(BaseModel):
     """One thing the caller reports as sitting in its context window."""
 
+    # Unknown keys are refused here too — the note on `ShelfScopedInput` (#104).
+    model_config = ConfigDict(extra="forbid")
+
     label: str = Field(description="What this is, in your own words — it is echoed in proposals.")
     approx_tokens: int = Field(description="Rough size in tokens; an eyeball estimate is fine.")
     state: Literal["live", "closed", "unknown"] = Field(
@@ -495,6 +510,9 @@ def run_advise(params: AdviseInput) -> dict:
 
 
 class ImportInput(BaseModel):
+    # Unknown keys are refused here too — the note on `ShelfScopedInput` (#104).
+    model_config = ConfigDict(extra="forbid")
+
     method: Literal["discover", "extract"] = Field(
         description="'discover' lists conversations by content marker; 'extract' cleans "
         "one to a working file for shelving."

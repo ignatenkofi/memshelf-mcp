@@ -30,6 +30,7 @@ import types
 from typing import Any, get_type_hints
 
 import pytest
+from pydantic import ValidationError
 
 from memshelf_mcp import server
 
@@ -53,8 +54,8 @@ def _tool_functions() -> dict[str, types.FunctionType]:
     }
 
 
-def _placeholder(model, shelf_path: str):
-    """Build the tool's input model with a value for every required field.
+def _placeholder_values(model, shelf_path: str) -> dict[str, Any]:
+    """Build a value for every required field of the tool's input model.
 
     The point is to reach the wrapper, not to make a meaningful call — the
     values are deliberately implausible so the underlying operation fails and
@@ -85,7 +86,12 @@ def _placeholder(model, shelf_path: str):
                 "kind": "topic",
                 "method": "discover",
             }.get(field_name, "placeholder")
-    return model(**values)
+    return values
+
+
+def _placeholder(model, shelf_path: str):
+    """The same values, as an instance of the model."""
+    return model(**_placeholder_values(model, shelf_path))
 
 
 def test_the_roster_is_not_empty():
@@ -184,3 +190,112 @@ def test_flat_arguments_are_accepted_as_well_as_nested(tmp_path, monkeypatch):
 
     assert flat == nested, (flat, nested)
     assert missing in flat["error"], flat
+
+
+# A digest that is valid but carries the `thin` warning: `strict` decides whether
+# it passes, so the flag's fate is visible in the answer rather than inferred.
+_THIN_DIGEST = "The parser reads UTF-8 transcripts from disk and reports byte offsets per record."
+
+
+def test_an_unknown_key_is_rejected_rather_than_dropped(monkeypatch):
+    """A misspelled flag must fail the call, not revert to its default (#104).
+
+    pydantic's default is ``extra='ignore'``, and `_accept_flat_arguments` wraps
+    a flat call into ``params`` before validation — so an unknown key was dropped
+    without a word. The cost is not the typo: it is that the flag's *other*
+    behaviour runs and the call reports success. `memshelf_rebuild(check=…)`
+    writes instead of checking; `memshelf_lint_digest(strict=…)`, used here
+    because it needs no shelf, silently stops failing on warnings.
+
+    Asserted against the honestly-spelled call rather than in isolation: the
+    point is that the two answers must not agree.
+    """
+    monkeypatch.delenv("MEMSHELF_SHELF_PATH", raising=False)
+
+    honest = json.loads(
+        _call_over_the_boundary("memshelf_lint_digest", {"digest": _THIN_DIGEST, "strict": True})
+    )
+    assert honest["passed"] is False, honest  # the flag bites when it is spelled right
+
+    typo = json.loads(
+        _call_over_the_boundary("memshelf_lint_digest", {"digest": _THIN_DIGEST, "strikt": True})
+    )
+
+    assert typo["status"] == "error", typo
+    assert typo["type"] == "ValidationError", typo
+    assert "strikt" in typo["error"], f"the caller cannot fix a typo it is not shown: {typo}"
+
+
+def test_a_legal_flat_call_still_passes(tmp_path, monkeypatch):
+    """The other direction of the same change: `params`-wrapping must keep working.
+
+    Banning unknown keys is only safe if the envelope (#84) never presents a
+    *declared* field as an unknown one. Covered on a flag-carrying tool, not just
+    on `shelf_path`, since the wrapping happens for the whole flat object.
+    """
+    monkeypatch.delenv("MEMSHELF_SHELF_PATH", raising=False)
+
+    lint = json.loads(
+        _call_over_the_boundary("memshelf_lint_digest", {"digest": _THIN_DIGEST, "strict": False})
+    )
+    assert lint["status"] == "ok", lint
+    assert lint["passed"] is True, lint
+
+    doctor = json.loads(
+        _call_over_the_boundary(
+            "memshelf_doctor",
+            {"shelf_path": str(tmp_path / "no-such-shelf"), "check_remote": False},
+        )
+    )
+    assert doctor.get("type") != "ValidationError", (
+        f"a declared field was read as an unknown key: {doctor}"
+    )
+
+
+@pytest.mark.parametrize("tool_name", sorted(_tool_functions()))
+def test_every_input_model_rejects_an_unknown_key(tool_name: str, tmp_path):
+    """The ban is a property of the roster, not of the two tools tested above.
+
+    Discovered rather than listed, like the envelope test: a model added without
+    the config is caught the day it lands.
+    """
+    model = get_type_hints(_tool_functions()[tool_name])["params"]
+    values = _placeholder_values(model, str(tmp_path / "no-such-shelf"))
+
+    with pytest.raises(ValidationError):
+        model(**{**values, "definitely_not_a_key": True})
+
+
+def test_a_nested_model_rejects_an_unknown_key_too(tmp_path):
+    """`occupants` is a list of models, and the ban has to reach inside it."""
+    from memshelf_mcp.tools import AdviseInput
+
+    with pytest.raises(ValidationError):
+        AdviseInput(
+            shelf_path=str(tmp_path / "no-such-shelf"),
+            occupants=[{"label": "x", "approx_tokens": 1, "kynd": "topic"}],
+        )
+
+
+def test_an_unknown_key_beside_the_envelope_is_rejected_too(monkeypatch):
+    """The ban has to reach the *published* call shape, not only the flat one.
+
+    `_accept_flat_arguments` leaves a call that already names ``params`` alone,
+    and the SDK drops whatever else sits at that outer level without a word. So
+    banning unknown keys inside the model closes the convenience shape (#84)
+    while the documented, nested shape keeps exactly the silence #104 is about —
+    the misspelled flag lands beside the envelope instead of inside it and
+    vanishes just the same.
+    """
+    monkeypatch.delenv("MEMSHELF_SHELF_PATH", raising=False)
+
+    payload = json.loads(
+        _call_over_the_boundary(
+            "memshelf_lint_digest",
+            {"params": {"digest": _THIN_DIGEST}, "strikt": True},
+        )
+    )
+
+    assert payload["status"] == "error", payload
+    assert payload["type"] == "ValidationError", payload
+    assert "strikt" in payload["error"], payload
