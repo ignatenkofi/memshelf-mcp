@@ -9,7 +9,11 @@ pytest.importorskip("docshelf_mcp")
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
 from memshelf_mcp.cli import main as cli_main  # noqa: E402
-from memshelf_mcp.core.doctor import _parse_git_timestamp, check_shelf  # noqa: E402
+from memshelf_mcp.core.doctor import (  # noqa: E402
+    _parse_git_timestamp,
+    check_shelf,
+    index_entries,
+)
 from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.shelve import shelve  # noqa: E402
 from memshelf_mcp.tools import DoctorInput, run_doctor  # noqa: E402
@@ -679,3 +683,122 @@ def test_git_timestamps_parse_in_both_spellings(printed):
 def test_an_unreadable_timestamp_costs_the_finding_not_the_diagnosis():
     """A clock we cannot read must not take doctor down with it."""
     assert _parse_git_timestamp("not a date") is None
+
+
+def _bloat_shelf(root, *, entries, title_chars):
+    """A shelf whose INDEX entries are individually overpriced.
+
+    Long *titles*, because that is the fat that is still reachable: since the
+    2026-08-21 fix, descriptions are capped on both the write and the render
+    path, so an oversized description can no longer reach INDEX at all.
+    """
+    _init(root)
+    for n in range(entries):
+        day = f"2026-01-{n + 1:02d}"
+        shelve(
+            root,
+            slug=f"{day}-topic-{n}",
+            kind="topic",
+            digest="Решение принято, альтернатива отвергнута по замеру. Остаток открыт.",
+            sections={"Decisions": "Записано."},
+            display_title=("Очень длинный заголовок эпизода " * 20)[:title_chars] + str(n),
+            approx_tokens=100,
+            date=day,
+        )
+    rebuild(root)
+    return root
+
+
+def test_index_bloat_reports_the_price_of_a_line_not_just_the_total(tmp_path):
+    """A total alone cannot be acted on: a big INDEX on a big shelf is
+    navigation working as designed. The number with a fix behind it is the
+    per-entry cost, so the finding has to name it."""
+    root = _bloat_shelf(tmp_path / "shelf", entries=12, title_chars=400)
+
+    report = check_shelf(root)
+
+    (finding,) = [f for f in report.findings if f.code == "index-bloat"]
+    assert "per entry" in finding.detail
+    assert "allowance 80" in finding.detail
+    assert "12 listed" in finding.detail
+
+
+def test_index_bloat_no_longer_prescribes_a_rollup(tmp_path):
+    """The old advice was "roll up old episodes", and on a size-aware budget
+    that is not merely unhelpful but wrong: folding entries removes them and
+    their allowance together, so it cannot move the per-entry price. Prescribing
+    it made archiving live memory the standard way to pass the check."""
+    root = _bloat_shelf(tmp_path / "shelf", entries=12, title_chars=400)
+
+    (finding,) = [f for f in check_shelf(root).findings if f.code == "index-bloat"]
+
+    fix = finding.fix.lower()
+    # A rollup may be *mentioned* — ruling it out is half the advice. What it
+    # must never be is prescribed, so the only command offered is `rebuild`.
+    assert "a rollup drops the budget along with the lines and would not fix it" in fix
+    assert "memshelf rollup" not in fix
+    assert "memshelf rebuild" in fix
+    # And it names the field that is actually over — here the titles, which are
+    # the one entry term with no cap.
+    assert "titles" in fix and "display_title" in fix
+
+
+def test_growth_alone_never_trips_index_bloat(tmp_path):
+    """The property the absolute 2500 lacked. It went unreachable at ~30
+    episodes, and the only lever that lowered the number was archiving."""
+    root = _bloat_shelf(tmp_path / "shelf", entries=90, title_chars=60)
+
+    index_tokens = len((root / "INDEX.md").read_text(encoding="utf-8")) // 4
+    # The shelf has to be big enough that the *old* constant would have fired,
+    # or this test cannot detect the regression it is named after. Caught in
+    # review: at 40 entries the fixture rendered 1610 tokens and passed just as
+    # happily with `index_budget` reverted to `return 2500`.
+    assert index_tokens > 2500, f"fixture too small to be a regression guard ({index_tokens})"
+    assert "index-bloat" not in _codes(check_shelf(root))
+
+
+def test_the_budget_is_counted_off_the_index_not_off_the_episodes(tmp_path):
+    """Numerator and denominator must come from the same artifact.
+
+    `doctor` compares the budget against the *size of INDEX.md*, so counting
+    episodes on disk instead of lines in the file lets the two disagree — and
+    under #58 they disagree by design whenever the renderer is behind. Here the
+    disk holds 13 episodes and INDEX lists 7; counting the disk inflates the
+    budget by 480 tokens and hides a real overage.
+    """
+    from memshelf_mcp.core.archive import rollup
+
+    root = _bloat_shelf(tmp_path / "shelf", entries=12, title_chars=400)
+    rollup(root, slug="2026-01-06-rollup", digest=DIGEST_FOR_ROLLUP, until="2026-01-06")
+
+    listed = len(index_entries((root / "INDEX.md").read_text(encoding="utf-8")))
+    (finding,) = [f for f in check_shelf(root).findings if f.code == "index-bloat"]
+
+    assert f"×{listed} listed" in finding.detail
+    assert listed < check_shelf(root).episodes_checked
+
+
+def test_archived_episodes_earn_no_index_allowance(tmp_path):
+    """Entries are counted off the rendered INDEX, so a rolled-up episode stops
+    paying and stops being paid for in the same breath. Counting episodes on
+    disk instead would hand the shelf 80 tokens of allowance per line it no
+    longer carries — and a rollup would then *raise* the budget."""
+    from memshelf_mcp.core.advisor import advise
+    from memshelf_mcp.core.archive import rollup
+    from memshelf_mcp.core.doctor import index_budget
+
+    root = _bloat_shelf(tmp_path / "shelf", entries=20, title_chars=60)
+    before = advise(root).index_budget_tokens
+
+    rollup(root, slug="2026-01-10-rollup", digest=DIGEST_FOR_ROLLUP, until="2026-01-10")
+
+    after = advise(root).index_budget_tokens
+    listed = len(index_entries((root / "INDEX.md").read_text(encoding="utf-8")))
+    assert after == index_budget(listed)
+    assert after < before
+
+
+DIGEST_FOR_ROLLUP = (
+    "Период свёрнут: решения по middleware закрыты, альтернатива с cookie-session "
+    "отвергнута для межсервисных вызовов, ротация общего секрета осталась открытой."
+)

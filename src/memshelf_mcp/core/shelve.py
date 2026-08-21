@@ -25,7 +25,12 @@ from datetime import date as _date
 from pathlib import Path
 
 from memshelf_mcp.core.digest import ValidationResult, validate_digest
-from memshelf_mcp.core.episode import CATEGORY_BY_KIND, Frontmatter, compose_episode
+from memshelf_mcp.core.episode import (
+    CATEGORY_BY_KIND,
+    Frontmatter,
+    clamp_description,
+    compose_episode,
+)
 from memshelf_mcp.core.gitsync import SyncReport, hint_command, preflight, push_with_retry
 from memshelf_mcp.core.policy import load_pattern_pack
 from memshelf_mcp.core.redact import RedactionReport, redact
@@ -123,14 +128,21 @@ def _find_episode(root: Path, doc_stem: str) -> Path | None:
     return None
 
 
-def _first_sentence(text: str, cap: int = 200) -> str:
+def _first_sentence(text: str) -> str:
+    """The digest's opening sentence, as a default description.
+
+    No length cap of its own any more: ``clamp_description`` owns that number
+    now, and owning it in one place is the point — two caps at 200 and 120 on
+    two branches of the same expression is how the 200 came to apply to the
+    branch nobody used.
+    """
     text = text.strip()
     best = len(text)
     for sep in (". ", ".\n", "! ", "? "):
         i = text.find(sep)
         if i != -1:
             best = min(best, i + 1)
-    return text[:best].strip()[:cap]
+    return text[:best].strip()
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -338,7 +350,15 @@ def shelve(
     shelved_on = date or _date.today().isoformat()
     span = span or shelved_on
 
-    desc = description if description is not None else _first_sentence(digest)
+    # One cap, applied to both branches. It used to sit inside
+    # `_first_sentence`, which runs only when the caller supplies no
+    # description — so the path callers actually take wrote whatever they were
+    # given, straight into a line every future session reads.
+    desc, desc_warning = clamp_description(
+        description if description is not None else _first_sentence(digest)
+    )
+    if desc_warning:
+        warnings.append(desc_warning)
     ledger_notes, notes_warning = _flatten_notes(notes)
     if notes_warning:
         warnings.append(notes_warning)

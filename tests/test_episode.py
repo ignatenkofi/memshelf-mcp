@@ -1,6 +1,13 @@
 import pytest
 
-from memshelf_mcp.core.episode import EpisodeError, Frontmatter, compose_episode
+from memshelf_mcp.core.episode import (
+    MAX_DESCRIPTION_CHARS,
+    EpisodeError,
+    Frontmatter,
+    clamp_description,
+    compose_episode,
+    yaml_scalar,
+)
 
 
 def _fm(kind="topic", **kw):
@@ -99,3 +106,70 @@ def test_frontmatter_block_loads_as_yaml():
     assert loaded["display_title"] == 'Заголовок с "кавычками" и: двоеточием'
     assert loaded["notes"] == "a\\backslash"
     assert loaded["id"] == "2026-07-31-x"
+
+
+# --- clamp_description: the degenerate inputs found in review ---------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "- " + "х" * 200,  # no space after the first two chars
+        "Итог: " + "y" * 200,  # one space, very early
+        "See https://example.com/" + "a" * 200 + " end",  # a long unbroken URL
+        "а" * 200,  # no space at all
+        " " * 119 + "слово" * 40,  # only leading spaces in the head
+        "хвост, " + "z" * 200,  # head would `rstrip` down to nothing
+    ],
+)
+def test_clamp_keeps_most_of_the_budget_whatever_the_input(text):
+    """A word-boundary cut must not collapse the value.
+
+    Cutting at the *last* space in the head unconditionally turned
+    "Итог: yyyy…" into "Итог…" and could `rstrip` a head down to a bare
+    ellipsis — a description destroyed in the name of tidiness, silently, on
+    every rebuild. Found in review; the cut now falls back to a hard one when
+    the clean boundary would keep too little.
+    """
+    kept, warning = clamp_description(text)
+
+    assert warning is not None
+    assert len(kept) <= MAX_DESCRIPTION_CHARS
+    assert len(kept) >= MAX_DESCRIPTION_CHARS * 2 // 3
+    assert kept.endswith("…")
+    assert kept.strip("… ")  # never a bare ellipsis
+
+
+def test_clamp_reports_the_length_it_actually_produced():
+    """The warning said "cut to 120" while returning a single character."""
+    kept, warning = clamp_description("Итог: " + "y" * 200)
+
+    assert f"cut to {len(kept)}" in warning
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        (None, ""),
+        ("", ""),
+        ("   ", ""),
+        ("x" * MAX_DESCRIPTION_CHARS, "x" * MAX_DESCRIPTION_CHARS),
+    ],
+)
+def test_clamp_leaves_anything_within_budget_untouched(text, expected):
+    kept, warning = clamp_description(text)
+    assert (kept, warning) == (expected, None)
+
+
+def test_clamp_survives_the_frontmatter_round_trip():
+    """The clamped value is written into `description:`, so it has to come back
+    out of the parser as the same string."""
+    from memshelf_mcp.core.frontmatter import parse_frontmatter
+
+    kept, _ = clamp_description('Он сказал "да": и вот # что {из} [этого] — ' + "ы" * 200)
+    body = (
+        f"# t\n\n---\nid: t\nkind: topic\nspan: 2026-08-21\ndescription: {yaml_scalar(kept)}\n---\n"
+    )
+    fields, _ = parse_frontmatter(body)
+
+    assert fields["description"] == kept

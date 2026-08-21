@@ -55,8 +55,11 @@ The M1 tools were pointed at the dogfood shelf the day they were built.
   credential inside a teaching recipe quoted from a student's homework review.
   Shape guards report, humans judge; the finding is the system working.
 - **`index-bloat` warning** — INDEX (~2.7K tokens) crossed the injection
-  budget, the exact drift the M2 rollup milestone exists for, observed in the
-  wild rather than predicted.
+  budget, observed in the wild rather than predicted. *(Read at the time as
+  "time to roll up". It was not: the budget was an absolute 2500 tokens on a
+  file that grows with the shelf, so crossing it was arithmetic, not drift. The
+  budget is linear as of 2026-08-21 and the finding now names the overpriced
+  term instead. See CHANGELOG.)*
 
 ## The headline stays the accidental one
 

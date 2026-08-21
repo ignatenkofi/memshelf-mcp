@@ -78,8 +78,7 @@ shelve→compact→recall cycle survives without manual repair; `doctor` clean.
 - ~~Rollups: consolidate old episodes into digest-of-digests, archive
   category.~~ — **done** (#15): `memshelf rollup` moves a period's episodes
   into the `archive/` sub-shelf behind one digest-of-digests. Navigation
-  shrinks; recall, search, ledger and stats are untouched. Exit criterion
-  (100+ episodes, INDEX under ~10 KB) is now a matter of running it.
+  shrinks; recall, search, ledger and stats are untouched.
 - Configurable PII/secret pattern packs per shelf.
 - ~~**Derived files rendered by a bot, not by `shelve`**~~ (#58, decided
   2026-07-31) — **done**: `date`/`notes`/`display_title`/`description` moved
@@ -90,10 +89,28 @@ shelve→compact→recall cycle survives without manual repair; `doctor` clean.
   shelf without the bot. Bot + PR-guard workflows: `adapters/shelf-repo/`.
   Rollups (below) build on the same regeneration path.
 
-**Exit criteria:** a shelf with 100+ episodes keeps INDEX under ~10 KB and
-recall precision doesn't degrade (re-run the M0 question set); the advisor's
-shelve proposals are accepted (not overridden) most of the time in dogfood
-use.
+**Exit criteria:** a shelf with 100+ episodes keeps INDEX **within its budget**
+— `INDEX_BASE_TOKENS + INDEX_TOKENS_PER_ENTRY × listed episodes`, i.e. the
+price of a *line* stays flat as the shelf grows — and recall precision doesn't
+degrade (re-run the M0 question set); the advisor's shelve proposals are
+accepted (not overridden) most of the time in dogfood use.
+
+> **Revised 2026-08-21.** This used to read "100+ episodes and INDEX under
+> ~10 KB", and the two clauses contradicted each other. INDEX lists episodes,
+> so its size is O(episodes) by construction; a fixed ceiling is therefore
+> unreachable past some shelf size, and the only mechanism that lowers the
+> number afterwards is `rollup` — which buys compliance by archiving live
+> memory. Measured on the author's 113-episode shelf: the structural floor,
+> with every description deleted and the link de-duplicated, is ~3800 tokens
+> (~15 KB), so "100+ episodes under 10 KB" was not merely tight but arithmetically
+> impossible. The derived constant `INDEX_BUDGET_TOKENS = 2500` inherited the
+> contradiction and added a unit error — "~10 KB at chars/4" holds only if one
+> character is one byte, and this shelf's Cyrillic runs ~1.42 bytes per
+> character, making the two clauses two different budgets (10 KB ≈ 1800 tokens;
+> 2500 tokens ≈ 14 KB). The budget is now linear in shelf size, which puts the
+> check on the quantity formatting can actually control. Rollups stay in M2,
+> triggered by INDEX's share of the context window (`INDEX_CONTEXT_SHARE`)
+> rather than by a threshold that growth alone would breach.
 
 ## M3 — Retrieval upgrades, reuse layer & second surface
 

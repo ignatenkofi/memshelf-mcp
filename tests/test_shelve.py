@@ -7,7 +7,10 @@ pytest.importorskip("docshelf_mcp")
 
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
-from memshelf_mcp.core.episode import EpisodeError  # noqa: E402
+from memshelf_mcp.core.episode import (  # noqa: E402
+    MAX_DESCRIPTION_CHARS,
+    EpisodeError,
+)
 from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.shelve import (  # noqa: E402
     AmendTargetMissing,
@@ -752,3 +755,99 @@ def test_a_refused_amend_does_not_move_the_episode(tmp_path):
     assert was.is_file(), "the episode moved despite the shelve being refused"
     assert was.read_text(encoding="utf-8") == before
     assert not (root / "docs" / "topics" / "2026-08-13-recount.md").exists()
+
+
+def test_an_explicit_description_is_capped_like_a_generated_one(tmp_path):
+    """The half-applied cap (#index-bloat diagnosis, 2026-08-21).
+
+    `shelve` read `description if description is not None else
+    _first_sentence(digest)`, and only `_first_sentence` truncated. Callers
+    almost always pass a description, so the cap was effectively off: the
+    author's shelf carried 15 descriptions past 200 chars, the longest 420, and
+    descriptions alone were 43% of INDEX.
+    """
+    root = _init_shelf(tmp_path)
+    long_description = (
+        "Разобрали, почему проверка токена уехала в middleware, какие два "
+        "альтернативных варианта отвергли и по каким именно замерам, что "
+        "осталось открытым по ротации общего секрета, и кто это забирает."
+    )
+    assert len(long_description) > MAX_DESCRIPTION_CHARS
+
+    result = shelve(
+        root,
+        slug="2026-07-22-auth-refactor",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        description=long_description,
+        approx_tokens=4000,
+        date="2026-07-22",
+    )
+
+    text = (tmp_path / "docs" / "topics" / "2026-07-22-auth-refactor.md").read_text(
+        encoding="utf-8"
+    )
+    (line,) = [ln for ln in text.splitlines() if ln.startswith("description:")]
+    written = line.split("description:", 1)[1].strip().strip("\"'")
+    assert len(written) <= MAX_DESCRIPTION_CHARS
+    assert written.endswith("…")
+    # Cut at a word boundary, so it reads as truncated rather than as a typo.
+    assert not written[:-1].endswith(" ")
+    # And the author is told, rather than left believing it was taken as given.
+    assert any("cut to" in w for w in result.warnings)
+
+
+def test_a_short_description_is_left_exactly_alone(tmp_path):
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-07-22-auth-refactor",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        description="Токен-чек уехал в middleware; cookie-session отвергли.",
+        approx_tokens=4000,
+        date="2026-07-22",
+    )
+
+    text = (tmp_path / "docs" / "topics" / "2026-07-22-auth-refactor.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Токен-чек уехал в middleware; cookie-session отвергли." in text
+    assert "…" not in text
+
+
+def test_rebuild_caps_descriptions_already_on_disk(tmp_path):
+    """Capping on write alone would leave every episode already shelved
+    oversized until someone rewrote it. INDEX is derived, so the cap has to
+    reach it from the render side too — one `rebuild`, no episodes touched."""
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-07-22-auth-refactor",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        description="short",
+        approx_tokens=4000,
+        date="2026-07-22",
+    )
+    episode = tmp_path / "docs" / "topics" / "2026-07-22-auth-refactor.md"
+    oversized = "и".join(["очень длинное описание"] * 12)
+    assert len(oversized) > MAX_DESCRIPTION_CHARS
+    episode.write_text(
+        episode.read_text(encoding="utf-8").replace(
+            'description: "short"', f'description: "{oversized}"'
+        ),
+        encoding="utf-8",
+    )
+
+    rebuild(root)
+
+    meta = json.loads((tmp_path / "docs" / "topics" / ".meta.json").read_text(encoding="utf-8"))
+    rendered = meta["2026-07-22-auth-refactor.md"]["description"]
+    assert len(rendered) <= MAX_DESCRIPTION_CHARS
+    # The episode is the source and keeps what it carries; the cap governs the
+    # derived line, which is the thing that is actually paid for.
+    assert oversized in episode.read_text(encoding="utf-8")

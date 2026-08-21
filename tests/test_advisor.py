@@ -22,11 +22,12 @@ from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 from memshelf_mcp.cli import main  # noqa: E402
 from memshelf_mcp.core.advisor import (  # noqa: E402
     EPISODE_STANDING_COST,
+    INDEX_CONTEXT_SHARE,
     MIN_PROPOSAL_TOKENS,
     Occupant,
     advise,
 )
-from memshelf_mcp.core.doctor import INDEX_BUDGET_TOKENS  # noqa: E402
+from memshelf_mcp.core.doctor import INDEX_TOKENS_PER_ENTRY, index_budget  # noqa: E402
 from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.shelve import shelve  # noqa: E402
 
@@ -234,11 +235,28 @@ def test_archived_episodes_still_count_as_shelved(tmp_path):
     assert _actions(advice) == [("drop", "old work")]
 
 
+#: A window small enough that 60 episodes of navigation cross
+#: INDEX_CONTEXT_SHARE. Stated rather than simulated: the rollup trigger is a
+#: *share* of the caller's window, so shrinking the window is the same
+#: experiment as growing the shelf, and it runs in a second instead of writing
+#: several hundred episodes.
+CROWDED_WINDOW = 50_000
+
+
 @pytest.fixture(scope="module")
-def bloated_shelf(tmp_path_factory):
-    """A shelf whose INDEX is over budget — 60 episodes, the size the author's
-    working shelf reached when the `index-bloat` warning went live."""
-    root = _init(tmp_path_factory.mktemp("bloated") / "shelf")
+def crowded_shelf(tmp_path_factory):
+    """60 episodes whose entries are all well formed — no oversized part.
+
+    This fixture used to be called `bloated_shelf` and was the shape of the bug
+    it was meant to guard: 60 entries with short, uniform 110-character
+    descriptions tripped the old absolute 2500-token budget, and the test below
+    asserted that a rollup brought them back under it. Nothing here is
+    oversized; the only thing "wrong" with this shelf is that it has 60
+    episodes in it, which is what a memory shelf is for. Under a size-aware
+    budget it is compliant, and it earns a rollup only when navigation grows
+    into a real share of the window.
+    """
+    root = _init(tmp_path_factory.mktemp("crowded") / "shelf")
     for n in range(60):
         day = date(2026, 1, 1) + timedelta(days=n)
         _shelve(
@@ -254,30 +272,63 @@ def bloated_shelf(tmp_path_factory):
     return root
 
 
-def test_index_over_budget_proposes_a_rollup_with_a_concrete_until(bloated_shelf):
-    advice = advise(bloated_shelf)
+def test_a_shelf_of_well_formed_entries_is_never_index_bloat(crowded_shelf):
+    """Size is not a fault. The old budget said otherwise, and the only way to
+    obey it was to archive episodes that had done nothing wrong."""
+    from memshelf_mcp.core.doctor import check_shelf
+
+    report = check_shelf(crowded_shelf)
+    advice = advise(crowded_shelf)
+
+    # Without this the test cannot detect the regression it is named after:
+    # a fixture that renders under 2500 tokens passes just as happily with the
+    # old absolute constant restored. Caught in review — the first version of
+    # this fixture had been trimmed to 2133 tokens and did exactly that.
+    assert advice.index_tokens > 2500, (
+        f"fixture is under the old absolute budget ({advice.index_tokens}); "
+        "it would pass with the constant restored and guards nothing"
+    )
+    assert [f for f in report.findings if f.code == "index-bloat"] == []
+    assert advice.index_tokens <= advice.index_budget_tokens
+    assert advice.index_entry_tokens <= INDEX_TOKENS_PER_ENTRY
+    assert [p for p in advice.proposals if p.action == "rollup"] == []
+
+
+def test_the_budget_grows_with_the_shelf(crowded_shelf):
+    """The property the fixed constant lacked: one more episode buys one more
+    entry's worth of allowance, so growth alone can never put a shelf over."""
+    assert index_budget(60) - index_budget(59) == INDEX_TOKENS_PER_ENTRY
+    advice = advise(crowded_shelf)
+    assert advice.index_budget_tokens == index_budget(60)
+
+
+def test_growth_alone_earns_a_rollup_only_as_a_share_of_the_window(crowded_shelf):
+    advice = advise(crowded_shelf, budget_tokens=CROWDED_WINDOW)
 
     (proposal,) = [p for p in advice.proposals if p.action == "rollup"]
-    assert advice.index_tokens > INDEX_BUDGET_TOKENS
+    assert advice.index_tokens > CROWDED_WINDOW * INDEX_CONTEXT_SHARE
     assert "--until 2026-0" in proposal.command
     assert "--digest" in proposal.command  # the synthesis stays the caller's
     assert proposal.tokens > 0
+    # Growth, not fat: the rollup must not claim to be fixing a bloat warning
+    # that doctor is not raising.
+    assert not any("index-bloat" in note for note in advice.notes)
 
 
-def test_the_rollup_it_proposes_actually_gets_index_under_budget(bloated_shelf, tmp_path):
+def test_the_rollup_it_proposes_actually_reaches_its_target(crowded_shelf, tmp_path):
     """The estimate has to survive being executed, not just look plausible."""
     from memshelf_mcp.core.archive import rollup
 
     root = tmp_path / "shelf"
-    shutil.copytree(bloated_shelf, root)
-    before = advise(root)
+    shutil.copytree(crowded_shelf, root)
+    before = advise(root, budget_tokens=CROWDED_WINDOW)
     (proposal,) = [p for p in before.proposals if p.action == "rollup"]
     until = proposal.command.split("--until ")[1].split()[0]
 
     rollup(root, slug=f"{until}-rollup", digest=DIGEST, until=until)
 
-    after = advise(root)
-    assert after.index_tokens <= INDEX_BUDGET_TOKENS
+    after = advise(root, budget_tokens=CROWDED_WINDOW)
+    assert after.index_tokens <= CROWDED_WINDOW * INDEX_CONTEXT_SHARE
     # The claimed reclaim is the reason to accept the proposal, so it has to be
     # close to what actually happened — within a fifth, not merely the right sign.
     actual = before.index_tokens - after.index_tokens
@@ -285,11 +336,29 @@ def test_the_rollup_it_proposes_actually_gets_index_under_budget(bloated_shelf, 
     assert [p for p in after.proposals if p.action == "rollup"] == []
 
 
-def test_a_pre_adopt_shelf_is_warned_before_it_is_told_to_roll_up(bloated_shelf, tmp_path):
+def test_a_rollup_does_not_buy_headroom_it_did_not_earn(crowded_shelf, tmp_path):
+    """Archiving removes entries *and* their allowance, so it barely moves the
+    per-entry budget. This is the arithmetic that makes a rollup the wrong
+    remedy for `index-bloat`, asserted rather than merely asserted about."""
+    from memshelf_mcp.core.archive import rollup
+
+    root = tmp_path / "shelf"
+    shutil.copytree(crowded_shelf, root)
+    before = advise(root)
+    rollup(root, slug="2026-02-01-rollup", digest=DIGEST, until="2026-02-01")
+    after = advise(root)
+
+    assert after.index_tokens < before.index_tokens  # the file did shrink
+    assert after.index_budget_tokens < before.index_budget_tokens  # so did the budget
+    # And the number the warning is about — the price of a line — did not move.
+    assert abs(after.index_entry_tokens - before.index_entry_tokens) <= 8
+
+
+def test_a_pre_adopt_shelf_is_warned_before_it_is_told_to_roll_up(crowded_shelf, tmp_path):
     """`rollup` regenerates .meta.json from the episodes; on a shelf written
     before #58 the titles live only in .meta.json and would be stripped."""
     root = tmp_path / "shelf"
-    shutil.copytree(bloated_shelf, root)
+    shutil.copytree(crowded_shelf, root)
     for episode in root.glob("docs/*/*.md"):
         episode.write_text(
             "\n".join(
@@ -301,14 +370,14 @@ def test_a_pre_adopt_shelf_is_warned_before_it_is_told_to_roll_up(bloated_shelf,
             encoding="utf-8",
         )
 
-    advice = advise(root)
+    advice = advise(root, budget_tokens=CROWDED_WINDOW)
 
     assert [p for p in advice.proposals if p.action == "rollup"]
     assert any("predates #58" in note and "--adopt" in note for note in advice.notes)
 
 
-def test_an_adopted_shelf_is_not_warned(bloated_shelf):
-    advice = advise(bloated_shelf)
+def test_an_adopted_shelf_is_not_warned(crowded_shelf):
+    advice = advise(crowded_shelf, budget_tokens=CROWDED_WINDOW)
 
     assert [p for p in advice.proposals if p.action == "rollup"]
     assert not any("predates #58" in note for note in advice.notes)
@@ -445,3 +514,16 @@ def test_advise_writes_nothing(tmp_path):
 
     after = {p: p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
     assert after == before
+
+
+def test_a_nonpositive_window_is_refused_not_divided_by(tmp_path):
+    """`advise` divides by the stated window to report INDEX's share of it.
+    Nothing did before this change, so a zero budget went from a harmless input
+    to an unhandled ZeroDivisionError, and a negative one printed
+    "-148100% of the window"."""
+    root = _init(tmp_path / "shelf")
+    _shelve(root, "2026-07-01-auth")
+
+    for bad in (0, -1):
+        with pytest.raises(ValueError, match="must be positive"):
+            advise(root, budget_tokens=bad)
