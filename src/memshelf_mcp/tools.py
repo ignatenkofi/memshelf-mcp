@@ -114,6 +114,19 @@ class ShelveInput(ShelfScopedInput):
     )
     date: str | None = Field(default=None, description="YYYY-MM-DD; defaults to today.")
     autocommit: bool = True
+    sync: bool = Field(
+        default=True,
+        description="Fetch + fast-forward the shelf to its remote before anything is "
+        "written (#108): a dirty tracked tree or a diverged branch refuses the shelve "
+        "with the fix in the message instead of silently writing onto a stale base. "
+        "A failed fetch (offline) does not refuse — it is reported loudly.",
+    )
+    push: bool = Field(
+        default=False,
+        description="Push the shelve commit; on a rejection, rebase and retry exactly "
+        "once (#108). The result then carries the post-push sha — the only sha worth "
+        "quoting, since a rebase rewrites the local one.",
+    )
     amend: bool = Field(
         default=False,
         description="Rewrite an episode already on the shelf, under the same slug (#71): "
@@ -142,6 +155,8 @@ def run_shelve(params: ShelveInput) -> dict:
         date=params.date,
         autocommit=params.autocommit,
         amend=params.amend,
+        sync=params.sync,
+        push=params.push,
     )
     totals = compute_stats(params.shelf_path)
     return {
@@ -156,6 +171,23 @@ def run_shelve(params: ShelveInput) -> dict:
         # being valid, and a move reported by nothing is a move that looks like
         # a write (#90).
         "moved_from": result.moved_from,
+        # #108 — what the sync around this shelve did, stated even when it did
+        # nothing: a clean run says pulled 0 / retries 0 explicitly.
+        "sync": None
+        if result.sync is None
+        else {
+            "performed": result.sync.performed,
+            "skipped_reason": result.sync.skipped_reason,
+            "remote": result.sync.remote,
+            "branch": result.sync.branch,
+            "commits_pulled": result.sync.commits_pulled,
+            "push_requested": result.sync.push_requested,
+            "pushed": result.sync.pushed,
+            "push_retries": result.sync.push_retries,
+            "final_sha": result.sync.final_sha,
+            "hint": result.sync.hint,
+            "summary": result.sync.line(),
+        },
         "redaction": {
             "total": result.redaction.total,
             "counts": result.redaction.counts,
