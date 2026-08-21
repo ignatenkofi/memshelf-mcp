@@ -95,7 +95,7 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
 
 5. **Write to the shelf.** Preferred — docshelf MCP:
    `docshelf_add_document(path=<temp .md>, category=<kind-mapped>,
-   title="<id>", description="<digest first sentence>")`.
+   title="<id>", description="<the capped description, see below>")`.
    Fallback — Python:
 
    ```bash
@@ -103,11 +103,21 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
    from docshelf_mcp import Shelf
    s = Shelf('$MEMSHELF_ROOT')
    s.add_document('<temp .md>', category='<kind-mapped>', title='<id>',
-                  description='<digest first sentence>')"
+                  description='<the capped description>')"
    ```
 
    Category mapping: `topic → topics`, `research → research`,
    `session → sessions`.
+
+   **Cap the description at 120 characters yourself.** The tool applies
+   `MAX_DESCRIPTION_CHARS` on both the write and the render path; this
+   fallback writes the files directly, so nothing applies it for you, and an
+   uncapped description here reproduces exactly what the cap exists to stop.
+   The digest's first sentence is a starting point, not the answer — on a real
+   shelf it ran to 420 characters, and descriptions alone reached 43% of
+   INDEX.md, which is paid for in every session by every reader who only
+   wanted to know which file to open. Cut at a word boundary and end with `…`.
+   The full account belongs in `## Digest`, which is what recall fetches.
 
 6. **Do NOT write the ledger by hand.** Since #58 `ledger.tsv` — like
    `INDEX.md`, `stats.svg` and each category's `.meta.json` — is a **derived**
