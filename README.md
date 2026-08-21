@@ -174,11 +174,21 @@ report, not left out of it), it **verifies** `episode=` claims before
 proposing a drop, and it **reports net** — a topic too small to pay for its
 own digest is not proposed at all.
 
-**Rollup shrinks navigation and nothing else.** When `doctor` warns
-`index-bloat`, `rollup` collapses a period into one digest-of-digests and
-moves the originals to `archive/` — still reachable by `recall` and `search`,
-every ledger row intact. The rollup digest is yours, not the tool's:
+**Rollup shrinks navigation and nothing else.** When INDEX grows into a real
+share of your window, `rollup` collapses a period into one digest-of-digests
+and moves the originals to `archive/` — still reachable by `recall` and
+`search`, every ledger row intact. The rollup digest is yours, not the tool's:
 synthesizing a quarter is the part a tool cannot do.
+
+**`index-bloat` is not what a rollup is for.** INDEX lists your episodes, so
+its size grows with the shelf by design; its budget grows with the shelf too
+(`INDEX_BASE_TOKENS + INDEX_TOKENS_PER_ENTRY × listed`). Over budget therefore
+means entries are *overpriced*, never that there are too many of them — so
+`doctor` reports the cost of one line, and the fix is to trim it and
+`rebuild`. A rollup would remove entries and their allowance together and
+leave the price where it was. Having the two paired the other way is what made
+"archive a third of your memory" the standard way to silence a formatting
+problem.
 
 **`purge` deletes the working tree, not history.** Retention is opt-in per
 episode (`--retain-until`); `purge` is a dry run until `--apply` — and even

@@ -8,6 +8,63 @@ once code ships.
 
 ## [Unreleased]
 
+### Changed
+
+- **The INDEX budget is a function of shelf size, not a constant — and
+  `index-bloat` no longer prescribes a rollup.** `INDEX_BUDGET_TOKENS = 2500`
+  is replaced by `index_budget(entries) = INDEX_BASE_TOKENS +
+  INDEX_TOKENS_PER_ENTRY × entries` (200 + 80×N).
+
+  The old constant could not be met. INDEX lists episodes, so its size is
+  O(episodes) by construction, and a fixed ceiling stops being reachable once a
+  shelf passes it — at ~30 episodes here. The only mechanism that lowers the
+  number afterwards is `rollup`, and `doctor`'s advice said exactly that ("roll
+  up old episodes"), so a shelf past thirty episodes was permanently in
+  violation with archiving live memory as its only compliant move. Measured on
+  the author's 113-episode shelf: INDEX 9365 tokens against a budget of 2500,
+  with a structural floor of ~3800 even with every description deleted and the
+  link de-duplicated. What was actually wrong was per-line: descriptions were
+  43% of the file.
+
+  The constant also mis-converted its own source. ROADMAP M2's "~10 KB at
+  chars/4 = 2500 tokens" holds only where one character is one byte; this
+  shelf's Cyrillic runs ~1.42 bytes per character, so the two clauses named two
+  different budgets (10 KB ≈ 1800 tokens, 2500 tokens ≈ 14 KB).
+
+  On a linear budget, over budget can only mean *fat entries*, so the finding
+  now reports the per-entry price against its allowance, and its fix is to trim
+  and `rebuild`. A rollup removes entries and their allowance together and
+  cannot move that price — asserted in
+  `test_a_rollup_does_not_buy_headroom_it_did_not_earn`.
+
+- **`rollup` is proposed for size, on its own trigger.** The advisor fires it
+  at `INDEX_CONTEXT_SHARE` (3%) of the caller's stated window rather than off
+  `index-bloat` — a share, so it scales with the host instead of repeating the
+  fixed-constant mistake. When a shelf has both problems the advisor says so
+  and says the rollup will not fix the other one. `advise` now also reports
+  `index_budget_tokens` and `index_entry_tokens`.
+
+  One term of the per-entry allowance is not ours to shrink: docshelf renders
+  each entry's filename twice, as the link label and inside the path, which is
+  ~1500 tokens of pure duplication on a 112-entry shelf. Filed as
+  docshelf-mcp#96; when it lands, `INDEX_TOKENS_PER_ENTRY` drops from 80 to
+  ~67.
+
+### Fixed
+
+- **The description cap applied to the branch nobody used.** `shelve` computed
+  `description if description is not None else _first_sentence(digest)`, and
+  only `_first_sentence` truncated (at 200 chars) — so an explicitly passed
+  description, which is what callers pass, was written through unmeasured. The
+  author's shelf carried 15 descriptions past 200 characters, the longest 420.
+  There is now one cap, `MAX_DESCRIPTION_CHARS = 120`, applied by
+  `clamp_description` on both the write path and the render path
+  (`rebuild.render_meta`). Capping on render as well is what lets a shelf of
+  already-oversized descriptions come back under budget from one `rebuild`,
+  without rewriting an episode: the episode stays the source and keeps its
+  text, the derived line is what is paid for. Truncation is word-aware, marked
+  with an ellipsis, and reported as a `shelve` warning.
+
 ### Documentation
 
 - **Said in the docs what only the code comments knew: `no-ledger-row` and

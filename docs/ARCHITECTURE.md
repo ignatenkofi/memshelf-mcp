@@ -411,7 +411,8 @@ Rules that keep the boundary honest:
 | Failure | Mitigation |
 |---|---|
 | Write-only memory (digests too vague to trigger recall) | Digest contract + referent lint; `doctor` samples episodes and flags digest/body mismatch; success criterion #3 in MANIFEST is the acceptance test |
-| INDEX bloat (hundreds of episodes) | Date-prefixed sort + SUBINDEX thresholds inherited from docshelf; periodic **rollup**: consolidate a quarter's episodes into one digest-of-digests, move originals to an `archive` category linked as a sub-shelf |
+| INDEX grows with the shelf (hundreds of episodes) | Date-prefixed sort + SUBINDEX thresholds inherited from docshelf; periodic **rollup** when navigation reaches a real share of the window: consolidate a quarter's episodes into one digest-of-digests, move originals to an `archive` category linked as a sub-shelf |
+| INDEX *entries* overpriced (`index-bloat`) | Budget is linear in shelf size (`doctor.index_budget`), so the check is on the price of a line, not the count of them; descriptions capped by `clamp_description` on both write and render; `doctor` attributes the overage to the term that caused it. A rollup is explicitly **not** the remedy — it removes entries and their allowance together |
 | Recall misses (grep can't find it) | Tags in frontmatter are search-indexed; digests are written to be greppable (named referents); embeddings remain the documented extension point |
 | Secret leakage | Redaction pass + private default + doctor scan; raw-URL mode gated behind explicit opt-in |
 | Accidental exfiltration (push of a memory shelf to the wrong place) | Default mode has no remote to push to; `git-remote` requires explicit opt-in, private visibility enforced by `doctor`, `autopush: false` |
