@@ -19,6 +19,7 @@ from memshelf_mcp.core.advisor import DEFAULT_BUDGET_TOKENS, STALE_AFTER_TURNS
 from memshelf_mcp.core.archive import ArchiveError
 from memshelf_mcp.core.doctor import DERIVED_STALE_AFTER_HOURS
 from memshelf_mcp.core.episode import EpisodeError
+from memshelf_mcp.core.gitsync import DirtyShelfError, PushRejectedError, SyncDivergedError
 from memshelf_mcp.core.importer import TranscriptError
 from memshelf_mcp.core.init import InitError
 from memshelf_mcp.core.recall import EpisodeNotFound
@@ -114,10 +115,20 @@ def _cmd_shelve(args: argparse.Namespace) -> int:
         date=args.date,
         autocommit=not args.no_commit,
         amend=args.amend,
+        sync=not args.no_sync,
+        push=args.push,
     )
     try:
         result = run_shelve(params)
-    except (DigestContractError, EpisodeError, AmendTargetMissing, EpisodeExists) as exc:
+    except (
+        DigestContractError,
+        EpisodeError,
+        AmendTargetMissing,
+        EpisodeExists,
+        DirtyShelfError,
+        SyncDivergedError,
+        PushRejectedError,
+    ) as exc:
         # Expected, actionable failures: print the fix to stderr, exit non-zero.
         print(str(exc), file=sys.stderr)
         return 1
@@ -395,6 +406,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sh.add_argument("--date", help="YYYY-MM-DD (defaults to today).")
     sh.add_argument("--no-commit", action="store_true", help="Skip the auto-commit.")
+    sh.add_argument(
+        "--no-sync",
+        action="store_true",
+        help="Skip the fetch + fast-forward preflight (#108). Default: sync before "
+        "writing; a dirty tracked tree or a diverged branch refuses the shelve.",
+    )
+    sh.add_argument(
+        "--push",
+        action="store_true",
+        help="Push after the commit; on a rejection, rebase and retry exactly once "
+        "(#108). The report then names the post-push sha.",
+    )
     sh.add_argument(
         "--amend",
         action="store_true",
