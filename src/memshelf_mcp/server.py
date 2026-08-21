@@ -77,19 +77,35 @@ def _error_response(exc: Exception, tool: str) -> str:
 
 
 def _accept_flat_arguments(tool: Any, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Wrap flat arguments in the envelope this tool's schema asks for.
+    """Move a tool's arguments into the envelope its schema asks for.
 
     Driven by the tool's own schema rather than by a blanket rule: only a tool
     whose single required property *is* the envelope gets the treatment, so a
-    tool that one day takes its fields directly is untouched, and a caller who
-    legitimately passes something named ``params`` is never second-guessed.
+    tool that one day takes its fields directly is untouched.
+
+    A wholly flat call is wrapped (#84). A call that already names the envelope
+    keeps it, but anything sitting *beside* it is folded in rather than left
+    where it is — the models forbid unknown keys (#104), and the SDK's own
+    argument validation drops an unknown key at this outer level in silence, so
+    a misspelled flag that missed the envelope would otherwise vanish exactly
+    the way #104 describes. Folded in, it meets the ban and is named in the
+    error. The envelope wins a collision: a key that *is* declared is already
+    answered inside, and the stray copy carries nothing new.
     """
     schema = tool.parameters or {}
     if schema.get("required") != [_ARGUMENT_ENVELOPE]:
         return arguments
-    if _ARGUMENT_ENVELOPE in arguments:
+    if _ARGUMENT_ENVELOPE not in arguments:
+        return {_ARGUMENT_ENVELOPE: arguments}
+    envelope = arguments[_ARGUMENT_ENVELOPE]
+    if not isinstance(envelope, dict):
+        # An envelope of the wrong type is its own validation error, and a
+        # truthful one — do not bury it under a rewrite of the call.
         return arguments
-    return {_ARGUMENT_ENVELOPE: arguments}
+    stray = {k: v for k, v in arguments.items() if k not in schema.get("properties", {})}
+    if not stray:
+        return arguments
+    return {_ARGUMENT_ENVELOPE: {**stray, **envelope}}
 
 
 class _ToolBoundary(MCPServer):
@@ -111,7 +127,9 @@ class _ToolBoundary(MCPServer):
       wrote the obvious shape gets an answer instead of an error naming a field
       that appears nowhere in the tool's documented interface. Whether the
       *published* shape should flatten is a wire-contract decision and stays with
-      the owner in #84 — this makes guessing wrong survivable, not moot.
+      the owner in #84 — this makes guessing wrong survivable, not moot. The same
+      step gathers any key left beside the envelope, so the models' ban on
+      unknown keys (#104) sees it instead of the SDK dropping it unremarked.
     * a validation failure leaves as the same JSON envelope every other failure
       uses, rather than as a transport error.
 
