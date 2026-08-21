@@ -26,6 +26,7 @@ from pathlib import Path
 
 from memshelf_mcp.core.digest import ValidationResult, validate_digest
 from memshelf_mcp.core.episode import CATEGORY_BY_KIND, Frontmatter, compose_episode
+from memshelf_mcp.core.gitsync import SyncReport, hint_command, preflight, push_with_retry
 from memshelf_mcp.core.policy import load_pattern_pack
 from memshelf_mcp.core.redact import RedactionReport, redact
 
@@ -96,6 +97,10 @@ class ShelveResult:
     #: episode's address changed under them — and because "the file moved" is
     #: not visible in `address` alone.
     moved_from: str | None = None
+    #: What the sync around this shelve did (#108): pulled-count, retry count,
+    #: post-push sha or the executable catch-up hint. None when sync was
+    #: disabled or the shelf is not a git repository.
+    sync: SyncReport | None = None
 
 
 def _category_dirs() -> list[str]:
@@ -191,6 +196,8 @@ def shelve(
     extra_patterns: list[tuple[str, str]] | None = None,
     autocommit: bool = True,
     amend: bool = False,
+    sync: bool = True,
+    push: bool = False,
 ) -> ShelveResult:
     """Shelve one episode into an initialized docshelf shelf.
 
@@ -210,6 +217,15 @@ def shelve(
     rendered by ``rebuild`` from the frontmatter, so rewriting the one episode
     recomputes the one row rather than adding a second: the reason a new slug
     was the wrong workaround disappears with it.
+
+    ``sync`` (default on) fetches and fast-forwards the clone *before anything
+    is written* (#108): in bot-draws mode the clone is behind origin by
+    construction, and a dirty tracked tree or a diverged branch refuses the
+    shelve with the fix in the message instead of silently writing onto a
+    stale base. ``push`` (default off) pushes the shelve commit and, on a
+    rejection, rebases and retries exactly once; the result then carries the
+    post-push sha. Either way ``result.sync`` states the outcome explicitly —
+    a clean run says «pulled 0, retries 0» rather than staying silent.
     """
     from docshelf_mcp.core.shelf import DocumentExistsError, Shelf  # heavy dep, lazy
     from docshelf_mcp.core.slugify import slugify
@@ -217,6 +233,23 @@ def shelve(
     root = Path(shelf_root).expanduser().resolve()
     sections = dict(sections or {})
     warnings: list[str] = []
+
+    if push and not autocommit:
+        raise ValueError(
+            "push=True needs autocommit=True — without the commit there is nothing to push"
+        )
+
+    # #108 — sync the clone before anything is written. In bot-draws mode the
+    # clone is behind origin by construction (the bot commits derived files in
+    # response to every push), so writing first and discovering the lag at
+    # `git push` is the normal path to a rejected push, not an edge case
+    # (main-memshelf#146). DirtyShelfError / SyncDivergedError propagate:
+    # both are states where writing first loses work.
+    sync_report: SyncReport | None = None
+    if sync and (root / ".git").exists():
+        sync_report = preflight(root)
+        if sync_report.skipped_reason:
+            warnings.append(sync_report.line())
 
     # Resolve the target before any work: an amend of a slug that isn't there
     # must cost nothing and say so. The path is derived exactly the way
@@ -406,6 +439,27 @@ def shelve(
         staged = [address] if moved_from is None else [address, moved_from]
         committed, sha = git_commit(root, subject, paths=staged)
 
+    # #108 — the push fork. On a rejection push_with_retry rebases and retries
+    # exactly once; a second rejection surfaces git's words (PushRejectedError
+    # propagates — by then the episode is written and committed locally).
+    if push:
+        if not committed:
+            warnings.append("push: nothing was committed — nothing to push")
+        else:
+            if sync_report is None:
+                sync_report = SyncReport()
+            push_with_retry(root, sync_report)
+    if (
+        sync_report is not None
+        and committed
+        and not sync_report.pushed
+        and sync_report.remote
+        and sync_report.branch
+    ):
+        # The commit stayed local — hand the caller the executable catch-up
+        # instead of a sha that the next rebase will rewrite (#146).
+        sync_report.hint = hint_command(root, sync_report.remote, sync_report.branch)
+
     return ShelveResult(
         address=address,
         display_title=display_title or slug,
@@ -418,4 +472,5 @@ def shelve(
         warnings=warnings,
         amended=amend,
         moved_from=moved_from,
+        sync=sync_report,
     )
