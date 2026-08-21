@@ -350,8 +350,10 @@ def memshelf_rebuild(params: RebuildInput) -> str:
 def memshelf_rollup(params: RollupInput) -> str:
     """Archive a period's episodes behind one digest-of-digests (#15).
 
-    INDEX.md rides in every session, so it grows while the budget does not;
-    a rollup turns N INDEX lines into one. The originals move to the `archive/`
+    INDEX.md rides in every session and grows with the shelf; a rollup turns N
+    INDEX lines into one. Use it when navigation has grown large, not to answer
+    `doctor`'s `index-bloat` — that one means an entry is overpriced, and
+    folding entries drops their budget along with them. The originals move to the `archive/`
     sub-shelf — nothing is deleted, recall by id keeps working, and every
     ledger row survives, because an archived episode still holds the mass it
     saved. The digest is YOURS: synthesizing a quarter of digests is the part

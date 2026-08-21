@@ -39,13 +39,19 @@ import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from memshelf_mcp.core.doctor import INDEX_BUDGET_TOKENS
+from memshelf_mcp.core.doctor import (
+    INDEX_BASE_TOKENS,
+    INDEX_TOKENS_PER_ENTRY,
+    index_budget,
+    index_entries,
+)
 from memshelf_mcp.core.rebuild import collect_episodes
 from memshelf_mcp.core.stats import CHARS_PER_TOKEN
 
 __all__ = [
     "DEFAULT_BUDGET_TOKENS",
     "EPISODE_STANDING_COST",
+    "INDEX_CONTEXT_SHARE",
     "MIN_PROPOSAL_TOKENS",
     "STALE_AFTER_TURNS",
     "Advice",
@@ -72,6 +78,27 @@ MIN_PROPOSAL_TOKENS = 10 * EPISODE_STANDING_COST
 #: Idleness is the founding signal ("dead topic, 40 minutes"), but it is only a
 #: signal: a stale occupant is *proposed*, never acted on.
 STALE_AFTER_TURNS = 10
+
+#: Share of the caller's stated context window that navigation may take before
+#: folding a period is worth proposing.
+#:
+#: This is the rollup's trigger, and it deliberately is not ``doctor``'s
+#: ``index-bloat``. The two ask different questions and only one of them has a
+#: rollup for an answer. ``index-bloat`` asks whether a line is too *expensive*
+#: — a formatting fault, which a rollup cannot fix, because folding entries
+#: removes them and their per-entry allowance together and leaves the price of
+#: the remaining lines exactly where it was. A rollup answers the other
+#: question: navigation is priced correctly and there is simply a lot of it,
+#: and it now costs enough of the window to be worth folding old periods into
+#: a digest-of-digests.
+#:
+#: 3% is ~6K tokens of a 200K window, which at the ~80-token entry allowance is
+#: about 75 episodes — near where ROADMAP M2 puts the exercise, and near where
+#: this shelf's own owner has historically reached for a rollup (45 episodes
+#: folded in July, 15 in the August pass). Expressed as a share rather than a
+#: constant so it scales with the host, which is the mistake the fixed 2500
+#: made in the other direction.
+INDEX_CONTEXT_SHARE = 0.03
 
 #: Occupant classes in the breakdown — ROADMAP M2's "static overhead vs live
 #: topics vs stale dumps", plus memshelf's own footprint kept visible.
@@ -129,6 +156,12 @@ class Advice:
     reclaimable_tokens: int
     episodes_on_shelf: int
     index_tokens: int
+    #: What INDEX may cost at this shelf's size, and what one entry costs now.
+    #: Reported next to the total because the total alone cannot be acted on: a
+    #: big INDEX on a big shelf is navigation working as designed, while an
+    #: expensive *entry* is a fault with a fix.
+    index_budget_tokens: int = 0
+    index_entry_tokens: int = 0
     proposals: list[Proposal] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
@@ -157,6 +190,8 @@ class Advice:
             "reclaimable_tokens": self.reclaimable_tokens,
             "episodes_on_shelf": self.episodes_on_shelf,
             "index_tokens": self.index_tokens,
+            "index_budget_tokens": self.index_budget_tokens,
+            "index_entry_tokens": self.index_entry_tokens,
             "proposals": [p.as_dict() for p in self.proposals],
             "notes": self.notes,
             "summary": self.summary,
@@ -278,21 +313,43 @@ def _rollup_proposal(
     *,
     index_tokens: int,
     records: list,
+    budget_tokens: int,
+    listed: int,
 ) -> tuple[Proposal | None, list[str]]:
-    """Propose folding the oldest episodes when INDEX itself is the bloat.
+    """Propose folding the oldest episodes when navigation has grown large.
 
-    This is the other half of ``doctor``'s ``index-bloat`` warning: doctor says
-    the file is too big, the advisor says which episodes to fold to fix it. Both
-    read the same budget constant, so they cannot disagree about the threshold.
+    Triggered by ``INDEX_CONTEXT_SHARE`` of the caller's window — *not* by
+    ``doctor``'s ``index-bloat``. It used to be the other half of that warning,
+    and that pairing was the defect: the warning fired on an absolute budget
+    that a growing shelf could not meet by any formatting, so the advisor's
+    only remedy for a fat line was to archive episodes. On the author's shelf
+    that read as "fold 75 of 113 episodes" for what was a description-length
+    problem. A rollup is now proposed for size and only for size; fat lines are
+    doctor's business and are fixed by trimming them.
     """
     notes: list[str] = []
-    if index_tokens <= INDEX_BUDGET_TOKENS:
-        return None, notes
     live = [r for r in records if not r.archived]
     if not live:
         return None, notes
 
-    excess = index_tokens - INDEX_BUDGET_TOKENS
+    target = int(budget_tokens * INDEX_CONTEXT_SHARE)
+    if index_tokens <= target:
+        return None, notes
+
+    # Say plainly when the shelf has both problems at once, so the rollup is
+    # not mistaken for the fix to the other one. Folding lines that are each
+    # overpriced carries the overprice into whatever is left.
+    if listed and index_tokens > index_budget(listed):
+        notes.append(
+            "INDEX also exceeds its per-entry budget "
+            f"(~{round((index_tokens - INDEX_BASE_TOKENS) / listed)} "
+            f"tokens per entry against {INDEX_TOKENS_PER_ENTRY}); that is doctor's "
+            "`index-bloat` and this rollup will not fix it — trim the long "
+            "descriptions and `memshelf rebuild` first, then re-check whether the "
+            "rollup is still worth making."
+        )
+
+    excess = index_tokens - target
     costs = _index_entry_costs(root)
     # A shelf whose INDEX has not been rendered yet (derived files are the
     # bot's since #58) gives no per-line data; fall back to a flat average.
@@ -318,8 +375,9 @@ def _rollup_proposal(
     reclaimed = max(sum(costs.get(r.id, average) for r in covered) - average, 0)
     if len(covered) >= len(live):
         notes.append(
-            f"INDEX is ~{index_tokens} tokens against a {INDEX_BUDGET_TOKENS} budget; "
-            "folding every episode still may not reach it — the preamble is a floor."
+            f"INDEX is ~{index_tokens} tokens against a target of {target} "
+            f"({INDEX_CONTEXT_SHARE:.0%} of a {_human(budget_tokens)} window); folding "
+            "every episode still may not reach it — the preamble is a floor."
         )
     if _pre_adopt(root, records):
         notes.append(
@@ -334,7 +392,8 @@ def _rollup_proposal(
             target=f"{len(covered)} episode(s) through {until}",
             tokens=reclaimed,
             why=(
-                f"INDEX is ~{index_tokens} tokens (budget {INDEX_BUDGET_TOKENS}) and rides "
+                f"INDEX is ~{index_tokens} tokens — {index_tokens / budget_tokens:.0%} of the "
+                f"window, past the {INDEX_CONTEXT_SHARE:.0%} worth folding for — and it rides "
                 "in every session; folding the oldest episodes shrinks navigation only — "
                 "recall, search and the ledger keep them"
             ),
@@ -362,9 +421,21 @@ def advise(
     missing, which is the honest answer to "show me what's eating my context"
     when nothing was supplied.
     """
+    if budget_tokens <= 0:
+        raise ValueError(f"budget_tokens must be positive, got {budget_tokens}")
     root = Path(shelf_root).expanduser().resolve()
     records, _ = collect_episodes(root)
     index_tokens = _index_tokens(root)
+    # Counted off the rendered INDEX rather than off the episodes, for the
+    # reason in `doctor.index_entries`: the budget has to describe the same
+    # artifact whose size it is being compared to, and under #58 those two
+    # sources disagree whenever the renderer is behind. Counting episodes here
+    # and lines in doctor also made the two tools report different budgets for
+    # the same shelf (760 vs 680, found in review).
+    index_path = root / "INDEX.md"
+    listed = (
+        len(index_entries(index_path.read_text(encoding="utf-8"))) if index_path.is_file() else 0
+    )
     # Same standing-cost model `memshelf stats` reports (INDEX + Σ digests), but
     # read from the episodes instead of `ledger.tsv`: since #58 the ledger is a
     # bot-rendered artifact, so on a branch it can lag or be absent entirely,
@@ -450,7 +521,13 @@ def advise(
             )
         )
 
-    rollup, rollup_notes = _rollup_proposal(root, index_tokens=index_tokens, records=records)
+    rollup, rollup_notes = _rollup_proposal(
+        root,
+        index_tokens=index_tokens,
+        records=records,
+        budget_tokens=budget_tokens,
+        listed=listed,
+    )
     notes.extend(rollup_notes)
     if rollup is not None:
         proposals.append(rollup)
@@ -485,6 +562,8 @@ def advise(
         reclaimable_tokens=sum(p.tokens for p in proposals),
         episodes_on_shelf=len(records),
         index_tokens=index_tokens,
+        index_budget_tokens=index_budget(listed),
+        index_entry_tokens=(round((index_tokens - INDEX_BASE_TOKENS) / listed) if listed else 0),
         proposals=proposals,
         notes=notes,
     )

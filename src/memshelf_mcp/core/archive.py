@@ -1,9 +1,16 @@
 """Retention and rollups — how a shelf stays small enough to read (#15).
 
 Two mechanics from ROADMAP M2, both aimed at the same failure mode: ``INDEX.md``
-is the one file that rides in every session, so it grows linearly with episodes
-while the per-session budget does not. ``doctor`` already warns (``index-bloat``)
-once it crosses the budget; this module is what the warning tells you to do.
+is the one file that rides in every session, and it grows linearly with
+episodes because listing them is its job.
+
+This module is **not** the answer to ``doctor``'s ``index-bloat``, though it
+used to be described that way. The budget grows linearly too
+(``doctor.index_budget``), so exceeding it means an entry is overpriced, and
+folding entries removes them and their allowance together without moving that
+price. A rollup answers the other question: navigation is priced correctly and
+there is simply enough of it to be worth folding old periods away — which the
+advisor triggers on INDEX's share of the context window.
 
 **Rollup** — consolidate a period's episodes into one digest-of-digests and move
 the originals into ``archive/``, a *sub-shelf* at the shelf root. The parent's

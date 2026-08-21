@@ -19,15 +19,150 @@ from pathlib import Path
 
 from memshelf_mcp.core.archive import archived_episodes
 from memshelf_mcp.core.digest import validate_digest
-from memshelf_mcp.core.episode import CATEGORY_BY_KIND, required_sections
+from memshelf_mcp.core.episode import (
+    CATEGORY_BY_KIND,
+    MAX_DESCRIPTION_CHARS,
+    required_sections,
+)
 from memshelf_mcp.core.frontmatter import parse_frontmatter
 from memshelf_mcp.core.policy import load_pattern_pack
 from memshelf_mcp.core.redact import scan, scan_patterns
 from memshelf_mcp.core.remote import PRIVATE, PUBLIC, configured_remotes, remote_visibility
+from memshelf_mcp.core.stats import CHARS_PER_TOKEN
 
-# ROADMAP M2 keeps INDEX under ~10 KB; at chars/4 that is ~2500 tokens injected
-# every session, so warn past it.
-INDEX_BUDGET_TOKENS = 2500
+#: What INDEX costs before it lists a single episode: the H1, the recall-rule
+#: preamble and the category headers. Measured at 135 tokens on the author's
+#: shelf; rounded up, since a shelf may carry a longer preamble or a fourth
+#: category.
+INDEX_BASE_TOKENS = 200
+
+#: What one listed episode may cost, as the sum of the parts a well-formed
+#: entry is made of under the renderer that actually writes them (docshelf's
+#: ``_render_entry``):
+#:
+#: * ~20 — the display title (~80 chars)
+#: * ~27 — the link. docshelf prints the filename twice, once as the label and
+#:   once inside the path, so about half of this is redundancy memshelf cannot
+#:   remove from its side (docshelf-mcp#96). When that lands, this drops to ~67.
+#: * ~30 — the description, held to ``MAX_DESCRIPTION_CHARS`` (120) by
+#:   ``clamp_description`` on both the write and the render path.
+#: *  ~3 — the list markup and the newline.
+INDEX_TOKENS_PER_ENTRY = 80
+
+
+def index_budget(entries: int) -> int:
+    """What INDEX may cost on a shelf that lists ``entries`` episodes.
+
+    A budget, not a ceiling — and the difference is the whole point. INDEX is
+    O(entries) by construction: listing episodes is its job. A *fixed* limit
+    therefore stops being reachable the moment a shelf grows past it, and the
+    only mechanism that can lower the number afterwards is ``rollup``, which
+    buys compliance by archiving live memory. The absolute 2500 this replaces
+    did exactly that: it was derived from ROADMAP M2's "~10 KB" as if one
+    character were one byte (on Cyrillic it is ~1.42, so the two clauses were
+    never the same budget), it went unreachable at ~30 episodes, and on the
+    author's own 113-episode shelf it demanded folding two thirds of the shelf
+    to silence what was actually a formatting problem.
+
+    Making it linear moves the check onto the one quantity formatting can
+    control: the price of a single line. Over budget therefore means *fat
+    entries*, never *many entries* — which is why ``index-bloat`` no longer
+    proposes a rollup, and why the finding reports the per-entry cost rather
+    than only the total.
+    """
+    return INDEX_BASE_TOKENS + INDEX_TOKENS_PER_ENTRY * max(entries, 0)
+
+
+#: The two shapes docshelf's ``_render_entry`` produces for a non-split
+#: document: ``- **Title** — desc — [`name.md`](url)`` with a URL resolver, and
+#: the same line ending in a bare `` `name.md` `` without one.
+_INDEX_ENTRY = re.compile(r"^- \*\*(?P<title>.*?)\*\*(?P<rest>.*)$")
+_INDEX_LINK = re.compile(r"(?:\[`[^`]*`\]\([^)]*\)|`[^`]*\.md`)\s*$")
+
+
+@dataclass
+class IndexEntry:
+    """One rendered INDEX line, split into the parts that can be over budget."""
+
+    title: str
+    description: str
+    link: str
+
+
+def index_entries(text: str) -> list[IndexEntry]:
+    """Parse INDEX.md into its entries.
+
+    The entry count comes from **the rendered file**, not from the episodes on
+    disk, and that is deliberate. The budget is compared against the size of
+    ``INDEX.md``, so counting episodes instead would take the numerator from
+    one artifact and the denominator from another — and under #58 those two
+    disagree by design, since the derived layer is rendered by a bot and is
+    documented as lagging. Measured while reviewing this change: a shelf that
+    had rolled up 30 of 41 episodes but not yet re-rendered reported a
+    fabricated `index-bloat` of "~104 tokens per entry" against a budget for 10
+    entries, for a file that still listed 41 at ~30 each. Reading both numbers
+    off the same file makes the ratio true whatever state the renderer is in.
+    """
+    entries: list[IndexEntry] = []
+    for line in text.splitlines():
+        m = _INDEX_ENTRY.match(line)
+        if not m:
+            continue
+        rest = m.group("rest")
+        link_match = _INDEX_LINK.search(rest)
+        link = link_match.group(0) if link_match else ""
+        description = rest[: len(rest) - len(link)].strip().lstrip("—").strip()
+        entries.append(IndexEntry(m.group("title"), description, link.strip()))
+    return entries
+
+
+#: The per-entry allowance, broken into the terms it was derived from, so an
+#: overage can be attributed instead of guessed at.
+_ENTRY_TERM_ALLOWANCE = {"title": 20, "description": 30, "link": 27}
+
+_ENTRY_TERM_FIX = {
+    "title": (
+        "the titles are what is over: shorten `display_title` in the episodes' "
+        "frontmatter (it is the one entry field with no cap, by design — naming "
+        "an episode is the author's call) and re-render: `memshelf rebuild "
+        "--shelf .`"
+    ),
+    "description": (
+        "the descriptions are what is over. They are capped at "
+        "{cap} chars on write and on render, so this means the derived layer "
+        "predates the cap — re-render it: `memshelf rebuild --shelf .`"
+    ),
+    "link": (
+        "the links are what is over, and that is not fixable from this side: "
+        "docshelf renders each entry's filename twice, once as the label and "
+        "once inside the path (docshelf-mcp#96). Nothing to do here until that "
+        "lands."
+    ),
+}
+
+
+def _index_overspend_fix(entries: list[IndexEntry]) -> str:
+    """Name the entry term that is furthest over its share of the allowance."""
+    totals = {
+        "title": sum(len(e.title) for e in entries),
+        "description": sum(len(e.description) for e in entries),
+        "link": sum(len(e.link) for e in entries),
+    }
+    worst, overage = "", 0
+    for term, chars in totals.items():
+        over = chars // CHARS_PER_TOKEN - _ENTRY_TERM_ALLOWANCE[term] * len(entries)
+        if over > overage:
+            worst, overage = term, over
+    if not worst:
+        # Every term within its share, yet the total is over: the slack is in
+        # markup or the preamble. Say that rather than blame a term at random.
+        return (
+            "no single entry field is over its share — the excess is in the "
+            "preamble or the list markup. Check the shelf's INDEX preamble "
+            "length in `.docshelf.json`."
+        )
+    return _ENTRY_TERM_FIX[worst].format(cap=MAX_DESCRIPTION_CHARS)
+
 
 # How long the derived layer may lag before "not rendered yet" becomes "not
 # being rendered" (#89). A day, because rendering is push-triggered: with the
@@ -584,16 +719,46 @@ def check_shelf(
 
     index = root / "INDEX.md"
     if index.is_file():
-        tokens = len(index.read_text(encoding="utf-8")) // 4
-        if tokens > INDEX_BUDGET_TOKENS:
+        index_text = index.read_text(encoding="utf-8")
+        tokens = len(index_text) // CHARS_PER_TOKEN
+        # Counted off the rendered file, so the budget and the size it is
+        # compared against always describe the same artifact — see
+        # `index_entries`. Archived episodes carry no line and so earn no
+        # allowance, which falls out of this for free.
+        entries = index_entries(index_text)
+        listed = len(entries)
+        budget = index_budget(listed)
+        if listed and tokens > budget:
+            # One decimal, and the overage stated outright. Integer division
+            # here prints "~80 tokens per entry, allowance 80" on a shelf two
+            # tokens over — a finding that reads as self-contradictory and
+            # invites the reader to dismiss it. A marginal case should read as
+            # marginal.
+            per_entry = (tokens - INDEX_BASE_TOKENS) / listed
             findings.append(
                 Finding(
                     "warning",
                     "index-bloat",
                     "INDEX.md",
-                    f"INDEX is ~{tokens} tokens (> {INDEX_BUDGET_TOKENS}); "
-                    "recall pays this every session",
-                    "roll up old episodes (ROADMAP M2)",
+                    f"INDEX is ~{tokens} tokens against a budget of {budget} "
+                    f"({INDEX_BASE_TOKENS} + {INDEX_TOKENS_PER_ENTRY}×{listed} listed), "
+                    f"over by {tokens - budget}: ~{per_entry:.1f} tokens per entry, "
+                    f"allowance {INDEX_TOKENS_PER_ENTRY}. "
+                    "Recall pays this every session.",
+                    # The old advice here was "roll up old episodes", and on a
+                    # linear budget that is not merely unhelpful but wrong: a
+                    # rollup removes entries and their allowance together, so
+                    # it moves the total and the budget by nearly the same
+                    # amount and leaves the per-entry price untouched.
+                    #
+                    # Naming a *fixed* culprit is the same mistake one level
+                    # down. "Trim the descriptions" was wrong the moment
+                    # descriptions became capped on both paths: what is left
+                    # uncapped is the title, so the advice pointed at the one
+                    # field that could no longer be the cause. Measure instead.
+                    "the overage is per-entry, not per-episode — a rollup drops "
+                    "the budget along with the lines and would not fix it. "
+                    + _index_overspend_fix(entries),
                 )
             )
 
