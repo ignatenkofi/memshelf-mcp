@@ -34,7 +34,12 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from memshelf_mcp.core.episode import CATEGORY_BY_KIND, flatten, yaml_scalar
+from memshelf_mcp.core.episode import (
+    CATEGORY_BY_KIND,
+    clamp_description,
+    flatten,
+    yaml_scalar,
+)
 from memshelf_mcp.core.frontmatter import parse_frontmatter
 from memshelf_mcp.core.shelve import LEDGER_HEADER
 
@@ -224,20 +229,37 @@ def render_ledger(records: list[EpisodeRecord]) -> str:
     return LEDGER_HEADER + "".join(row + "\n" for row in rows)
 
 
-def render_meta(records: list[EpisodeRecord], category: str) -> str | None:
+def render_meta(
+    records: list[EpisodeRecord],
+    category: str,
+    warnings: list[str] | None = None,
+) -> str | None:
     """The category's ``.meta.json``, or None when no episode overrides anything.
 
     docshelf reads this file to show a free-form title next to a latin
     filename; an episode that wants neither a title nor a description has no
     business creating an entry.
+
+    The description is clamped here as well as on the write path. The episode
+    stays the source and keeps whatever it carries; what the cap governs is
+    the *derived* line, which is the thing that is actually paid for. Clamping
+    here is also what lets a shelf full of already-oversized descriptions come
+    back under budget from one ``rebuild``, without rewriting a single episode.
+
+    ``warnings`` collects what was truncated. A rebuild that quietly shortened
+    a hundred descriptions and said nothing would be the same silence the cap
+    was added to end.
     """
-    data = {
-        r.filename: {"title": r.display_title or r.id, "description": r.description}
-        for r in records
-        if r.category == category
-        and not r.archived  # archived episodes are the sub-shelf's business
-        and (r.display_title or r.description)
-    }
+    data = {}
+    for r in records:
+        if r.category != category or r.archived:
+            continue  # archived episodes are the sub-shelf's business
+        if not (r.display_title or r.description):
+            continue
+        description, warning = clamp_description(r.description)
+        if warning is not None and warnings is not None:
+            warnings.append(f"{r.filename}: {warning}")
+        data[r.filename] = {"title": r.display_title or r.id, "description": description}
     if not data:
         return None
     import json
@@ -297,7 +319,7 @@ def rebuild(shelf_root: str | Path, *, check: bool = False) -> RebuildReport:
         _apply(
             root,
             f"docs/{category}/.meta.json",
-            render_meta(records, category),
+            render_meta(records, category, report.warnings),
             check=check,
             report=report,
         )

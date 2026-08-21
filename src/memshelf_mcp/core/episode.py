@@ -26,9 +26,63 @@ _REQUIRED_SECTIONS: dict[str, tuple[str, ...]] = {
 _SECTION_ORDER = ("Decisions", "Timeline", "Artifacts", "Open threads", "Raw excerpts")
 
 
+#: How long a description may be where it is *displayed* — one INDEX line.
+#: 120 characters is roughly one clause: enough to tell two episodes of the
+#: same week apart, not enough to become a second digest. The digest is what
+#: summarises the episode, and it lives in the episode; a description that
+#: grows into a summary is paid for in every session by every reader who only
+#: wanted to know which file to open.
+#:
+#: The number is also one of the four terms in ``doctor.INDEX_TOKENS_PER_ENTRY``
+#: (120 chars ≈ 30 tokens of its 80), so moving one means moving the other.
+MAX_DESCRIPTION_CHARS = 120
+
+
 def required_sections(kind: str) -> tuple[str, ...]:
     """The named H2 sections a given kind must carry besides Digest."""
     return _REQUIRED_SECTIONS.get(kind, ())
+
+
+def clamp_description(text: str | None) -> tuple[str, str | None]:
+    """Hold a description to ``MAX_DESCRIPTION_CHARS``: ``(text, warning)``.
+
+    Called on both paths that put a description in front of a reader — the
+    write path in ``shelve`` and the render path in ``rebuild.render_meta`` —
+    because capping only one of them fixes only half a shelf. Capping on write
+    alone leaves every episode already on disk oversized until someone rewrites
+    it; capping on render alone lets the author believe a 400-character
+    description was accepted as written.
+
+    Before this, the cap existed but applied to one branch of one expression:
+    ``shelve`` used ``_first_sentence(digest)`` — truncating at 200 — only when
+    the caller passed no ``description``, and wrote an explicit one through
+    unmeasured. Since callers almost always pass one, the cap was effectively
+    off: the author's shelf carried 15 descriptions past 200 characters, the
+    longest 420, and descriptions alone were 43% of INDEX.
+
+    Truncation is word-aware and marked with an ellipsis, so a cut line reads
+    as cut rather than as a sentence that happens to end oddly.
+    """
+    text = flatten(text or "").strip()
+    if len(text) <= MAX_DESCRIPTION_CHARS:
+        return text, None
+    head = text[: MAX_DESCRIPTION_CHARS - 1]
+    # Prefer a word boundary, but only when one is near the end. Cutting at the
+    # *last* space in the head unconditionally is how a description with one
+    # long unbroken run — a URL, a hash, a wall of one token — collapses to
+    # almost nothing: "Итог: yyyy…(200 more)" came back as "Итог…", and a value
+    # whose head ended in punctuation could `rstrip` away to a bare ellipsis.
+    # Below this floor a hard cut mid-word loses less than a "clean" one.
+    floor = MAX_DESCRIPTION_CHARS * 2 // 3
+    cut = head.rsplit(" ", 1)[0].rstrip(" ,;:—-") if " " in head else ""
+    if len(cut) < floor:
+        cut = head.rstrip()
+    kept = f"{cut}…"
+    return kept, (
+        f"description was {len(text)} chars, cut to {len(kept)} "
+        f"({len(text) - len(cut)} dropped): INDEX shows it in every session. "
+        "Put the full account in the digest, which is what recall fetches."
+    )
 
 
 class EpisodeError(ValueError):
