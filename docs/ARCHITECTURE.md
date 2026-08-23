@@ -25,8 +25,8 @@ Read [`MANIFEST.md`](MANIFEST.md) first for the why; this document is the how.
  ┌───────────────────────┐   ┌────────┴────────┐
  │  CAPTURE              │   │  RECALL         │
  │  serialize episode →  │   │  INDEX →        │
- │  normalized Markdown  │   │  SUBINDEX →     │
- │  + redaction pass     │   │  section fetch  │
+ │  normalized Markdown  │   │  episode →      │
+ │  + redaction pass     │   │  section slice  │
  └───────────┬───────────┘   └────────▲────────┘
              ▼                        │
  ┌───────────────────────┐            │
@@ -38,7 +38,7 @@ Read [`MANIFEST.md`](MANIFEST.md) first for the why; this document is the how.
              ▼                        │
  ┌────────────────────────────────────┴───────┐
  │  STORAGE = docshelf shelf                  │
- │  add_document → split (H2) → SUBINDEX      │
+ │  add_document (whole file, never split)    │
  │  → rebuild INDEX.md → auto-commit          │
  └────────────────────────────────────────────┘
 ```
@@ -62,13 +62,7 @@ memory-shelf/
 └── docs/
     ├── topics/               # closed topics & investigations (the bulk)
     │   ├── .meta.json
-    │   ├── 2026-07-10-unevie-auth-refactor.md
-    │   └── 2026-07-10-unevie-auth-refactor/     # docshelf H2 auto-split
-    │       ├── SUBINDEX.md
-    │       ├── 001-digest.md
-    │       ├── 002-decisions.md
-    │       ├── 003-timeline.md
-    │       └── 004-raw-excerpts.md
+    │   └── 2026-07-10-unevie-auth-refactor.md   # whole episode, one file
     ├── research/             # bulky one-shot dumps (search results, specs read)
     └── sessions/             # session digests — the chronological journal
         └── 2026-07-13-sqst-l16-planning.md
@@ -81,13 +75,16 @@ Conventions:
   questions), not with per-project categories — keeps each INDEX small.
 - **File names** are date-prefixed slugs: `YYYY-MM-DD-<slug>.md`. Natural
   sort = chronological order; the date survives title edits.
-- `split_threshold_bytes` and the H2 splitter are inherited — a long episode
-  becomes section files automatically, and INDEX links to its SUBINDEX.
-  This is why the episode format below mandates H2 skeleton headings.
+- **One episode is one file.** docshelf's H2 splitter is switched off
+  (`split=False`, #109): it wrote section files beside the episode that
+  `shelve` never committed, so the machine that shelved rendered an INDEX no
+  other checkout could produce — a permanent `stale-index`. Sections are
+  sliced out of the episode itself (`recall --section`), which is why the
+  episode format below still mandates H2 skeleton headings. Shelves carrying
+  directories from before the fix: `memshelf prune-splits`.
 
-What we reuse from docshelf verbatim: splitter, indexer, SUBINDEX rendering,
-`read_document` (with its UTF-8 paging), `search`, `doctor`, URL providers,
-`.meta.json` sidecars. What we do **not** use: the PDF/DOCX converters
+What we reuse from docshelf verbatim: indexer, `read_document` (with its
+UTF-8 paging), `search`, `doctor`, URL providers, `.meta.json` sidecars. What we do **not** use: the PDF/DOCX converters
 (episodes are born as Markdown).
 
 **Storage modes** (`memory.storage` in shelf config):
@@ -411,7 +408,7 @@ Rules that keep the boundary honest:
 | Failure | Mitigation |
 |---|---|
 | Write-only memory (digests too vague to trigger recall) | Digest contract + referent lint; `doctor` samples episodes and flags digest/body mismatch; success criterion #3 in MANIFEST is the acceptance test |
-| INDEX grows with the shelf (hundreds of episodes) | Date-prefixed sort + SUBINDEX thresholds inherited from docshelf; periodic **rollup** when navigation reaches a real share of the window: consolidate a quarter's episodes into one digest-of-digests, move originals to an `archive` category linked as a sub-shelf |
+| INDEX grows with the shelf (hundreds of episodes) | Date-prefixed sort; periodic **rollup** when navigation reaches a real share of the window: consolidate a quarter's episodes into one digest-of-digests, move originals to an `archive` category linked as a sub-shelf |
 | INDEX *entries* overpriced (`index-bloat`) | Budget is linear in shelf size (`doctor.index_budget`), so the check is on the price of a line, not the count of them; descriptions capped by `clamp_description` on both write and render; `doctor` attributes the overage to the term that caused it. A rollup is explicitly **not** the remedy — it removes entries and their allowance together |
 | Recall misses (grep can't find it) | Tags in frontmatter are search-indexed; digests are written to be greppable (named referents); embeddings remain the documented extension point |
 | Secret leakage | Redaction pass + private default + doctor scan; raw-URL mode gated behind explicit opt-in |

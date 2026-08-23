@@ -33,6 +33,7 @@ from memshelf_mcp.tools import (
     InitInput,
     LintDigestInput,
     OccupantInput,
+    PruneSplitsInput,
     PurgeInput,
     RebuildInput,
     RecallInput,
@@ -48,6 +49,7 @@ from memshelf_mcp.tools import (
     run_index,
     run_init,
     run_lint_digest,
+    run_prune_splits,
     run_purge,
     run_rebuild,
     run_recall,
@@ -353,6 +355,20 @@ def _cmd_purge(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_prune_splits(args: argparse.Namespace) -> int:
+    result = run_prune_splits(PruneSplitsInput(shelf_path=args.shelf, apply=args.apply))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if result["local"] and not result["applied"]:
+        print("dry run — re-run with --apply to delete", file=sys.stderr)
+    if result["tracked"]:
+        print(
+            "left alone (git tracks them, so every checkout has them): "
+            + ", ".join(result["tracked"]),
+            file=sys.stderr,
+        )
+    return 0
+
+
 def _cmd_import(args: argparse.Namespace) -> int:
     params = ImportInput(
         method=args.method,
@@ -592,6 +608,14 @@ def build_parser() -> argparse.ArgumentParser:
     pu.add_argument("--apply", action="store_true", help="Actually delete (default: dry run).")
     pu.add_argument("--today", help="Treat this ISO date as today.")
     pu.set_defaults(func=_cmd_purge)
+
+    ps = sub.add_parser(
+        "prune-splits",
+        help="Remove H2 split directories git does not track (migration for #109).",
+    )
+    ps.add_argument("--shelf", help=_SHELF_HELP)
+    ps.add_argument("--apply", action="store_true", help="Actually delete (default: dry run).")
+    ps.set_defaults(func=_cmd_prune_splits)
 
     im = sub.add_parser("import", help="Prepare an exported transcript for shelving.")
     im.add_argument("method", choices=["discover", "extract"])

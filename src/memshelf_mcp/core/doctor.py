@@ -28,6 +28,7 @@ from memshelf_mcp.core.frontmatter import parse_frontmatter
 from memshelf_mcp.core.policy import load_pattern_pack
 from memshelf_mcp.core.redact import scan, scan_patterns
 from memshelf_mcp.core.remote import PRIVATE, PUBLIC, configured_remotes, remote_visibility
+from memshelf_mcp.core.splits import local_split_dirs
 from memshelf_mcp.core.stats import CHARS_PER_TOKEN
 
 #: What INDEX costs before it lists a single episode: the H1, the recall-rule
@@ -413,6 +414,35 @@ def _check_derived_freshness(
     ]
 
 
+def _check_local_splits(root: Path) -> list[Finding]:
+    """Name the split directories that exist only in this working copy (#109).
+
+    They are why docshelf's ``stale-index`` can be permanent: the check compares
+    ``INDEX.md`` against a render of what is *on disk*, while the file it reads
+    was rendered from what is *committed*. An untracked split directory puts a
+    section block on one side of that comparison and not the other, so the
+    warning survives every rebuild — and the fix it suggests, run locally,
+    commits links to paths no other checkout has.
+
+    Saying so here is the part memshelf owes the reader: docshelf's finding is
+    true and its advice is wrong, and only this side knows why. ``shelve`` no
+    longer creates these; this covers the shelves that already have them.
+    """
+    return [
+        Finding(
+            "warning",
+            "local-split-dir",
+            rel,
+            "H2 split directory is not committed — it exists only in this working "
+            "copy, so INDEX and search rendered here cannot match any other "
+            "checkout (this is what makes `stale-index` permanent)",
+            "run `memshelf prune-splits --shelf . --apply` from the shelf root — "
+            "the sections are a copy, the episode file keeps all of them",
+        )
+        for rel in local_split_dirs(root)
+    ]
+
+
 def _check_ledger(root: Path) -> list[Finding]:
     """Validate the register itself, not just the episodes it points at.
 
@@ -705,6 +735,7 @@ def check_shelf(
             )
 
     findings.extend(_check_derived_freshness(root, uncounted, now or _utc_now(), stale_after_hours))
+    findings.extend(_check_local_splits(root))
 
     for orphan in sorted(ledger_ids - seen):
         findings.append(
