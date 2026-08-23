@@ -420,6 +420,26 @@ def shelve(
                 description=desc,
                 rebuild_index=False,
                 overwrite=amend,
+                # No H2 split (#109). docshelf splits anything past 50 KiB into
+                # sections beside the episode — and this function commits the
+                # episode alone (`paths=staged` below), so those sections never
+                # reach the repository. That single fact breaks the invariant
+                # the whole derived split rests on: the derived layer stops
+                # being a function of the *committed* episodes. Measured on the
+                # author's shelf, one 53 KB episode: `INDEX.md` rendered here
+                # carries a section block the bot's checkout cannot produce, so
+                # `doctor` reports a `stale-index` that survives every rebuild
+                # (and whose advice, followed, publishes links to paths no
+                # checkout has); `search` answers with
+                # `docs/sessions/<slug>/003-decisions.md`, an address that
+                # exists on one laptop and that `recall --id` then rejects.
+                #
+                # Nothing memshelf offers reads those files: `recall --section`
+                # slices the section out of the episode itself
+                # (core/recall.py::_slice_section), which is why the whole file
+                # is the source and the split was only ever a copy. Directories
+                # left by older versions: `memshelf prune-splits`.
+                split=False,
             )
         except DocumentExistsError as exc:
             # docshelf's guard points at its own Python kwarg. Name the flag the

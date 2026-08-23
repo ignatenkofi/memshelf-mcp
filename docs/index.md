@@ -49,7 +49,7 @@ working memory:
    digest: decisions, rejected alternatives, artifacts, open threads. A weak
    digest is rejected with the exact fix printed.
 3. **Recall** — the agent keeps only `INDEX.md` (kilobytes) + digests in
-   context and fetches exact sections via INDEX → SUBINDEX navigation
+   context and fetches exact sections via INDEX → episode → section slice
    over MCP.
 
 Positioning in one sentence: *claude-mem's loop, git's substrate, docshelf's

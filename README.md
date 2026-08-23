@@ -32,7 +32,7 @@ in context, bodies fetched on demand — to the agent's own working memory:
 2. Each episode carries an LLM-written, contract-validated **digest** that
    preserves decisions, rejected alternatives, artifacts, and open threads.
 3. The agent keeps only `INDEX.md` (kilobytes) + digests in context and
-   **recalls** exact sections via INDEX → SUBINDEX navigation over MCP.
+   **recalls** exact sections via INDEX → episode → section slice over MCP.
 
 Positioning in one sentence: *claude-mem's loop, git's substrate, docshelf's
 navigation* — episodic memory you can grep, diff, review, and carry between
@@ -115,6 +115,7 @@ One verb per job; the same names over MCP (`memshelf_*`) and in the CLI:
 | `purge` | Drop episodes past `retain_until`, then reindex — dry run by default |
 | `resolve` | Settle multi-writer conflicts: regenerate derived, union the recall log |
 | `doctor` | Diagnose: episode schema, digest contract at rest, secret shapes, index bloat |
+| `prune-splits` | CLI only — remove H2 split directories git never got (migration for #109) |
 
 ## The rules the tools enforce
 
@@ -157,6 +158,17 @@ merge conflict:
 If those warnings persist for a *day* while episodes keep arriving, that is a
 different state — the renderer is not lagging, it is stopped — and `doctor`
 says so separately, as `derived-stale` at error severity.
+
+There was a third way to hold `stale-index` forever, and it is fixed rather
+than documented: docshelf split any episode past 50 KiB into section files
+beside it, `shelve` committed the episode alone, and from then on this working
+copy rendered an INDEX no other checkout could produce — no rebuild could
+clear it, and `search` answered with addresses that existed on one machine
+(#109). `shelve` no longer splits. A shelf that already carries such
+directories keeps reporting them as `local-split-dir` until
+`memshelf prune-splits --shelf . --apply` removes them; the episode file holds
+every section, so nothing is lost. It is a dry run without `--apply`, and a
+split directory that *is* committed is reported and left alone.
 
 **`advise` proposes, never writes.** It answers the question the project was
 founded on — *a dead topic has been occupying 30K tokens for forty minutes*.

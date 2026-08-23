@@ -31,6 +31,7 @@ from memshelf_mcp.core.rebuild import rebuild
 from memshelf_mcp.core.recall import read_index, recall, search
 from memshelf_mcp.core.resolve import resolve_shelf
 from memshelf_mcp.core.shelve import shelve
+from memshelf_mcp.core.splits import prune_split_dirs
 from memshelf_mcp.core.stats import banner, compute_stats, episode_mass
 
 SHELF_PATH_ENV = "MEMSHELF_SHELF_PATH"
@@ -471,6 +472,25 @@ def run_purge(params: PurgeInput) -> dict:
     Dry-run by default. Deletes the working-tree file only — git history still
     contains it, and real erasure is a deliberate filter-repo pass."""
     return purge_shelf(params.shelf_path, today=params.today, apply=params.apply).as_dict()
+
+
+class PruneSplitsInput(ShelfScopedInput):
+    apply: bool = Field(
+        default=False,
+        description="Actually delete. Default is a dry run that only lists what would go.",
+    )
+
+
+def run_prune_splits(params: PruneSplitsInput) -> dict:
+    """Remove H2 split directories git does not track (#109).
+
+    The migration for shelves written before `shelve` stopped splitting: those
+    sections were never committed, so the machine holding them renders an INDEX
+    no other checkout can produce and `doctor` reports a `stale-index` no
+    rebuild clears. The episode file keeps every section — the split was a copy.
+    A directory git *does* track is coherent everywhere and is reported, never
+    deleted. CLI-only on purpose: deleting files is a decision a human makes."""
+    return prune_split_dirs(params.shelf_path, apply=params.apply).to_dict()
 
 
 class OccupantInput(BaseModel):

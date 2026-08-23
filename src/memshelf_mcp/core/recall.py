@@ -142,7 +142,13 @@ def recall(
 
 
 def search(shelf_root: str | Path, query: str, *, max_results: int = 10) -> list[SearchHit]:
-    """Grep the shelf; return episode addresses (split docs hit at section level)."""
+    """Grep the shelf; return episode addresses.
+
+    Addresses, not paths that happen to exist here: `shelve` no longer lets
+    docshelf split (#109), so every hit is a committed file and means the same
+    thing in any other checkout. A shelf that still carries a split directory
+    from before the fix will hit inside it — `memshelf prune-splits` clears it.
+    """
     from docshelf_mcp.core.shelf import Shelf
 
     from memshelf_mcp.core.archive import archive_root

@@ -8,6 +8,42 @@ once code ships.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`shelve` no longer lets docshelf split an episode into section files, and
+  `prune-splits` removes the ones older versions left (#109).** docshelf splits
+  any document past 50 KiB with two or more H2 headings into
+  `docs/<category>/<slug>/NNN-*.md`; `shelve` stages the episode path alone, so
+  those files never entered the repository. The shelf's derived layer stopped
+  being a function of its committed episodes: this working copy rendered
+  `INDEX.md` with a section block the bot's checkout could not produce, so
+  `doctor` reported `stale-index` — correctly, permanently, and through every
+  successful bot run. Measured on a shelf with a 53 KB episode: the warning
+  survived regeneration, the prescribed `run rebuild_index` wrote ten INDEX
+  lines pointing at three paths with zero tracked files (broken links, reverted
+  by the bot on its next pass), and `search` returned
+  `docs/sessions/<slug>/003-decisions.md` — an address `recall --id` rejects
+  and no other machine has. Reproduced from scratch on a shelf whose
+  `.gitignore` has no rule for split directories: the ignore rule was never the
+  cause, the single-path commit was.
+
+  Nothing read those files. `recall --section` slices the section out of the
+  episode (`core/recall.py::_slice_section`), and an A/B on copies of a real
+  183-episode shelf, with and without the directory, returned byte-identical
+  output from `recall`, `recall --section`, `index` and `stats`; only `doctor`
+  and `search` differed, and both differed for the worse. So `shelve` now passes
+  `split=False` and one episode stays one file.
+
+  For shelves that already carry such directories: `memshelf prune-splits`
+  (CLI only, dry run by default, `--apply` to delete). It removes only a
+  directory that sits beside an episode of the same stem, on a git shelf, with
+  nothing inside it tracked — a shelf that committed its sections is coherent
+  and is reported instead of touched. `doctor` reports the untracked ones as
+  `local-split-dir` and names the command.
+
+  The `fix: "run rebuild_index"` hint that publishes those broken links lives
+  in docshelf and is filed there.
+
 ### Changed
 
 - **The INDEX budget is a function of shelf size, not a constant — and
