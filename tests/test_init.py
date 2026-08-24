@@ -42,10 +42,17 @@ def test_git_local_default_creates_everything(tmp_path):
     )
 
 
-def test_git_local_commits_without_an_ambient_git_identity(tmp_path, monkeypatch):
-    # A fresh machine, a container, or a CI runner has no user.name/user.email,
-    # and `git commit` refuses outright there — which used to leave a shelf with
-    # a .git directory and no commit at all (silently non-durable, committed=False).
+def _detach_ambient_identity(monkeypatch, *, config_file: str = os.devnull) -> None:
+    """Cut every path by which the host's git identity could reach a subprocess.
+
+    Silencing the config files alone does not reproduce a machine without an
+    identity (#123): with no `user.name`/`user.email` git does not refuse, it
+    *derives* one from the gecos name and `user@hostname`, so on a workstation
+    the commit succeeds under the developer's own name and the fallback branch
+    is never taken. `user.useConfigOnly=true` disables exactly that derivation
+    and nothing else, which is what makes the refusal deterministic on any host
+    rather than a property of how the machine happens to be named.
+    """
     for var in (
         "GIT_AUTHOR_NAME",
         "GIT_AUTHOR_EMAIL",
@@ -54,18 +61,57 @@ def test_git_local_commits_without_an_ambient_git_identity(tmp_path, monkeypatch
         "EMAIL",
     ):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", config_file)
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "user.useConfigOnly")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+
+
+def _author_of_head(root) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), "log", "-1", "--format=%an <%ae>"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def test_git_local_commits_without_an_ambient_git_identity(tmp_path, monkeypatch):
+    # A fresh machine, a container, or a CI runner has no user.name/user.email,
+    # and `git commit` refuses outright there — which used to leave a shelf with
+    # a .git directory and no commit at all (silently non-durable, committed=False).
+    _detach_ambient_identity(monkeypatch)
 
     result = init_shelf(tmp_path, name="test memory")
 
     assert result.committed and result.commit
-    author = subprocess.run(
-        ["git", "-C", str(tmp_path), "log", "-1", "--format=%an <%ae>"],
+    assert _author_of_head(tmp_path) == "memshelf <memshelf@localhost>"
+
+
+def test_git_local_keeps_an_ambient_git_identity(tmp_path, monkeypatch):
+    # The counterpart: where an identity does exist, the fallback must stay out
+    # of the way — neither authoring the commit nor landing in the shelf's own
+    # config. That is what passing it via `-c` buys (core/shelve.py), and until
+    # now nothing held the property down.
+    home = tmp_path / "home"
+    home.mkdir()
+    gitconfig = home / ".gitconfig"
+    gitconfig.write_text(
+        "[user]\n\tname = Ambient Owner\n\temail = owner@example.test\n", encoding="utf-8"
+    )
+    _detach_ambient_identity(monkeypatch, config_file=str(gitconfig))
+
+    shelf = tmp_path / "shelf"
+    result = init_shelf(shelf, name="test memory")
+
+    assert result.committed and result.commit
+    assert _author_of_head(shelf) == "Ambient Owner <owner@example.test>"
+    local = subprocess.run(
+        ["git", "-C", str(shelf), "config", "--local", "--get-regexp", "^user\\."],
         capture_output=True,
         text=True,
-    ).stdout.strip()
-    assert author == "memshelf <memshelf@localhost>"
+    )
+    assert local.stdout.strip() == ""
 
 
 def test_shelf_yml_is_memory_profile(tmp_path):
