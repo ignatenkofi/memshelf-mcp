@@ -922,3 +922,142 @@ def test_amend_of_a_legacy_undated_episode_still_works(tmp_path):
     assert result.address == "docs/topics/legacy.md"
     assert legacy.is_file()
     assert "cookie-session rejected" in legacy.read_text(encoding="utf-8")
+
+
+def _archive_the_episode(root, slug, category="topics"):
+    """Mimic what `rollup` does to one file: move it under archive/docs/."""
+    src = root / "docs" / category / f"{slug}.md"
+    dst = root / "archive" / "docs" / category / f"{slug}.md"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    src.rename(dst)
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "rollup: move"], check=True)
+    return dst
+
+
+def test_amend_reaches_an_archived_episode(tmp_path):
+    """#117: a slug behind a rollup is an episode, not a typo."""
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-07-06-hw-review-tail",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        date="2026-07-06",
+    )
+    archived = _archive_the_episode(root, "2026-07-06-hw-review-tail")
+
+    result = shelve(
+        root,
+        slug="2026-07-06-hw-review-tail",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+        date="2026-07-06",
+        amend=True,
+    )
+    # Rewritten in place, in the archive — no second file under docs/.
+    assert result.address == "archive/docs/topics/2026-07-06-hw-review-tail.md"
+    assert "cookie-session rejected" in archived.read_text(encoding="utf-8")
+    assert not (root / "docs" / "topics" / "2026-07-06-hw-review-tail.md").exists()
+    assert result.committed
+    committed = subprocess.run(
+        ["git", "-C", str(root), "show", "--name-only", "--format=", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert committed == ["archive/docs/topics/2026-07-06-hw-review-tail.md"]
+
+
+def test_amended_archive_episode_keeps_one_ledger_row(tmp_path):
+    """The archived row survives the amend: rendered from the same frontmatter."""
+    from memshelf_mcp.core.rebuild import rebuild as run_rebuild
+
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-07-06-hw-review-tail",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        approx_tokens=4000,
+        date="2026-07-06",
+    )
+    _archive_the_episode(root, "2026-07-06-hw-review-tail")
+    shelve(
+        root,
+        slug="2026-07-06-hw-review-tail",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+        approx_tokens=4000,
+        date="2026-07-06",
+        amend=True,
+    )
+    run_rebuild(root)
+    rows = [
+        line
+        for line in (root / "ledger.tsv").read_text(encoding="utf-8").splitlines()
+        if "2026-07-06-hw-review-tail" in line
+    ]
+    assert len(rows) == 1
+    assert "\t4000\t" in rows[0]
+    # And the render is a fixed point: nothing drifts after the amend.
+    report = run_rebuild(root, check=True)
+    assert report.drifted == []
+
+
+def test_shelving_an_archived_slug_without_amend_is_refused(tmp_path):
+    """A plain shelve over an archived slug would put one slug in two places."""
+    from memshelf_mcp.core.shelve import EpisodeExists
+
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-07-06-hw-review-tail",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        date="2026-07-06",
+    )
+    _archive_the_episode(root, "2026-07-06-hw-review-tail")
+    with pytest.raises(EpisodeExists) as err:
+        shelve(
+            root,
+            slug="2026-07-06-hw-review-tail",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "JWT chosen."},
+            date="2026-07-06",
+        )
+    assert "archive/docs/topics/2026-07-06-hw-review-tail.md" in str(err.value)
+    assert not (root / "docs" / "topics" / "2026-07-06-hw-review-tail.md").exists()
+
+
+def test_kind_change_of_an_archived_episode_is_refused_with_the_reason(tmp_path):
+    """No silent move across the archive boundary — refuse and say why."""
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-07-06-hw-review-tail",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        date="2026-07-06",
+    )
+    archived = _archive_the_episode(root, "2026-07-06-hw-review-tail")
+    before = archived.read_text(encoding="utf-8")
+    with pytest.raises(EpisodeError) as err:
+        shelve(
+            root,
+            slug="2026-07-06-hw-review-tail",
+            kind="session",
+            digest=GOOD_DIGEST,
+            sections={"Timeline": "t", "Open threads": "o"},
+            date="2026-07-06",
+            amend=True,
+        )
+    assert "archive" in str(err.value)
+    assert archived.read_text(encoding="utf-8") == before  # untouched on refusal
