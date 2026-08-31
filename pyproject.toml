@@ -31,7 +31,13 @@ classifiers = [
 # mcp + pydantic. The pure Layer-2/3 core (redaction, digest contract) still
 # needs none of these, so those modules and their tests run stdlib-only.
 dependencies = [
-    "docshelf-mcp>=0.2,<1",
+    # Floor at 0.4.1: enumeration there stops treating H2 split files under
+    # docs/<category>/<slug>/ as shelf documents and reports the directory
+    # itself (uncommitted-split-dir / split-out-of-sync), so a legacy split no
+    # longer makes INDEX diverge between checkouts. Below 0.4.1 the same shelf
+    # renders differently on the machine that holds the split — the #109 world
+    # tests/test_splits.py used to document.
+    "docshelf-mcp>=0.4.1,<1",
     # Пол на 2.0: server.py импортирует MCPServer из mcp.server.mcpserver,
     # которого нет в 1.x (имя 1.x — mcp.server.fastmcp — удалено в 2.0.0),
     # то есть установка 1.x падает на импорте. Потолок по мажору: следующий

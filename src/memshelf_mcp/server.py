@@ -180,11 +180,13 @@ def memshelf_shelve(params: ShelveInput) -> str:
     """Offload one closed topic to the shelf as a durable, indexed episode.
 
     Redacts credential shapes, enforces the digest contract (<=120 words, named
-    referents, no secrets), composes the episode, writes it through docshelf,
-    appends the ledger row, and auto-commits (git shelves only; never pushes). A
-    contract violation comes back as an error carrying the exact fixes — nothing
-    is written. Returns the episode address, redaction report, and any digest
-    warnings.
+    referents, no secrets), composes the episode, and writes it through docshelf,
+    staging and auto-committing the episode alone (git shelves; push is opt-in
+    via `push`). Derived files — the ledger row, INDEX — are NOT written here:
+    they are rendered by `rebuild` or the shelf's bot (#58), and the response
+    says so (`shelf_totals.derived_stale`, `next`). A contract violation comes
+    back as an error carrying the exact fixes — nothing is written. Returns the
+    episode address, redaction report, and any digest warnings.
     """
     try:
         return _serialize(run_shelve(params))

@@ -18,20 +18,29 @@ stay importable without it.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from datetime import date as _date
 from pathlib import Path
 
+from memshelf_mcp.core.archive import archive_root
 from memshelf_mcp.core.digest import ValidationResult, validate_digest
 from memshelf_mcp.core.episode import (
     CATEGORY_BY_KIND,
+    EpisodeError,
     Frontmatter,
     clamp_description,
     compose_episode,
 )
-from memshelf_mcp.core.gitsync import SyncReport, hint_command, preflight, push_with_retry
+from memshelf_mcp.core.gitsync import (
+    SyncReport,
+    hint_command,
+    preflight,
+    publish_branch,
+    push_with_retry,
+)
 from memshelf_mcp.core.policy import load_pattern_pack
 from memshelf_mcp.core.redact import RedactionReport, redact
 
@@ -66,6 +75,28 @@ class DigestContractError(ValueError):
     def __init__(self, result: ValidationResult) -> None:
         self.result = result
         super().__init__("digest rejected:\n" + result.report())
+
+
+#: The date prefix the slug contract declares. Months 01–12, days 01–31: a
+#: transposed «2026-31-08-…» must not pass a check that exists to keep the
+#: shelf's natural sort chronological.
+_DATED_SLUG = re.compile(r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])-")
+
+
+class SlugContractError(ValueError):
+    """Raised when a *new* episode's slug has no date prefix (#101).
+
+    The contract («latin, date-prefixed») was declared in this docstring and in
+    the MCP schema, and enforced nowhere — an undated slug produced an undated
+    file name, silently breaking the property everything downstream stands on:
+    natural sort = chronological order (docs/ARCHITECTURE.md). Same class as
+    the digest contract, so the same enforcement point: refuse before any
+    write, with the fix in the message.
+
+    Only new names are gated. An episode that already lives on the shelf under
+    an undated name (shelved before this check) stays amendable — the contract
+    guards what gets created, not access to what exists.
+    """
 
 
 class AmendTargetMissing(FileNotFoundError):
@@ -123,6 +154,22 @@ def _find_episode(root: Path, doc_stem: str) -> Path | None:
     """
     for category in sorted(set(CATEGORY_BY_KIND.values())):
         candidate = root / "docs" / category / f"{doc_stem}.md"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _find_archived_episode(root: Path, doc_stem: str) -> Path | None:
+    """Where this slug lives in the rollup archive, if anywhere (#117).
+
+    ``archive/docs`` mirrors ``docs`` category for category. A slug behind a
+    rollup is still an episode — ``recall --id`` keeps answering from it — so
+    the write-side lookup must see it too: without this, an amend of an
+    archived episode read as a typo, and the error's advice («shelve it
+    without --amend») was a recipe for one slug in two places.
+    """
+    for category in sorted(set(CATEGORY_BY_KIND.values())):
+        candidate = archive_root(root) / "docs" / category / f"{doc_stem}.md"
         if candidate.is_file():
             return candidate
     return None
@@ -210,6 +257,7 @@ def shelve(
     amend: bool = False,
     sync: bool = True,
     push: bool = False,
+    publish: bool = False,
 ) -> ShelveResult:
     """Shelve one episode into an initialized docshelf shelf.
 
@@ -225,7 +273,9 @@ def shelve(
     ``amend`` rewrites an episode that is already on the shelf, under the same
     slug (#71). The whole pipeline runs again — redaction, the digest contract,
     composition — so an amended episode is exactly as guarded as a fresh one,
-    which a hand-edit of the file never is. Since #58 the ledger row is
+    which a hand-edit of the file never is. An episode a rollup moved to
+    ``archive/docs`` is amended there, in place (#117); changing its kind is
+    refused, because that move would cross the archive boundary. Since #58 the ledger row is
     rendered by ``rebuild`` from the frontmatter, so rewriting the one episode
     recomputes the one row rather than adding a second: the reason a new slug
     was the wrong workaround disappears with it.
@@ -238,6 +288,14 @@ def shelve(
     rejection, rebases and retries exactly once; the result then carries the
     post-push sha. Either way ``result.sync`` states the outcome explicitly —
     a clean run says «pulled 0, retries 0» rather than staying silent.
+
+    ``publish`` (default off, exclusive with ``push``) sends the shelve commit
+    to origin as a **new branch** ``shelve/<slug>`` and reports a one-click
+    compare link (#118): the mode for shelves whose ``main`` requires a PR,
+    where a push rejection is policy — arriving after the ephemeral session
+    already ended — and the episode must leave the container anyway. The
+    local checkout never switches branches, so recall keeps answering from
+    this clone; publication does not depend on any PR being opened.
     """
     from docshelf_mcp.core.shelf import DocumentExistsError, Shelf  # heavy dep, lazy
     from docshelf_mcp.core.slugify import slugify
@@ -249,6 +307,16 @@ def shelve(
     if push and not autocommit:
         raise ValueError(
             "push=True needs autocommit=True — without the commit there is nothing to push"
+        )
+    if publish and not autocommit:
+        raise ValueError(
+            "publish=True needs autocommit=True — without the commit there is nothing to publish"
+        )
+    if publish and push:
+        raise ValueError(
+            "push=True and publish=True are two destinations for one commit — "
+            "pick one: push lands on the current branch, publish opens a new "
+            "shelve/<slug> branch for a PR (#118)"
         )
 
     # #108 — sync the clone before anything is written. In bot-draws mode the
@@ -282,16 +350,44 @@ def shelve(
     # ledger rows for one episode. The lookup therefore spans categories, and
     # both branches below need that answer (#90).
     found_at = _find_episode(root, doc_stem)
+    archived_at = _find_archived_episode(root, doc_stem) if found_at is None else None
     moved_from: str | None = None
+    amend_in_archive = False
 
     if amend:
-        if found_at is None:
+        if found_at is None and archived_at is None:
             raise AmendTargetMissing(
                 f"--amend: no episode {slug!r} on this shelf "
-                f"(no {doc_stem}.md under {', '.join(_category_dirs())}). "
+                f"(no {doc_stem}.md under {', '.join(_category_dirs())} "
+                "or archive/docs/). "
                 "Check the slug, or shelve it without --amend to create it."
             )
-        if found_at != episode_path:
+        if found_at is None:
+            # #117 — the episode is behind a rollup. Amend it where it lives:
+            # a rollup is not a deletion (recall by id still answers from the
+            # archive), so the one guarded write path must reach it too. The
+            # ledger row is untouched by construction — rebuild renders it
+            # from this same frontmatter, archived or not.
+            assert archived_at is not None
+            archived_category = archived_at.parent.name
+            if archived_category != category:
+                # A kind change is a category move. In the live docs/ tree the
+                # move is safe and performed below; out of (or within) the
+                # archive it would silently resurrect or reshuffle what a
+                # rollup deliberately put away — refuse with the reason
+                # instead of guessing.
+                raise EpisodeError(
+                    f"--amend: {slug!r} is archived under "
+                    f"kind-category {archived_category!r} "
+                    f"(archive/docs/{archived_category}/{doc_stem}.md); "
+                    f"amending it as kind={kind!r} would move it across the "
+                    "archive boundary. Keep the original kind, or un-archive "
+                    "it deliberately first — a silent move out of the archive "
+                    "is exactly what this refusal prevents (#117)."
+                )
+            episode_path = archived_at
+            amend_in_archive = True
+        elif found_at != episode_path:
             # A kind change *is* a category change: the field decides which
             # sections doctor demands, so correcting a wrong kind is one of the
             # few things amend is genuinely needed for. Refusing here (which is
@@ -306,6 +402,28 @@ def shelve(
             # land in the new category still carrying its old text, while the
             # caller is told nothing happened.
             moved_from = found_at.relative_to(root).as_posix()
+    elif archived_at is not None:
+        # Not an amend, and the slug lives behind a rollup. Writing a fresh
+        # docs/ file here is the «one slug in two places» the archive lookup
+        # exists to prevent (#117) — the advice names the flag that works.
+        raise EpisodeExists(
+            f"episode {slug!r} is already on this shelf, archived at "
+            f"{archived_at.relative_to(root).as_posix()}. Pass --amend (CLI) / "
+            "amend=True to rewrite it in place, in the archive — a plain "
+            "shelve would create a second episode under the same slug."
+        )
+    elif found_at is None and not _DATED_SLUG.match(slug):
+        # #101 — the slug contract, enforced where the write happens. This
+        # branch is reached only for a genuinely new name: an amend resolved
+        # above (grandfathering pre-contract episodes), an existing slug is
+        # handled below / by docshelf's own exists-guard.
+        suggested = f"{date or _date.today().isoformat()}-{slug}"
+        raise SlugContractError(
+            f"slug {slug!r} has no date prefix; the contract is "
+            f"YYYY-MM-DD-<latin-slug> (e.g. {suggested!r}). File names are "
+            "date-prefixed slugs so natural sort stays chronological "
+            "(docs/ARCHITECTURE.md). Nothing was written."
+        )
     elif found_at is not None and found_at != episode_path:
         # Not an amend, and the slug is already on the shelf under another
         # category. docshelf's own guard cannot see this — it checks the target
@@ -391,7 +509,36 @@ def shelve(
         episode_path.parent.mkdir(parents=True, exist_ok=True)
         (root / moved_from).rename(episode_path)
 
-    # Layer 1 — write through docshelf.
+    # Layer 1 — the write. An archived episode is rewritten in place: docshelf
+    # owns docs/, not archive/, and everything docshelf's write path adds on
+    # top of the bytes — slugified naming, the exists-guard, the sidecar —
+    # was either resolved above (the path exists and is the target) or is
+    # rendered for the archive by `rebuild_archive_index`, not by a sidecar
+    # snapshot here.
+    if amend_in_archive:
+        episode_path.write_text(markdown, encoding="utf-8")
+        return _finish_shelve(
+            root=root,
+            episode_path=episode_path,
+            slug=slug,
+            display_title=display_title,
+            digest=digest,
+            redaction=redaction,
+            validation=validation,
+            shelved_on=shelved_on,
+            mode=mode,
+            approx_tokens=approx_tokens,
+            ledger_notes=ledger_notes,
+            warnings=warnings,
+            amend=amend,
+            moved_from=None,
+            autocommit=autocommit,
+            push=push,
+            publish=publish,
+            sync_report=sync_report,
+        )
+
+    # Write through docshelf.
     shelf = Shelf(root)
 
     # add_document slugifies its `title` into the filename, and docshelf's
@@ -456,6 +603,55 @@ def shelve(
         elif sidecar.is_file() and sidecar.read_text(encoding="utf-8") != sidecar_before:
             sidecar.write_text(sidecar_before, encoding="utf-8")
 
+    return _finish_shelve(
+        root=root,
+        episode_path=episode_path,
+        slug=slug,
+        display_title=display_title,
+        digest=digest,
+        redaction=redaction,
+        validation=validation,
+        shelved_on=shelved_on,
+        mode=mode,
+        approx_tokens=approx_tokens,
+        ledger_notes=ledger_notes,
+        warnings=warnings,
+        amend=amend,
+        moved_from=moved_from,
+        autocommit=autocommit,
+        push=push,
+        publish=publish,
+        sync_report=sync_report,
+    )
+
+
+def _finish_shelve(
+    *,
+    root: Path,
+    episode_path: Path,
+    slug: str,
+    display_title: str | None,
+    digest: str,
+    redaction: RedactionReport,
+    validation: ValidationResult,
+    shelved_on: str,
+    mode: str,
+    approx_tokens: int,
+    ledger_notes: str,
+    warnings: list[str],
+    amend: bool,
+    moved_from: str | None,
+    autocommit: bool,
+    push: bool,
+    publish: bool,
+    sync_report: SyncReport | None,
+) -> ShelveResult:
+    """Everything after the episode's bytes are on disk: commit, push, report.
+
+    Shared by the two write paths — through docshelf into ``docs/`` and in
+    place into ``archive/docs/`` (#117) — so the guarantees stated here hold
+    for both by construction, not by parallel maintenance.
+    """
     address = episode_path.relative_to(root).as_posix()
 
     # The ledger row is no longer written here — it is what `rebuild` will
@@ -489,10 +685,22 @@ def shelve(
             if sync_report is None:
                 sync_report = SyncReport()
             push_with_retry(root, sync_report)
+    # #118 — the branch destination: for a shelf whose main requires a PR, the
+    # episode must leave the container even though no push to main can. The
+    # branch name comes from the file stem (slugified, ref-safe), the local
+    # branch keeps the commit so recall still answers from this checkout.
+    if publish:
+        if not committed:
+            warnings.append("publish: nothing was committed — nothing to publish")
+        else:
+            if sync_report is None:
+                sync_report = SyncReport()
+            publish_branch(root, sync_report, episode_path.stem)
     if (
         sync_report is not None
         and committed
         and not sync_report.pushed
+        and not sync_report.published_branch
         and sync_report.remote
         and sync_report.branch
     ):

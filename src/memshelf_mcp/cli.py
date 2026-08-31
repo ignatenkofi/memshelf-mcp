@@ -23,7 +23,12 @@ from memshelf_mcp.core.gitsync import DirtyShelfError, PushRejectedError, SyncDi
 from memshelf_mcp.core.importer import TranscriptError
 from memshelf_mcp.core.init import InitError
 from memshelf_mcp.core.recall import EpisodeNotFound
-from memshelf_mcp.core.shelve import AmendTargetMissing, DigestContractError, EpisodeExists
+from memshelf_mcp.core.shelve import (
+    AmendTargetMissing,
+    DigestContractError,
+    EpisodeExists,
+    SlugContractError,
+)
 from memshelf_mcp.tools import (
     SHELF_PATH_ENV,
     AdviseInput,
@@ -119,11 +124,13 @@ def _cmd_shelve(args: argparse.Namespace) -> int:
         amend=args.amend,
         sync=not args.no_sync,
         push=args.push,
+        publish=args.publish,
     )
     try:
         result = run_shelve(params)
     except (
         DigestContractError,
+        SlugContractError,
         EpisodeError,
         AmendTargetMissing,
         EpisodeExists,
@@ -433,6 +440,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Push after the commit; on a rejection, rebase and retry exactly once "
         "(#108). The report then names the post-push sha.",
+    )
+    sh.add_argument(
+        "--publish",
+        action="store_true",
+        help="Publish the shelve commit to origin as a NEW branch shelve/<slug> and "
+        "print a one-click compare link (#118) — for shelves whose main requires a "
+        "PR. Exclusive with --push; the checkout never switches branches.",
     )
     sh.add_argument(
         "--amend",

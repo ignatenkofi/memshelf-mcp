@@ -5,10 +5,18 @@ a bot own ``INDEX.md`` on ``main`` while sessions push episodes from anywhere.
 An H2 split directory broke it: docshelf wrote one beside any episode past
 50 KiB, ``shelve`` committed the episode alone, and from then on the machine
 that shelved rendered an INDEX no other checkout could produce. ``doctor``
-called that ``stale-index`` — correctly, and permanently.
+called that ``stale-index`` — correctly, and (on docshelf < 0.4.1) permanently.
+
+docshelf 0.4.1 cured the divergence upstream: enumeration skips split
+directories, so the INDEX rendered next to one is the INDEX every other
+checkout renders, and the directory itself is reported by docshelf's own
+doctor (``uncommitted-split-dir`` / ``split-out-of-sync``). That is why
+pyproject floors the dependency at 0.4.1 — below it these tests would be
+asserting a world the installed library no longer produces.
 
 These tests hold the invariant end to end (shelve → bot render → doctor) and
-cover the migration for shelves that already carry such a directory.
+cover the migration for shelves that already carry such a directory: the
+directory is still reported (our ``local-split-dir``) and still removable.
 """
 
 import shutil
@@ -138,7 +146,11 @@ def test_a_legacy_split_directory_is_reported_and_removable(tmp_path):
     findings = {f.code: f for f in check_shelf(root).findings}
     assert "local-split-dir" in findings
     assert findings["local-split-dir"].path == "docs/topics/2026-08-23-big-episode"
-    assert "stale-index" in findings  # the symptom the directory causes
+    # docshelf >= 0.4.1 skips split directories when enumerating documents, so
+    # the INDEX no longer diverges between checkouts — the old `stale-index`
+    # symptom must NOT fire. The directory is still loudly reported: by us
+    # above, and by docshelf itself (`uncommitted-split-dir`).
+    assert "stale-index" not in findings
 
     dry = prune_split_dirs(root)
     assert dry.local == ["docs/topics/2026-08-23-big-episode"]

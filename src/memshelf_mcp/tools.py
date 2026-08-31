@@ -128,6 +128,13 @@ class ShelveInput(ShelfScopedInput):
         "once (#108). The result then carries the post-push sha — the only sha worth "
         "quoting, since a rebase rewrites the local one.",
     )
+    publish: bool = Field(
+        default=False,
+        description="Publish the shelve commit to origin as a NEW branch shelve/<slug> "
+        "and report a one-click compare link (#118) — the mode for shelves whose main "
+        "requires a PR. Exclusive with `push`; the local checkout never switches "
+        "branches, so recall keeps working from this clone.",
+    )
     amend: bool = Field(
         default=False,
         description="Rewrite an episode already on the shelf, under the same slug (#71): "
@@ -158,8 +165,11 @@ def run_shelve(params: ShelveInput) -> dict:
         amend=params.amend,
         sync=params.sync,
         push=params.push,
+        publish=params.publish,
     )
     totals = compute_stats(params.shelf_path)
+    root = Path(params.shelf_path).expanduser().resolve()
+    on_disk = _episodes_on_disk(root)
     return {
         "status": "ok",
         "address": result.address,
@@ -187,6 +197,10 @@ def run_shelve(params: ShelveInput) -> dict:
             "push_retries": result.sync.push_retries,
             "final_sha": result.sync.final_sha,
             "hint": result.sync.hint,
+            # #118 — the branch destination, stated like everything else.
+            "publish_requested": result.sync.publish_requested,
+            "published_branch": result.sync.published_branch,
+            "compare_url": result.sync.compare_url,
             "summary": result.sync.line(),
         },
         "redaction": {
@@ -197,14 +211,90 @@ def run_shelve(params: ShelveInput) -> dict:
         "digest_warnings": [f.code for f in result.validation.warnings],
         "warnings": result.warnings,
         "ledger_row": result.ledger_row,
+        # #98 — the totals below are read from ledger.tsv, i.e. they describe
+        # the shelf as of the last rebuild, not as of this call: since #58 the
+        # write above added an episode the ledger cannot know about yet. Say
+        # so instead of letting the number quietly disagree with doctor.
         "shelf_totals": {
+            "as_of": "last-rebuild",
             "episodes": totals.episodes,
+            "episodes_on_disk": on_disk,
+            "derived_stale": on_disk != totals.episodes,
             "shelved_mass": totals.shelved_mass,
             "standing_cost": totals.standing_cost,
             "compression_ratio": totals.compression_ratio,
         },
-        "summary": f"+{params.approx_tokens:,} tok shelved · {banner(totals)}",
+        # #99 — what actually makes the derived layer catch up, spelled out for
+        # the shelf at hand instead of left to the caller's memory of #58.
+        "next": _derived_next_step(root, result),
+        "summary": f"+{params.approx_tokens:,} tok shelved · {banner(totals)}"
+        + (
+            f" · derived lag {on_disk - totals.episodes} episode(s), see `next`"
+            if on_disk != totals.episodes
+            else ""
+        ),
     }
+
+
+def _episodes_on_disk(root: Path) -> int:
+    """Episodes as the working tree holds them — docs/ and the rollup archive.
+
+    ``compute_stats`` counts what the last rebuild rendered into ``ledger.tsv``;
+    right after a shelve those two answers differ by construction (#58), and
+    that difference is exactly what the caller must be shown rather than left
+    to discover with doctor a day later (#98).
+    """
+    count = 0
+    for base in (root / "docs", root / "archive" / "docs"):
+        if base.is_dir():
+            count += sum(1 for _ in base.glob("*/*.md"))
+    return count
+
+
+def _derived_next_step(root: Path, result) -> str:
+    """The one action that makes INDEX/ledger include the episode just written.
+
+    Distinguishes the two shelves #99 conflated: with a render bot the answer
+    is *push* (a manual rebuild there recreates the #58 conflict class), and
+    without one the answer is *rebuild in a separate commit*. Bot detection is
+    the pattern's documented location — ``.github/workflows/shelf-derived.yml``
+    — so a shelf with a differently-named bot gets the soft wording, not a
+    wrong command.
+    """
+    bot = (root / ".github" / "workflows" / "shelf-derived.yml").is_file()
+    if result.sync is not None and result.sync.published_branch:
+        link = f" — open the PR: {result.sync.compare_url}" if result.sync.compare_url else ""
+        tail = (
+            "the shelf bot renders derived files after the merge"
+            if bot
+            else "render derived files after the merge (memshelf rebuild, or the shelf's bot)"
+        )
+        return f"episode published as branch {result.sync.published_branch}{link}; {tail}"
+    if not (root / ".git").exists():
+        return (
+            "episode written — derived files (ledger.tsv, INDEX.md) do not "
+            "include it yet: run `memshelf rebuild` (plain shelf — no git, no bot)"
+        )
+    if result.sync is not None and result.sync.pushed:
+        if bot:
+            return "pushed — the shelf bot renders derived files on main; nothing else to do"
+        return (
+            "pushed — no shelf-derived.yml bot on this shelf: run "
+            "`memshelf rebuild` and commit the derived files separately "
+            "(skip that if another bot renders this shelf)"
+        )
+    if result.committed:
+        tail = (
+            "the shelf bot renders derived files after the push"
+            if bot
+            else "then run `memshelf rebuild` in a separate commit "
+            "(skip the rebuild if a bot renders this shelf)"
+        )
+        return f"episode committed locally, not pushed — push it (see sync.hint); {tail}"
+    return (
+        "episode written, not committed (autocommit off) — commit it, and "
+        "render derived files with `memshelf rebuild` or the shelf bot"
+    )
 
 
 class RecallInput(ShelfScopedInput):

@@ -694,7 +694,9 @@ def _bloat_shelf(root, *, entries, title_chars):
     """
     _init(root)
     for n in range(entries):
-        day = f"2026-01-{n + 1:02d}"
+        # Real calendar dates: day 32 of January is not a date, and the slug
+        # contract (#101) rightly refuses one.
+        day = f"2026-{n // 28 + 1:02d}-{n % 28 + 1:02d}"
         shelve(
             root,
             slug=f"{day}-topic-{n}",
@@ -802,3 +804,63 @@ DIGEST_FOR_ROLLUP = (
     "Период свёрнут: решения по middleware закрыты, альтернатива с cookie-session "
     "отвергнута для межсервисных вызовов, ротация общего секрета осталась открытой."
 )
+
+
+# --- #154 option 3: the renderer is judged only on what it could see --------
+
+
+def _shelf_with_origin_and_old_ledger(tmp_path):
+    """A bot shelf as the 2026-08-21 measurement found it: ledger rendered and
+    pushed long ago, and one fresh episode sitting in a local, unpushed commit."""
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    root = _init(tmp_path / "shelf")
+    subprocess.run(["git", "-C", str(root), "checkout", "-qb", "main"], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "init shelf"], check=True)
+    _commit_ledger_at(root, "2026-08-10T09:00:00+00:00")
+    subprocess.run(["git", "-C", str(root), "remote", "add", "origin", str(origin)], check=True)
+    subprocess.run(["git", "-C", str(root), "push", "-qu", "origin", "main"], check=True)
+    shelve(
+        root,
+        slug="2026-08-21-unpushed",
+        kind="topic",
+        digest=(
+            "The renderer writes ledger.tsv from the episodes, so a freshly shelved "
+            "episode has no row until it runs. The decided approach keeps that warning "
+            "as it is. Open: nothing."
+        ),
+        sections={"Decisions": "kept"},
+        approx_tokens=1000,
+        date="2026-08-21",
+    )
+    return origin, root
+
+
+def test_an_unpushed_episode_is_not_a_stalled_renderer(tmp_path):
+    """The 2026-08-21 false verdict, reproduced: doctor blamed the bot for an
+    episode the bot could not see, and the fork's literal reading led straight
+    into the #58 conflict class (main-memshelf#154)."""
+    _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
+
+    report = check_shelf(root, now=datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc))
+
+    assert "derived-stale" not in _codes(report), report.as_dict()
+    finding = next(f for f in report.findings if f.code == "episode-unpushed")
+    assert finding.level == "warning"
+    assert "2026-08-21-unpushed" in finding.detail
+    assert "origin/main" in finding.detail
+    assert "push" in finding.fix and "fetch" in finding.fix
+    assert report.as_dict()["errors"] == 0
+
+
+def test_a_pushed_episode_with_a_stopped_renderer_is_still_an_error(tmp_path):
+    """The other half: once the bot could see the episode, silence IS the bot's."""
+    _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
+    subprocess.run(["git", "-C", str(root), "push", "-q", "origin", "main"], check=True)
+    subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin", "main"], check=True)
+
+    report = check_shelf(root, now=datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc))
+
+    assert "derived-stale" in _codes(report), report.as_dict()
+    assert "episode-unpushed" not in _codes(report)

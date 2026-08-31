@@ -63,6 +63,12 @@ Configure via env:
   it looks like a shelf: `INDEX.md` + `ledger.tsv`).
 - `MEMSHELF_AUTOPUSH=1` — enable the durability push. Set it in ephemeral cloud
   sessions; leave it unset on a persistent host, where you push manually.
+- `MEMSHELF_AUTOPUSH_MODE=branch` — publish to a rescue branch
+  (`shelve/autopush-<utc-timestamp>`) instead of pushing the current branch:
+  the setting for shelves whose `main` requires a PR (#118), where a direct
+  push is refused by policy. Without it the hook still falls back to the
+  rescue branch **when the direct push fails** — a refusal that arrives after
+  the session ended must not cost the episode.
 
 **What the hooks deliberately do NOT do.** A hook is a shell command — it can't
 run the model. So "shelve closed topics before compaction" and "write a session
