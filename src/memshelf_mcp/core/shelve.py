@@ -34,7 +34,13 @@ from memshelf_mcp.core.episode import (
     clamp_description,
     compose_episode,
 )
-from memshelf_mcp.core.gitsync import SyncReport, hint_command, preflight, push_with_retry
+from memshelf_mcp.core.gitsync import (
+    SyncReport,
+    hint_command,
+    preflight,
+    publish_branch,
+    push_with_retry,
+)
 from memshelf_mcp.core.policy import load_pattern_pack
 from memshelf_mcp.core.redact import RedactionReport, redact
 
@@ -251,6 +257,7 @@ def shelve(
     amend: bool = False,
     sync: bool = True,
     push: bool = False,
+    publish: bool = False,
 ) -> ShelveResult:
     """Shelve one episode into an initialized docshelf shelf.
 
@@ -281,6 +288,14 @@ def shelve(
     rejection, rebases and retries exactly once; the result then carries the
     post-push sha. Either way ``result.sync`` states the outcome explicitly —
     a clean run says «pulled 0, retries 0» rather than staying silent.
+
+    ``publish`` (default off, exclusive with ``push``) sends the shelve commit
+    to origin as a **new branch** ``shelve/<slug>`` and reports a one-click
+    compare link (#118): the mode for shelves whose ``main`` requires a PR,
+    where a push rejection is policy — arriving after the ephemeral session
+    already ended — and the episode must leave the container anyway. The
+    local checkout never switches branches, so recall keeps answering from
+    this clone; publication does not depend on any PR being opened.
     """
     from docshelf_mcp.core.shelf import DocumentExistsError, Shelf  # heavy dep, lazy
     from docshelf_mcp.core.slugify import slugify
@@ -292,6 +307,16 @@ def shelve(
     if push and not autocommit:
         raise ValueError(
             "push=True needs autocommit=True — without the commit there is nothing to push"
+        )
+    if publish and not autocommit:
+        raise ValueError(
+            "publish=True needs autocommit=True — without the commit there is nothing to publish"
+        )
+    if publish and push:
+        raise ValueError(
+            "push=True and publish=True are two destinations for one commit — "
+            "pick one: push lands on the current branch, publish opens a new "
+            "shelve/<slug> branch for a PR (#118)"
         )
 
     # #108 — sync the clone before anything is written. In bot-draws mode the
@@ -509,6 +534,7 @@ def shelve(
             moved_from=None,
             autocommit=autocommit,
             push=push,
+            publish=publish,
             sync_report=sync_report,
         )
 
@@ -594,6 +620,7 @@ def shelve(
         moved_from=moved_from,
         autocommit=autocommit,
         push=push,
+        publish=publish,
         sync_report=sync_report,
     )
 
@@ -616,6 +643,7 @@ def _finish_shelve(
     moved_from: str | None,
     autocommit: bool,
     push: bool,
+    publish: bool,
     sync_report: SyncReport | None,
 ) -> ShelveResult:
     """Everything after the episode's bytes are on disk: commit, push, report.
@@ -657,10 +685,22 @@ def _finish_shelve(
             if sync_report is None:
                 sync_report = SyncReport()
             push_with_retry(root, sync_report)
+    # #118 — the branch destination: for a shelf whose main requires a PR, the
+    # episode must leave the container even though no push to main can. The
+    # branch name comes from the file stem (slugified, ref-safe), the local
+    # branch keeps the commit so recall still answers from this checkout.
+    if publish:
+        if not committed:
+            warnings.append("publish: nothing was committed — nothing to publish")
+        else:
+            if sync_report is None:
+                sync_report = SyncReport()
+            publish_branch(root, sync_report, episode_path.stem)
     if (
         sync_report is not None
         and committed
         and not sync_report.pushed
+        and not sync_report.published_branch
         and sync_report.remote
         and sync_report.branch
     ):

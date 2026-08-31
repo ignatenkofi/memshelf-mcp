@@ -128,6 +128,13 @@ class ShelveInput(ShelfScopedInput):
         "once (#108). The result then carries the post-push sha — the only sha worth "
         "quoting, since a rebase rewrites the local one.",
     )
+    publish: bool = Field(
+        default=False,
+        description="Publish the shelve commit to origin as a NEW branch shelve/<slug> "
+        "and report a one-click compare link (#118) — the mode for shelves whose main "
+        "requires a PR. Exclusive with `push`; the local checkout never switches "
+        "branches, so recall keeps working from this clone.",
+    )
     amend: bool = Field(
         default=False,
         description="Rewrite an episode already on the shelf, under the same slug (#71): "
@@ -158,6 +165,7 @@ def run_shelve(params: ShelveInput) -> dict:
         amend=params.amend,
         sync=params.sync,
         push=params.push,
+        publish=params.publish,
     )
     totals = compute_stats(params.shelf_path)
     root = Path(params.shelf_path).expanduser().resolve()
@@ -189,6 +197,10 @@ def run_shelve(params: ShelveInput) -> dict:
             "push_retries": result.sync.push_retries,
             "final_sha": result.sync.final_sha,
             "hint": result.sync.hint,
+            # #118 — the branch destination, stated like everything else.
+            "publish_requested": result.sync.publish_requested,
+            "published_branch": result.sync.published_branch,
+            "compare_url": result.sync.compare_url,
             "summary": result.sync.line(),
         },
         "redaction": {
@@ -250,6 +262,14 @@ def _derived_next_step(root: Path, result) -> str:
     wrong command.
     """
     bot = (root / ".github" / "workflows" / "shelf-derived.yml").is_file()
+    if result.sync is not None and result.sync.published_branch:
+        link = f" — open the PR: {result.sync.compare_url}" if result.sync.compare_url else ""
+        tail = (
+            "the shelf bot renders derived files after the merge"
+            if bot
+            else "render derived files after the merge (memshelf rebuild, or the shelf's bot)"
+        )
+        return f"episode published as branch {result.sync.published_branch}{link}; {tail}"
     if not (root / ".git").exists():
         return (
             "episode written — derived files (ledger.tsv, INDEX.md) do not "

@@ -244,3 +244,150 @@ def test_push_without_autocommit_is_a_loud_misuse(tmp_path):
             autocommit=False,
             push=True,
         )
+
+
+# --- #118: the branch destination -------------------------------------------
+
+
+def _protect_main(origin):
+    """A pre-receive hook standing in for the ruleset: main refuses pushes."""
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text(
+        "#!/bin/sh\n"
+        "while read old new ref; do\n"
+        '  if [ "$ref" = "refs/heads/main" ]; then\n'
+        '    echo "main requires a pull request" >&2\n'
+        "    exit 1\n"
+        "  fi\n"
+        "done\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+
+
+def _shelve_published(work, slug="2026-08-31-ruleset-probe"):
+    return shelve(
+        work,
+        slug=slug,
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections=SECTIONS,
+        date=slug[:10],
+        publish=True,
+    )
+
+
+def test_publish_lands_the_episode_when_main_refuses_pushes(tmp_path):
+    """#118 acceptance: the episode leaves the container even under the ruleset."""
+    origin, work = _shelf_with_origin(tmp_path)
+    _protect_main(origin)
+
+    result = _shelve_published(work)
+
+    branch = result.sync.published_branch
+    assert branch == "shelve/2026-08-31-ruleset-probe"
+    # The episode is on origin, on that branch — not on main.
+    on_branch = _must(origin, "ls-tree", "-r", "--name-only", branch).stdout
+    assert "docs/topics/2026-08-31-ruleset-probe.md" in on_branch
+    on_main = _must(origin, "ls-tree", "-r", "--name-only", "main").stdout
+    assert "2026-08-31-ruleset-probe" not in on_main
+    # The sha in the report is the pushed one — identical to local HEAD, since
+    # nothing rebased (the #146 rule: never quote a sha the push can rewrite).
+    assert result.sync.final_sha == _must(work, "rev-parse", "HEAD").stdout.strip()
+    # The checkout never switched: recall still answers from this clone.
+    assert _must(work, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "main"
+    assert (work / "docs" / "topics" / "2026-08-31-ruleset-probe.md").is_file()
+    # No catch-up hint: the commit is exactly where the mode wants it.
+    assert result.sync.hint is None
+    # A filesystem origin has no web UI — no link is fabricated.
+    assert result.sync.compare_url is None
+    assert "published shelve/2026-08-31-ruleset-probe" in result.sync.line()
+
+
+def test_push_dies_where_publish_survives(tmp_path):
+    """The control: under the same ruleset, push=True is a policy death —
+    the #108 retry cannot help, which is why the branch mode exists."""
+    origin, work = _shelf_with_origin(tmp_path)
+    _protect_main(origin)
+    with pytest.raises(PushRejectedError):
+        shelve(
+            work,
+            slug="2026-08-31-doomed-push",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections=SECTIONS,
+            date="2026-08-31",
+            push=True,
+        )
+
+
+def test_publish_behaves_the_same_without_a_ruleset(tmp_path):
+    """#118 acceptance: behavior must not depend on a setting the tool can't see."""
+    origin, work = _shelf_with_origin(tmp_path)
+    result = _shelve_published(work)
+    assert result.sync.published_branch == "shelve/2026-08-31-ruleset-probe"
+    on_branch = _must(origin, "ls-tree", "-r", "--name-only", result.sync.published_branch).stdout
+    assert "docs/topics/2026-08-31-ruleset-probe.md" in on_branch
+
+
+def test_a_taken_branch_name_retries_qualified_by_the_commit(tmp_path):
+    """Same slug from a second session collides by design; the retry names why."""
+    origin, work = _shelf_with_origin(tmp_path)
+    other = _second_clone(tmp_path, origin, name="other-session")
+    (other / "unrelated.txt").write_text("someone else's shelve\n", encoding="utf-8")
+    _must(other, "add", "-A")
+    _must(other, "commit", "-q", "-m", "other")
+    _must(other, "push", "-q", "origin", "HEAD:refs/heads/shelve/2026-08-31-ruleset-probe")
+
+    result = _shelve_published(work)
+    head7 = _must(work, "rev-parse", "HEAD").stdout.strip()[:7]
+    assert result.sync.published_branch == f"shelve/2026-08-31-ruleset-probe-{head7}"
+
+
+def test_publish_and_push_are_two_destinations(tmp_path):
+    origin, work = _shelf_with_origin(tmp_path)
+    with pytest.raises(ValueError, match="two destinations"):
+        shelve(
+            work,
+            slug="2026-08-31-both",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections=SECTIONS,
+            date="2026-08-31",
+            push=True,
+            publish=True,
+        )
+
+
+def test_publish_needs_a_commit_to_publish(tmp_path):
+    origin, work = _shelf_with_origin(tmp_path)
+    with pytest.raises(ValueError, match="autocommit"):
+        shelve(
+            work,
+            slug="2026-08-31-nocommit",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections=SECTIONS,
+            date="2026-08-31",
+            autocommit=False,
+            publish=True,
+        )
+
+
+def test_web_url_normalizes_the_remotes_that_have_a_web_ui():
+    from memshelf_mcp.core.gitsync import _web_url
+
+    assert (
+        _web_url("git@github.com:ignatenkofi/main-memshelf.git")
+        == "https://github.com/ignatenkofi/main-memshelf"
+    )
+    assert (
+        _web_url("ssh://git@github.com/ignatenkofi/main-memshelf")
+        == "https://github.com/ignatenkofi/main-memshelf"
+    )
+    assert (
+        _web_url("https://github.com/ignatenkofi/main-memshelf.git")
+        == "https://github.com/ignatenkofi/main-memshelf"
+    )
+    assert _web_url("/home/user/origin.git") is None

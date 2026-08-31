@@ -694,7 +694,9 @@ def _bloat_shelf(root, *, entries, title_chars):
     """
     _init(root)
     for n in range(entries):
-        day = f"2026-01-{n + 1:02d}"
+        # Real calendar dates: day 32 of January is not a date, and the slug
+        # contract (#101) rightly refuses one.
+        day = f"2026-{n // 28 + 1:02d}-{n % 28 + 1:02d}"
         shelve(
             root,
             slug=f"{day}-topic-{n}",

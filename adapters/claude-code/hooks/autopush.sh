@@ -16,5 +16,16 @@ if [ -z "$root" ] || [ ! -d "$root/.git" ]; then exit 0; fi
 if ! git -C "$root" remote get-url origin >/dev/null 2>&1; then exit 0; fi
 
 # Best-effort: a failed push must never break the session.
-git -C "$root" push origin HEAD >/dev/null 2>&1 || true
+#
+# Two destinations (#118). Default: push the current branch; if that is
+# refused — a ruleset that requires PRs on main, a clone the derived bot
+# outran — fall back to a rescue branch, because by the time the refusal
+# arrives this session is over and a local-only commit dies with the
+# container. MEMSHELF_AUTOPUSH_MODE=branch skips the doomed direct push
+# entirely (the documented setting for ruleset shelves).
+if [ "${MEMSHELF_AUTOPUSH_MODE:-}" != "branch" ]; then
+  git -C "$root" push origin HEAD >/dev/null 2>&1 && exit 0
+fi
+rescue="shelve/autopush-$(date -u +%Y%m%d-%H%M%S)"
+git -C "$root" push origin "HEAD:refs/heads/$rescue" >/dev/null 2>&1 || true
 exit 0

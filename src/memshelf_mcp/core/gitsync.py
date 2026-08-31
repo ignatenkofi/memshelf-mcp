@@ -27,6 +27,7 @@ failure class main-memshelf#148 files under the same name).
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -84,6 +85,12 @@ class SyncReport:
     #: The executable catch-up when the commit stayed local: exactly
     #: ``git -C <shelf> pull --rebase <remote> <branch> && git -C … push …``.
     hint: str | None = None
+    #: #118 — branch publication. ``published_branch`` is the remote branch
+    #: that now carries the shelve commit; ``compare_url`` opens the PR in one
+    #: click (None when the remote's URL is not a recognizable web host).
+    publish_requested: bool = False
+    published_branch: str | None = None
+    compare_url: str | None = None
 
     def line(self) -> str:
         """One human sentence for CLI output and warnings."""
@@ -93,6 +100,10 @@ class SyncReport:
         if self.push_requested:
             parts.append(f"push retries {self.push_retries}")
             parts.append("pushed" if self.pushed else "not pushed")
+        elif self.publish_requested:
+            parts.append(
+                f"published {self.published_branch}" if self.published_branch else "not published"
+            )
         else:
             parts.append("retries 0")
         return ", ".join(parts)
@@ -186,6 +197,71 @@ def preflight(root: Path) -> SyncReport:
     report.performed = True
     report.commits_pulled = int(behind.stdout.strip() or 0)
     return report
+
+
+def _web_url(remote_url: str) -> str | None:
+    """The remote as a browsable https URL, or None when there isn't one.
+
+    ``git@host:owner/repo(.git)`` and ``ssh://git@host/owner/repo`` normalize;
+    a filesystem path or an exotic scheme yields None — the publish still
+    succeeded, there is just no link to fabricate.
+    """
+    url = remote_url.strip()
+    if url.endswith(".git"):
+        url = url[:-4]
+    if url.startswith(("https://", "http://")):
+        return url
+    m = re.match(r"^(?:ssh://)?git@([^:/]+)[:/](.+)$", url)
+    if m:
+        return f"https://{m.group(1)}/{m.group(2)}"
+    return None
+
+
+def publish_branch(root: Path, report: SyncReport, branch_stem: str) -> None:
+    """Publish the shelve commit as a *new* remote branch (#118).
+
+    For a shelf whose ``main`` requires a PR, ``push_with_retry`` cannot help:
+    the rejection is policy, not a race, and the retry dies the same death —
+    while the session that could fix anything is already over. This path never
+    touches the protected branch: the commit stays on the local branch (recall
+    keeps answering from it) and goes to origin as ``shelve/<slug>``, pushed
+    ``HEAD:refs/heads/…`` so the checkout never switches branches.
+
+    The name is deterministic from the slug — two sessions closing two topics
+    the same day cannot collide. The same slug from a second session *should*
+    collide (same name = same episode); that rejection is retried exactly once
+    under a name qualified by the commit itself, so a half-landed previous
+    attempt cannot brick the shelve.
+
+    ``final_sha`` is set only after the push lands, and — unlike the
+    rebase-retry path — it equals local HEAD: nothing rewrote history, so the
+    sha is stable enough to quote (main-memshelf#146 rule).
+    """
+    report.publish_requested = True
+    if report.remote is None or report.branch is None:
+        target, why = _sync_target(root)
+        if target is None:
+            raise PushRejectedError(f"branch publish requested, but {why}")
+        report.remote, report.branch = target
+
+    head = _git(root, "rev-parse", "HEAD").stdout.strip()
+    name = f"shelve/{branch_stem}"
+    first = _git(root, "push", report.remote, f"HEAD:refs/heads/{name}")
+    if first.returncode != 0:
+        qualified = f"{name}-{head[:7]}"
+        second = _git(root, "push", report.remote, f"HEAD:refs/heads/{qualified}")
+        if second.returncode != 0:
+            raise PushRejectedError(
+                f"branch publish rejected for {name!r} and {qualified!r}; git says:\n"
+                f"{_err(second)}\n(first attempt: {_err(first)})"
+            )
+        name = qualified
+    report.published_branch = name
+    report.final_sha = head
+    remote_url = _git(root, "remote", "get-url", report.remote).stdout
+    web = _web_url(remote_url)
+    if web is not None:
+        report.compare_url = f"{web}/compare/{report.branch}...{name}?expand=1"
 
 
 def push_with_retry(root: Path, report: SyncReport) -> None:
