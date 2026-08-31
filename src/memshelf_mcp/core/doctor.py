@@ -414,6 +414,73 @@ def _check_derived_freshness(
     ]
 
 
+def _split_by_upstream(root: Path, uncounted: list[str]) -> tuple[list[str], list[str], str | None]:
+    """Which uncounted episodes the renderer could even know about (#154 opt. 3).
+
+    The bot renders what it can see — ``origin/<branch>``. An episode that
+    lives only in this checkout (a local commit not yet pushed) is invisible
+    to it *by construction*, so its missing ledger row says nothing about the
+    renderer's health. main-memshelf#154 counts three consecutive false shelf
+    verdicts, all with one shape: the measurement was taken on state the bot
+    could not see; the third one (2026-08-21) was ``doctor`` itself calling
+    ``derived-stale`` on an unpushed commit.
+
+    Returns ``(visible, local_only, upstream)``. The upstream ref is read as
+    this clone last fetched it — deliberately no fetch here: doctor reads, it
+    does not go to the network — so right after a push the split is only as
+    fresh as the last fetch, and the finding's advice says to fetch. Without
+    an upstream (git-local shelf, plain dir) everything is «visible»: there is
+    no renderer to be fair to, and the old behavior is the right one.
+    """
+    if not uncounted or not (root / ".git").exists():
+        return uncounted, [], None
+    proc = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        capture_output=True,
+        text=True,
+    )
+    upstream = proc.stdout.strip()
+    if proc.returncode != 0 or not upstream:
+        return uncounted, [], None
+    visible: list[str] = []
+    local_only: list[str] = []
+    for rel in uncounted:
+        seen = subprocess.run(
+            ["git", "-C", str(root), "cat-file", "-e", f"{upstream}:{rel}"],
+            capture_output=True,
+            text=True,
+        )
+        (visible if seen.returncode == 0 else local_only).append(rel)
+    return visible, local_only, upstream
+
+
+def _check_unpushed_episodes(local_only: list[str], upstream: str | None) -> list[Finding]:
+    """One shelf-level finding for the episodes only this checkout has (#154).
+
+    Warning, not error: this is the normal state between a shelve and its
+    push. It exists to be *named* — the reader deciding «is the bot alive»
+    must see «the bot cannot see these» instead of an error blaming the
+    renderer for state it was never shown.
+    """
+    if not local_only or upstream is None:
+        return []
+    shown = ", ".join(sorted(local_only)[:3])
+    if len(local_only) > 3:
+        shown += f", … (+{len(local_only) - 3})"
+    return [
+        Finding(
+            "warning",
+            "episode-unpushed",
+            "ledger.tsv",
+            f"{len(local_only)} episode(s) exist only in this checkout — {upstream}, as of "
+            f"the last fetch, does not have them, so the render bot cannot see them and "
+            f"their missing ledger rows say nothing about its health: {shown}",
+            "push the shelf, `git fetch`, and re-run doctor; do not rebuild derived "
+            "files by hand on a shelf with a render bot (#58)",
+        )
+    ]
+
+
 def _check_local_splits(root: Path) -> list[Finding]:
     """Name the split directories that exist only in this working copy (#109).
 
@@ -734,7 +801,11 @@ def check_shelf(
                 )
             )
 
-    findings.extend(_check_derived_freshness(root, uncounted, now or _utc_now(), stale_after_hours))
+    # #154 — the renderer is judged only on what it could see: episodes not on
+    # the upstream ref are named separately, not blamed on the bot.
+    visible, local_only, upstream = _split_by_upstream(root, uncounted)
+    findings.extend(_check_derived_freshness(root, visible, now or _utc_now(), stale_after_hours))
+    findings.extend(_check_unpushed_episodes(local_only, upstream))
     findings.extend(_check_local_splits(root))
 
     for orphan in sorted(ledger_ids - seen):
