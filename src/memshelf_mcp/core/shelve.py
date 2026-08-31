@@ -18,6 +18,7 @@ stay importable without it.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -66,6 +67,28 @@ class DigestContractError(ValueError):
     def __init__(self, result: ValidationResult) -> None:
         self.result = result
         super().__init__("digest rejected:\n" + result.report())
+
+
+#: The date prefix the slug contract declares. Months 01–12, days 01–31: a
+#: transposed «2026-31-08-…» must not pass a check that exists to keep the
+#: shelf's natural sort chronological.
+_DATED_SLUG = re.compile(r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])-")
+
+
+class SlugContractError(ValueError):
+    """Raised when a *new* episode's slug has no date prefix (#101).
+
+    The contract («latin, date-prefixed») was declared in this docstring and in
+    the MCP schema, and enforced nowhere — an undated slug produced an undated
+    file name, silently breaking the property everything downstream stands on:
+    natural sort = chronological order (docs/ARCHITECTURE.md). Same class as
+    the digest contract, so the same enforcement point: refuse before any
+    write, with the fix in the message.
+
+    Only new names are gated. An episode that already lives on the shelf under
+    an undated name (shelved before this check) stays amendable — the contract
+    guards what gets created, not access to what exists.
+    """
 
 
 class AmendTargetMissing(FileNotFoundError):
@@ -306,6 +329,18 @@ def shelve(
             # land in the new category still carrying its old text, while the
             # caller is told nothing happened.
             moved_from = found_at.relative_to(root).as_posix()
+    elif found_at is None and not _DATED_SLUG.match(slug):
+        # #101 — the slug contract, enforced where the write happens. This
+        # branch is reached only for a genuinely new name: an amend resolved
+        # above (grandfathering pre-contract episodes), an existing slug is
+        # handled below / by docshelf's own exists-guard.
+        suggested = f"{date or _date.today().isoformat()}-{slug}"
+        raise SlugContractError(
+            f"slug {slug!r} has no date prefix; the contract is "
+            f"YYYY-MM-DD-<latin-slug> (e.g. {suggested!r}). File names are "
+            "date-prefixed slugs so natural sort stays chronological "
+            "(docs/ARCHITECTURE.md). Nothing was written."
+        )
     elif found_at is not None and found_at != episode_path:
         # Not an amend, and the slug is already on the shelf under another
         # category. docshelf's own guard cannot see this — it checks the target

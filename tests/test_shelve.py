@@ -15,6 +15,7 @@ from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.shelve import (  # noqa: E402
     AmendTargetMissing,
     DigestContractError,
+    SlugContractError,
     shelve,
 )
 
@@ -851,3 +852,73 @@ def test_rebuild_caps_descriptions_already_on_disk(tmp_path):
     # The episode is the source and keeps what it carries; the cap governs the
     # derived line, which is the thing that is actually paid for.
     assert oversized in episode.read_text(encoding="utf-8")
+
+
+def test_an_undated_slug_is_refused_before_anything_is_written(tmp_path):
+    """#101: the declared contract (YYYY-MM-DD-slug) gets an enforcement point."""
+    root = _init_shelf(tmp_path)
+    with pytest.raises(SlugContractError) as err:
+        shelve(
+            root,
+            slug="auth-refactor",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "JWT chosen."},
+            date="2026-07-22",
+        )
+    # The message carries the format and the exact fixed form.
+    assert "YYYY-MM-DD" in str(err.value)
+    assert "2026-07-22-auth-refactor" in str(err.value)
+    # Nothing was written, nothing was committed.
+    assert list((tmp_path / "docs" / "topics").iterdir()) == []
+    log = subprocess.run(
+        ["git", "-C", str(root), "log", "--oneline"], capture_output=True, text=True
+    )
+    assert "shelve" not in log.stdout
+
+
+def test_a_transposed_date_prefix_is_refused(tmp_path):
+    """2026-31-08 sorts wrong — exactly what the contract exists to prevent."""
+    root = _init_shelf(tmp_path)
+    with pytest.raises(SlugContractError):
+        shelve(
+            root,
+            slug="2026-31-08-auth-refactor",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "JWT chosen."},
+            date="2026-08-31",
+        )
+
+
+def test_amend_of_a_legacy_undated_episode_still_works(tmp_path):
+    """The contract gates new names, not access to episodes shelved before it."""
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-07-22-legacy",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        date="2026-07-22",
+    )
+    # What a pre-contract shelf actually holds: the same episode under an
+    # undated file name.
+    dated = tmp_path / "docs" / "topics" / "2026-07-22-legacy.md"
+    legacy = tmp_path / "docs" / "topics" / "legacy.md"
+    dated.rename(legacy)
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "legacy name"], check=True)
+
+    result = shelve(
+        root,
+        slug="legacy",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+        date="2026-07-22",
+        amend=True,
+    )
+    assert result.address == "docs/topics/legacy.md"
+    assert legacy.is_file()
+    assert "cookie-session rejected" in legacy.read_text(encoding="utf-8")

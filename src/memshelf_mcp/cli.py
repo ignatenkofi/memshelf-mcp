@@ -23,7 +23,12 @@ from memshelf_mcp.core.gitsync import DirtyShelfError, PushRejectedError, SyncDi
 from memshelf_mcp.core.importer import TranscriptError
 from memshelf_mcp.core.init import InitError
 from memshelf_mcp.core.recall import EpisodeNotFound
-from memshelf_mcp.core.shelve import AmendTargetMissing, DigestContractError, EpisodeExists
+from memshelf_mcp.core.shelve import (
+    AmendTargetMissing,
+    DigestContractError,
+    EpisodeExists,
+    SlugContractError,
+)
 from memshelf_mcp.tools import (
     SHELF_PATH_ENV,
     AdviseInput,
@@ -124,6 +129,7 @@ def _cmd_shelve(args: argparse.Namespace) -> int:
         result = run_shelve(params)
     except (
         DigestContractError,
+        SlugContractError,
         EpisodeError,
         AmendTargetMissing,
         EpisodeExists,
