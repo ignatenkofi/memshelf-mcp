@@ -7,7 +7,10 @@ repository. The result is a shelf whose derived layer is not a function of its
 committed episodes: the machine that shelved renders INDEX with a section block
 the bot's checkout cannot produce, ``doctor`` reports a ``stale-index`` no
 rebuild can clear, and ``search`` answers with addresses that exist on one
-laptop. ``shelve`` now passes ``split=False``, so no new directory appears.
+laptop. ``shelve`` now passes ``split=False``, so no new directory appears —
+and docshelf 0.4.1 (our floor) stopped enumerating split files as documents,
+so a leftover directory no longer skews INDEX; ``search`` still answers from
+it, which is reason enough to prune.
 
 This module is the other half — the shelves that already have one. Detection is
 deliberately narrow:
