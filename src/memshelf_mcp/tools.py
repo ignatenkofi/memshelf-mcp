@@ -105,7 +105,20 @@ class ShelveInput(ShelfScopedInput):
         description="When the work happened, YYYY-MM-DD or A..B; defaults to date/today.",
     )
     session: str | None = None
-    approx_tokens: int = 0
+    approx_tokens: int | None = Field(
+        default=None,
+        description="Rough in-window size in tokens; an eyeball estimate is fine. "
+        "OMIT when nothing was measured or estimated — the episode is then "
+        "recorded as approx_tokens_source: unmeasured instead of a silent 0 "
+        "(#113): absence of measurement must not look like a measured zero.",
+    )
+    approx_tokens_source: Literal["estimate", "measured"] | None = Field(
+        default=None,
+        description="Where the number came from (#79). Default for any passed "
+        "number is 'estimate' — that is what callers actually produce; say "
+        "'measured' only when it was. Contradiction (a source with no number) "
+        "is refused.",
+    )
     mode: Literal["live", "import"] = "live"
     notes: str = ""
     retain_until: str | None = Field(
@@ -157,6 +170,7 @@ def run_shelve(params: ShelveInput) -> dict:
         span=params.span,
         session=params.session,
         approx_tokens=params.approx_tokens,
+        approx_tokens_source=params.approx_tokens_source,
         mode=params.mode,
         notes=params.notes,
         retain_until=params.retain_until,
@@ -227,7 +241,7 @@ def run_shelve(params: ShelveInput) -> dict:
         # #99 — what actually makes the derived layer catch up, spelled out for
         # the shelf at hand instead of left to the caller's memory of #58.
         "next": _derived_next_step(root, result),
-        "summary": f"+{params.approx_tokens:,} tok shelved · {banner(totals)}"
+        "summary": f"+{params.approx_tokens or 0:,} tok shelved · {banner(totals)}"
         + (
             f" · derived lag {on_disk - totals.episodes} episode(s), see `next`"
             if on_disk != totals.episodes

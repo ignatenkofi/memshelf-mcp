@@ -65,7 +65,7 @@ def test_banner_line(tmp_path):
     s = compute_stats(tmp_path)
     line = banner(s)
     assert line.startswith("memshelf: 1 episodes")
-    assert "holds 100K" in line
+    assert "holds ~100K est." in line  # the mass is caller-estimated, and the line says so (#79)
     assert "realized" not in line  # no recalls logged
 
 

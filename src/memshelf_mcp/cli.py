@@ -116,6 +116,7 @@ def _cmd_shelve(args: argparse.Namespace) -> int:
         span=args.span,
         session=args.session,
         approx_tokens=args.approx_tokens,
+        approx_tokens_source=args.approx_tokens_source,
         mode=args.mode,
         notes=args.notes,
         retain_until=args.retain_until,
@@ -426,7 +427,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="When the work happened, YYYY-MM-DD or A..B (defaults to --date/today).",
     )
     sh.add_argument("--session")
-    sh.add_argument("--approx-tokens", type=int, default=0)
+    sh.add_argument(
+        "--approx-tokens",
+        type=int,
+        default=None,
+        help="Rough in-window size in tokens (an estimate is fine). Omit when "
+        "nothing was measured — the episode records approx_tokens_source: "
+        "unmeasured instead of a silent 0 (#113).",
+    )
+    sh.add_argument(
+        "--approx-tokens-source",
+        choices=["estimate", "measured"],
+        default=None,
+        help="Where the number came from (#79); default for any passed number is 'estimate'.",
+    )
     sh.add_argument("--mode", choices=["live", "import"], default="live")
     sh.add_argument("--notes", default="")
     sh.add_argument(

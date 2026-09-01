@@ -21,6 +21,7 @@ from pathlib import Path
 from memshelf_mcp.core.archive import archived_episodes
 from memshelf_mcp.core.digest import validate_digest
 from memshelf_mcp.core.episode import (
+    APPROX_TOKENS_SOURCES,
     CATEGORY_BY_KIND,
     MAX_DESCRIPTION_CHARS,
     required_sections,
@@ -716,6 +717,19 @@ def _check_episode(
                         f"add {field_name!r} to the frontmatter",
                     )
                 )
+        source = fields.get("approx_tokens_source")
+        if source and source not in APPROX_TOKENS_SOURCES:
+            out.append(
+                Finding(
+                    "warning",
+                    "bad-approx-tokens-source",
+                    rel,
+                    f"approx_tokens_source {source!r} is not one of "
+                    f"{'/'.join(APPROX_TOKENS_SOURCES)} — readers splitting "
+                    "estimated from measured mass will misfile this episode",
+                    "set it to estimate, measured or unmeasured (absent = legacy episode)",
+                )
+            )
         approx = fields.get("approx_tokens")
         if approx is not None and not approx.lstrip("-").isdigit():
             out.append(

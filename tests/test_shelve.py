@@ -1061,3 +1061,82 @@ def test_kind_change_of_an_archived_episode_is_refused_with_the_reason(tmp_path)
         )
     assert "archive" in str(err.value)
     assert archived.read_text(encoding="utf-8") == before  # untouched on refusal
+
+
+def test_no_approx_tokens_is_recorded_as_unmeasured_not_zero(tmp_path):
+    """#113: absence of measurement must not look like a measured zero."""
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-09-01-no-number",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        date="2026-09-01",
+    )
+    text = (tmp_path / "docs" / "topics" / "2026-09-01-no-number.md").read_text(encoding="utf-8")
+    assert "approx_tokens: 0" in text
+    assert "approx_tokens_source: unmeasured" in text
+
+
+def test_a_passed_number_defaults_to_an_estimate(tmp_path):
+    """#79: a caller's number is a judgment call unless they claim otherwise."""
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-09-01-eyeballed",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        approx_tokens=120000,
+        date="2026-09-01",
+    )
+    text = (tmp_path / "docs" / "topics" / "2026-09-01-eyeballed.md").read_text(encoding="utf-8")
+    assert "approx_tokens: 120000" in text
+    assert "approx_tokens_source: estimate" in text
+
+
+def test_measured_is_an_explicit_claim(tmp_path):
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-09-01-measured",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        approx_tokens=54321,
+        approx_tokens_source="measured",
+        date="2026-09-01",
+    )
+    text = (tmp_path / "docs" / "topics" / "2026-09-01-measured.md").read_text(encoding="utf-8")
+    assert "approx_tokens_source: measured" in text
+
+
+def test_a_source_without_a_number_is_a_contradiction(tmp_path):
+    root = _init_shelf(tmp_path)
+    with pytest.raises(ValueError, match="contradiction"):
+        shelve(
+            root,
+            slug="2026-09-01-contradiction",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "JWT chosen."},
+            approx_tokens_source="measured",
+            date="2026-09-01",
+        )
+    assert list((tmp_path / "docs" / "topics").iterdir()) == []
+
+
+def test_an_unknown_source_value_is_refused(tmp_path):
+    root = _init_shelf(tmp_path)
+    with pytest.raises(ValueError, match="must be one of"):
+        shelve(
+            root,
+            slug="2026-09-01-badsource",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "JWT chosen."},
+            approx_tokens=10,
+            approx_tokens_source="vibes",
+            date="2026-09-01",
+        )

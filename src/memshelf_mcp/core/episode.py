@@ -118,6 +118,18 @@ def yaml_scalar(text: str) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+#: Where an episode's ``approx_tokens`` came from (#79/#110/#113). The number
+#: is the input to the shelf's headline metrics, and nothing in the data told
+#: a measured value from an eyeballed one — or from no measurement at all,
+#: which arrived as an arithmetically working 0. Three values, closed set:
+#: ``estimate`` (a caller's judgment — the honest default for any number, per
+#: the M0 chars/4 methodology), ``measured`` (an explicit claim), and
+#: ``unmeasured`` (no number was passed; the stored 0 is a placeholder, not a
+#: measurement). Absent on pre-field episodes — readers treat absence as
+#: legacy, not as any of the three.
+APPROX_TOKENS_SOURCES = ("estimate", "measured", "unmeasured")
+
+
 @dataclass(frozen=True)
 class Frontmatter:
     """The episode's frontmatter — and, since #58, the single source for every
@@ -135,6 +147,8 @@ class Frontmatter:
     span: str | None = None
     tags: tuple[str, ...] = ()
     approx_tokens: int = 0
+    #: One of APPROX_TOKENS_SOURCES; "" on legacy episodes (field not written).
+    approx_tokens_source: str = ""
     mode: str = "live"
     session: str | None = None
     date: str | None = None
@@ -161,6 +175,8 @@ class Frontmatter:
             lines.append(f"description: {yaml_scalar(flatten(self.description))}")
         lines.append(f"tags: [{', '.join(self.tags)}]")
         lines.append(f"approx_tokens: {self.approx_tokens}")
+        if self.approx_tokens_source:
+            lines.append(f"approx_tokens_source: {self.approx_tokens_source}")
         lines.append(f"mode: {self.mode}")
         if self.notes:
             lines.append(f"notes: {yaml_scalar(flatten(self.notes))}")

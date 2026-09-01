@@ -56,10 +56,17 @@ def _int(value: str) -> int | None:
 
 
 def banner(stats: Stats) -> str:
-    """One ambient line for session starts and tool output."""
+    """One ambient line for session starts and tool output.
+
+    The mass is labeled an estimate where it is read (#79): the headline
+    number is the sum of caller-passed ``approx_tokens`` — chars/4-grade
+    judgment calls by the shelf's own M0 methodology, not measurements — and
+    nothing in the line said so. ``standing`` and ``realized`` stay unlabeled:
+    they are computed from the artifacts directly.
+    """
     line = (
         f"memshelf: {stats.episodes} episodes · standing {_human(stats.standing_cost)} tok "
-        f"· holds {_human(stats.shelved_mass)} ({stats.compression_ratio}:1)"
+        f"· holds ~{_human(stats.shelved_mass)} est. ({stats.compression_ratio}:1)"
     )
     if stats.realized_savings:
         line += f" · realized saved {_human(stats.realized_savings)}"
