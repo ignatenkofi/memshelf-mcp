@@ -46,7 +46,10 @@ This directory **is** an installable Claude Code plugin (`memshelf`). It bundles
 the `/shelve` skill plus two hooks:
 
 - **`SessionStart`** → injects the shelf `INDEX.md` as context, so recall works
-  from the first turn (`hooks/session-start-index.sh`).
+  from the first turn (`hooks/session-start-index.sh`). No matcher is set, so
+  this fires on **every** session start — including the restart after an
+  auto-compaction, the one moment context is known to have been lost (#112).
+  Reading stops being a choice the agent has to remember to make.
 - **`SessionEnd` + `PreCompact`** → push the shelf so committed episodes survive
   an ephemeral container (`hooks/autopush.sh`) — **opt-in** via
   `MEMSHELF_AUTOPUSH=1`.
@@ -69,6 +72,14 @@ Configure via env:
   push is refused by policy. Without it the hook still falls back to the
   rescue branch **when the direct push fails** — a refusal that arrives after
   the session ended must not cost the episode.
+
+**Rollout order for the reading habit (#112).** The write side of a shelf
+enforces itself (the digest contract refuses); the read side has no trigger,
+so it needs a mechanism, in this order: (1) keep INDEX small — the linear
+budget in `doctor` and the shelf's rollup policy own that; (2) the
+`SessionStart` hook above makes the first read free; (3) recall now logs by
+default (`recall-log.tsv`), so (4) whether the habit took is *measurable* —
+sessions that begin with a read, recalls per compaction — instead of assumed.
 
 **What the hooks deliberately do NOT do.** A hook is a shell command — it can't
 run the model. So "shelve closed topics before compaction" and "write a session

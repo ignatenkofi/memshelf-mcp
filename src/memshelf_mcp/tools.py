@@ -304,8 +304,11 @@ class RecallInput(ShelfScopedInput):
     )
     max_bytes: int = 100_000
     log: bool = Field(
-        default=False,
-        description="Append this recall to recall-log.tsv (feeds realized-economy stats).",
+        default=True,
+        description="Append this recall to recall-log.tsv (feeds realized-economy "
+        "stats). On by default (#112): without the counter there is no way to "
+        "know whether the reading habit ever took; pass false to read without "
+        "a trace.",
     )
 
 

@@ -4,6 +4,8 @@
 
 [![PyPI](https://img.shields.io/pypi/v/memshelf-mcp)](https://pypi.org/project/memshelf-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/memshelf-mcp)](https://pypi.org/project/memshelf-mcp/)
+[![ci](https://github.com/ignatenkofi/memshelf-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/ignatenkofi/memshelf-mcp/actions/workflows/ci.yml)
+[![security](https://github.com/ignatenkofi/memshelf-mcp/actions/workflows/security.yml/badge.svg)](https://github.com/ignatenkofi/memshelf-mcp/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-ignatenkofi.github.io%2Fmemshelf--mcp-blue.svg)](https://ignatenkofi.github.io/memshelf-mcp/)
 [![Sibling: docshelf](https://img.shields.io/badge/sibling-docshelf--mcp-green.svg)](https://github.com/ignatenkofi/docshelf-mcp)

@@ -10,6 +10,7 @@ modes and ``docs/M0.md``.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from collections.abc import Callable
@@ -222,7 +223,7 @@ _STEM_LEN = 5
 
 @dataclass
 class Finding:
-    level: str  # "error" | "warning" | "info"
+    level: str  # "error" | "warning" | "info" | "unknown"
     code: str
     path: str  # relative to the shelf root, or "" for shelf-wide
     detail: str
@@ -245,6 +246,9 @@ class DoctorReport:
             "episodes_checked": self.episodes_checked,
             "errors": sum(f.level == "error" for f in self.findings),
             "warnings": sum(f.level == "warning" for f in self.findings),
+            # The third outcome (#125): a consumer that could not be judged is
+            # counted out loud, never folded into «ok».
+            "unknowns": sum(f.level == "unknown" for f in self.findings),
             "findings": [asdict(f) for f in self.findings],
         }
 
@@ -479,6 +483,105 @@ def _check_unpushed_episodes(local_only: list[str], upstream: str | None) -> lis
             "files by hand on a shelf with a render bot (#58)",
         )
     ]
+
+
+def _find_reference_checkout(root: Path) -> Path | None:
+    """The memshelf-mcp source checkout to judge the served code against.
+
+    Explicit before conventional: ``$MEMSHELF_CHECKOUT`` names one directly
+    (the freshness module's own doctrine — guessed consumers give silent
+    misses); otherwise the documented layout, the tool repo cloned next to
+    the shelf. Nothing found is not «fine» — the caller reports UNKNOWN.
+    """
+    override = os.environ.get("MEMSHELF_CHECKOUT", "").strip()
+    candidates = []
+    if override:
+        candidates.append(Path(override).expanduser())
+    candidates.append(root.parent / "memshelf-mcp" / "src" / "memshelf_mcp")
+    for candidate in candidates:
+        if (candidate / "__init__.py").is_file():
+            return candidate.resolve()
+    return None
+
+
+def _check_served_freshness(root: Path) -> list[Finding]:
+    """Is the code answering this call the code the checkout holds? (#125)
+
+    Twice in one day a merged fix was not acting: a stale pipx binary, then a
+    Claude Desktop extension 121 lines behind main — and both times the
+    version number said nothing, because it had not moved. The owner's
+    decision on #125: freshness is a doctor finding, not a ritual. Composition
+    follows the measured base rates there:
+
+    * ``served-code-differs`` — **error**. Outside the incident this gap was
+      zero at every measurement, so the rule is silent while things are whole
+      and stops sounding exactly when fixed; an open gap must keep sounding.
+    * ``not-a-release`` — **warning**, and only about the consumer serving
+      *this* call: a pin is deliberate and temporary, other environments are
+      not this call's business.
+    * ``freshness-unknown`` — the third outcome, never folded into «ok»: with
+      no checkout to compare against, «don't know» is said aloud (#125's own
+      boundary: lag behind main on a machine with no sources is undetectable
+      by design, and pretending otherwise would be the version-number lie
+      again).
+    * (a) merged-but-unreleased is deliberately **absent**: true for 20
+      straight days at measurement time — 20 days of noise about a normal
+      state — it stays in the CLI probe (``memshelf freshness``) where it is
+      asked for deliberately. Held down by a test.
+
+    Cost: two in-process directory hashes (no consumer spawn — the doctor IS
+    the consumer here), single-digit milliseconds against check_shelf's
+    hundreds.
+    """
+    from memshelf_mcp import __version__
+    from memshelf_mcp.core import freshness
+
+    findings: list[Finding] = []
+    served_dir = Path(__file__).resolve().parent.parent  # …/memshelf_mcp
+    if __version__ and not freshness.is_release_version(__version__):
+        findings.append(
+            Finding(
+                "warning",
+                "not-a-release",
+                "",
+                f"the memshelf answering this call is {__version__} — a local "
+                "build, not a released version",
+                "a pin is a deliberate, temporary state; unpin or release when done",
+            )
+        )
+    checkout = _find_reference_checkout(root)
+    if checkout is None:
+        findings.append(
+            Finding(
+                "unknown",
+                "freshness-unknown",
+                "",
+                "served code cannot be judged: no memshelf-mcp checkout next to "
+                "the shelf and $MEMSHELF_CHECKOUT unset — this is «don't know», "
+                "not «ok» (#125)",
+                "clone memshelf-mcp next to the shelf, or point MEMSHELF_CHECKOUT "
+                "at a checkout; `memshelf freshness` probes installed consumers",
+            )
+        )
+        return findings
+    served_sha = freshness.package_sha(served_dir)
+    reference_sha = served_sha if checkout == served_dir else freshness.package_sha(checkout)
+    if served_sha != reference_sha:
+        findings.append(
+            Finding(
+                "error",
+                "served-code-differs",
+                "",
+                f"the code answering this call ({served_sha[:12]}, {served_dir}) "
+                f"is not the checkout at {checkout} ({reference_sha[:12]}) — a "
+                "merged fix may not be serving; this exact gap once went silent "
+                "for 18h20m (#125)",
+                "resync the consumer (reinstall the package / refresh the "
+                "extension copy) or update the checkout; `memshelf freshness` "
+                "probes every installed consumer",
+            )
+        )
+    return findings
 
 
 def _check_local_splits(root: Path) -> list[Finding]:
@@ -763,6 +866,7 @@ def check_shelf(
         )
 
     findings.extend(_check_ledger(root))
+    findings.extend(_check_served_freshness(root))
 
     ledger_ids = _ledger_ids(root / "ledger.tsv")
     seen: set[str] = set()
