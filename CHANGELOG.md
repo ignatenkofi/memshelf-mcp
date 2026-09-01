@@ -850,3 +850,7 @@ success, and leaves an artifact it would itself call broken.
 - Import mode is first-class; raw transcripts are input-only, never stored.
 - Token accounting (`ledger.tsv`) is built into the core loop.
 - Repository made public 2026-07-13; the dogfood shelf stays private.
+
+[Unreleased]: https://github.com/ignatenkofi/memshelf-mcp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ignatenkofi/memshelf-mcp/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/ignatenkofi/memshelf-mcp/releases/tag/v0.1.0

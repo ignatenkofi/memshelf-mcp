@@ -24,8 +24,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Ends of the supported range (pyproject: requires-python >= 3.10).
-        python-version: ["3.10", "3.12"]
+        # Ends of the declared range (classifiers: 3.10-3.13) — testing both
+        # endpoints is the cheap guard that the classifiers are not lying.
+        python-version: ["3.10", "3.13"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

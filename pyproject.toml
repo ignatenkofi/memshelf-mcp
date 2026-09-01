@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "memshelf-mcp"
 dynamic = ["version"]
-description = "Working-memory shelf for AI agents — offload closed topics to a docshelf shelf as digest-indexed episodes, recall by index."
+description = "Working memory for AI agents: digest-indexed episodes on a git shelf, recalled a section at a time."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -38,11 +38,11 @@ dependencies = [
     # renders differently on the machine that holds the split — the #109 world
     # tests/test_splits.py used to document.
     "docshelf-mcp>=0.4.1,<1",
-    # Пол на 2.0: server.py импортирует MCPServer из mcp.server.mcpserver,
-    # которого нет в 1.x (имя 1.x — mcp.server.fastmcp — удалено в 2.0.0),
-    # то есть установка 1.x падает на импорте. Потолок по мажору: следующий
-    # мажор получает порт и прогон tests/test_stdio_protocol.py, а не
-    # расширенный диапазон.
+    # Floor at 2.0: server.py imports MCPServer from mcp.server.mcpserver,
+    # which 1.x does not have (the 1.x name, mcp.server.fastmcp, was removed
+    # in 2.0.0) — a 1.x install fails at import. Major-version ceiling: the
+    # next major gets a port and a tests/test_stdio_protocol.py run, not a
+    # widened range. The long version of this story: CHANGELOG 0.2.0.
     "mcp>=2.0.0,<3",
     "pydantic>=2.6,<3",
 ]
