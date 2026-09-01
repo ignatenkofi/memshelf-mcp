@@ -28,6 +28,7 @@ from pathlib import Path
 from memshelf_mcp.core.archive import archive_root
 from memshelf_mcp.core.digest import ValidationResult, validate_digest
 from memshelf_mcp.core.episode import (
+    APPROX_TOKENS_SOURCES,
     CATEGORY_BY_KIND,
     EpisodeError,
     Frontmatter,
@@ -247,7 +248,8 @@ def shelve(
     tags: list[str] | None = None,
     span: str | None = None,
     session: str | None = None,
-    approx_tokens: int = 0,
+    approx_tokens: int | None = None,
+    approx_tokens_source: str | None = None,
     mode: str = "live",
     notes: str = "",
     date: str | None = None,
@@ -462,6 +464,33 @@ def shelve(
     if not validation.ok:
         raise DigestContractError(validation)
 
+    # #79/#110/#113 — provenance of the one number the shelf's headline
+    # metrics stand on, decided by the owner 2026-09-01: a source field, not a
+    # schema change. The rule makes absence sayable: no number -> 0 with
+    # source "unmeasured" (an unmeasured episode must not look like a measured
+    # zero); a number without a stated source is an "estimate" — that is what
+    # callers actually pass (M0 methodology, chars/4-grade); "measured" is a
+    # claim the caller makes explicitly. The ledger keeps its six columns
+    # (shelf-spec v0 § 4.4); the field rides in the frontmatter, which is
+    # where rebuild renders the ledger from — data first, column when the
+    # spec gets one.
+    if approx_tokens is None:
+        if approx_tokens_source not in (None, "", "unmeasured"):
+            raise ValueError(
+                f"approx_tokens_source={approx_tokens_source!r} without approx_tokens "
+                "is a contradiction: a source asserts where a number came from, "
+                "and there is no number"
+            )
+        approx_tokens = 0
+        approx_tokens_source = "unmeasured"
+    else:
+        approx_tokens_source = approx_tokens_source or "estimate"
+    if approx_tokens_source not in APPROX_TOKENS_SOURCES:
+        raise ValueError(
+            f"approx_tokens_source must be one of {APPROX_TOKENS_SOURCES}, "
+            f"got {approx_tokens_source!r}"
+        )
+
     # SPEC 5.2 makes `span` REQUIRED; a live episode is almost always
     # single-day, so default it to the episode date rather than reject (#56).
     # An explicit span (multi-day, or import backfill) always wins.
@@ -490,6 +519,7 @@ def shelve(
         span=span,
         tags=tuple(tags or ()),
         approx_tokens=approx_tokens,
+        approx_tokens_source=approx_tokens_source,
         mode=mode,
         session=session,
         date=shelved_on,

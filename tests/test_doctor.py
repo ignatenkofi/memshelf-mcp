@@ -951,3 +951,27 @@ def test_merged_but_unreleased_stays_out_of_doctor(tmp_path, monkeypatch):
     _checkout_beside(root)
     codes = _codes(check_shelf(root))  # must not raise
     assert "served-code-differs" not in codes
+
+
+def test_a_bad_approx_tokens_source_is_a_warning_and_absence_is_not(tmp_path):
+    """#79/#113: the field's value set is closed; legacy episodes carry none."""
+    root = _init(tmp_path)
+    _write_raw(
+        root,
+        "topics",
+        "2026-09-01-badsource",
+        _fm("2026-09-01-badsource", **{"approx_tokens_source": "vibes"})
+        + "\n## Digest\nA decided change; nothing open.\n\n## Decisions\nX over Y.\n",
+    )
+    _write_raw(
+        root,
+        "topics",
+        "2026-09-01-legacy",
+        _fm("2026-09-01-legacy") + "\n## Digest\nA decided change; nothing open.\n\n"
+        "## Decisions\nX over Y.\n",
+    )
+    report = check_shelf(root)
+    findings = {f.code: f for f in report.findings}
+    assert "bad-approx-tokens-source" in findings
+    assert findings["bad-approx-tokens-source"].path.endswith("2026-09-01-badsource.md")
+    assert findings["bad-approx-tokens-source"].level == "warning"
