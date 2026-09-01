@@ -391,3 +391,45 @@ def test_web_url_normalizes_the_remotes_that_have_a_web_ui():
         == "https://github.com/ignatenkofi/main-memshelf"
     )
     assert _web_url("/home/user/origin.git") is None
+
+
+def test_a_dirty_recall_log_does_not_block_a_shelve(tmp_path):
+    """#112: recall logs by default, and reading memory must never refuse
+    writing it — the log is append-only telemetry no renderer touches."""
+    origin, work = _shelf_with_origin(tmp_path)
+    (work / "recall-log.tsv").write_text("ts\tepisode\tfetched\tsaved\n", encoding="utf-8")
+    _must(work, "add", "-A")
+    _must(work, "commit", "-q", "-m", "track the recall log")
+    _must(work, "push", "-q", "origin", "main")
+    with (work / "recall-log.tsv").open("a", encoding="utf-8") as fh:
+        fh.write("2026-08-31T17:00Z\tx\t100\t900\n")
+
+    result = shelve(
+        work,
+        slug="2026-08-31-after-a-logged-recall",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections=SECTIONS,
+        date="2026-08-31",
+    )
+    assert result.committed
+    # The log's local appends survived, uncommitted — the shelve staged only
+    # the episode, exactly as before.
+    assert "2026-08-31T17:00Z" in (work / "recall-log.tsv").read_text(encoding="utf-8")
+
+
+def test_any_other_dirty_tracked_file_still_refuses(tmp_path):
+    """The exemption is one file, not a loophole."""
+    origin, work = _shelf_with_origin(tmp_path)
+    index = work / "INDEX.md"
+    assert index.is_file()  # tracked since the init commit — a real guard case
+    index.write_text(index.read_text(encoding="utf-8") + "edited by hand\n", encoding="utf-8")
+    with pytest.raises(DirtyShelfError):
+        shelve(
+            work,
+            slug="2026-08-31-blocked",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections=SECTIONS,
+            date="2026-08-31",
+        )

@@ -139,11 +139,19 @@ def _sync_target(root: Path) -> tuple[tuple[str, str] | None, str | None]:
     return (remote, branch), None
 
 
+#: Tracked files the dirty-tree guard ignores. recall-log.tsv is append-only
+#: read telemetry that recall writes on every logged read (on by default since
+#: #112) and that no renderer ever touches — so local appends survive a
+#: fast-forward, and refusing to *write memory* because someone *read memory*
+#: would invert the shelf's priorities. Everything else stays guarded.
+_DIRTY_EXEMPT = {"recall-log.tsv"}
+
+
 def _dirty_tracked(root: Path) -> list[str]:
     """Paths of modified *tracked* files. Untracked scratch does not count —
     it cannot be damaged by a fast-forward and must not block a shelve."""
     out = _git(root, "status", "--porcelain", "--untracked-files=no").stdout
-    return [line[3:] for line in out.splitlines() if line.strip()]
+    return [line[3:] for line in out.splitlines() if line.strip() and line[3:] not in _DIRTY_EXEMPT]
 
 
 def preflight(root: Path) -> SyncReport:

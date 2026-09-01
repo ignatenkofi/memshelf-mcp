@@ -482,7 +482,17 @@ def build_parser() -> argparse.ArgumentParser:
     rc.add_argument("--section", help="Fetch only this H2 section (e.g. Decisions).")
     rc.add_argument("--max-bytes", type=int, default=100_000)
     rc.add_argument(
-        "--log", action="store_true", help="Log this recall (feeds realized-economy stats)."
+        "--log",
+        action="store_true",
+        default=True,
+        help="Log this recall to recall-log.tsv (feeds realized-economy stats). "
+        "On by default (#112).",
+    )
+    rc.add_argument(
+        "--no-log",
+        dest="log",
+        action="store_false",
+        help="Read without appending to recall-log.tsv.",
     )
     rc.set_defaults(func=_cmd_recall)
 
