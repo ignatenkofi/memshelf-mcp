@@ -300,6 +300,12 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_freshness(args: argparse.Namespace) -> int:
+    from memshelf_mcp.core.freshness import main as freshness_main
+
+    return freshness_main([args.repo] if args.repo else [])
+
+
 def _cmd_doctor(args: argparse.Namespace) -> int:
     result = run_doctor(
         DoctorInput(
@@ -572,6 +578,20 @@ def build_parser() -> argparse.ArgumentParser:
         "renderer normally answers in minutes should pick a much shorter one.",
     )
     dc.set_defaults(func=_cmd_doctor)
+
+    fr = sub.add_parser(
+        "freshness",
+        help="Probe installed consumers (pipx, Desktop extension) against the working "
+        "tree: which code actually answers calls, and is anything merged but "
+        "unreleased (#125). The deliberate-ask side of the doctor freshness findings.",
+    )
+    fr.add_argument(
+        "repo",
+        nargs="?",
+        default=None,
+        help="memshelf-mcp checkout to compare against (default: cwd).",
+    )
+    fr.set_defaults(func=_cmd_freshness)
 
     rb = sub.add_parser(
         "rebuild",

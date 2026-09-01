@@ -1,6 +1,7 @@
 import os
 import subprocess
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -864,3 +865,89 @@ def test_a_pushed_episode_with_a_stopped_renderer_is_still_an_error(tmp_path):
 
     assert "derived-stale" in _codes(report), report.as_dict()
     assert "episode-unpushed" not in _codes(report)
+
+
+# --- #125: freshness as doctor findings -------------------------------------
+
+
+def _served_package_dir():
+    import memshelf_mcp
+
+    return Path(memshelf_mcp.__file__).resolve().parent
+
+
+def _checkout_beside(root, package_dir=None):
+    """A memshelf-mcp checkout in the documented place: next to the shelf."""
+    import shutil
+
+    target = root.parent / "memshelf-mcp" / "src" / "memshelf_mcp"
+    if package_dir is None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(
+            _served_package_dir(),
+            target,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+    else:
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "__init__.py").write_text('__version__ = "9.9.9"\n', encoding="utf-8")
+    return target
+
+
+def test_a_whole_install_reports_no_freshness_findings(tmp_path):
+    """#125 DoD: the rule is silent while things are whole."""
+    root = _init(tmp_path / "shelf")
+    _checkout_beside(root)
+    codes = _codes(check_shelf(root))
+    assert "served-code-differs" not in codes
+    assert "freshness-unknown" not in codes
+
+
+def test_served_code_that_differs_from_the_checkout_is_an_error(tmp_path):
+    """#125 DoD: the 18h20m window — a merged fix not serving — must sound."""
+    root = _init(tmp_path / "shelf")
+    _checkout_beside(root, package_dir="stub")
+    report = check_shelf(root)
+    finding = next(f for f in report.findings if f.code == "served-code-differs")
+    assert finding.level == "error"
+    assert not report.ok
+
+
+def test_no_checkout_is_unknown_not_silence_and_not_ok(tmp_path):
+    """#125 DoD positive control: «don't know», said aloud."""
+    root = _init(tmp_path / "shelf")
+    report = check_shelf(root)
+    finding = next(f for f in report.findings if f.code == "freshness-unknown")
+    assert finding.level == "unknown"
+    assert report.as_dict()["unknowns"] >= 1
+    # unknown is not an error — a shelf must stay pushable on a machine that
+    # simply has no sources to compare with…
+    assert "served-code-differs" not in _codes(report)
+
+
+def test_the_checkout_can_be_named_explicitly(tmp_path, monkeypatch):
+    root = _init(tmp_path / "shelf")
+    elsewhere = tmp_path / "elsewhere" / "src" / "memshelf_mcp"
+    import shutil
+
+    shutil.copytree(
+        _served_package_dir(), elsewhere, ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
+    )
+    monkeypatch.setenv("MEMSHELF_CHECKOUT", str(elsewhere))
+    codes = _codes(check_shelf(root))
+    assert "freshness-unknown" not in codes
+    assert "served-code-differs" not in codes
+
+
+def test_merged_but_unreleased_stays_out_of_doctor(tmp_path, monkeypatch):
+    """#125 DoD: (a) was true for 20 straight days — doctor must not ask it."""
+    from memshelf_mcp.core import freshness
+
+    def _forbidden(*args, **kwargs):
+        raise AssertionError("doctor called unreleased_commits — (a) belongs to the CLI probe")
+
+    monkeypatch.setattr(freshness, "unreleased_commits", _forbidden)
+    root = _init(tmp_path / "shelf")
+    _checkout_beside(root)
+    codes = _codes(check_shelf(root))  # must not raise
+    assert "served-code-differs" not in codes
