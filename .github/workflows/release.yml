@@ -81,3 +81,41 @@ jobs:
         run: |
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish
+
+  # #87 — ship the desktop bundles with the release. Until this job, the only
+  # way to get a .mcpb was to clone and build one. Signing stays open in #87:
+  # `mcpb sign` needs a certificate and a decision about where the key lives —
+  # owner-side prerequisites this job must not fake.
+  #
+  # Runs-on note: this is a public repo, hosted minutes are free here; the
+  # portfolio rule «hosted only where free» is satisfied.
+  bundles:
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create/upload the GitHub release
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build the uv bundle and the linux standalone
+        run: python3 adapters/claude-desktop/build.py --variant both --target linux-x86_64 --out dist
+      - name: Start the linux standalone and talk MCP to it
+        # The same live check ci runs on every PR: `mcpb validate` reads the
+        # manifest and cannot notice an over-pruned interpreter or a wheel for
+        # the wrong ABI; only starting the bundle can.
+        run: python3 adapters/claude-desktop/try_bundle.py dist/*-linux-x86_64.mcpb
+      - name: Build the macOS standalone (cross-built, not started)
+        # A bundle can only be *started* on the platform it targets; the
+        # builder cross-installs wheels and fetches the interpreter tarball by
+        # platform, and every mistake in the shared machinery fails identically
+        # on the linux bundle above. Verified-on-macOS stays a #87 open item.
+        run: python3 adapters/claude-desktop/build.py --variant standalone --target macos-arm64 --out dist
+      - name: Attach to the GitHub release
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag \
+            --title "$GITHUB_REF_NAME" --generate-notes || true
+          gh release upload "$GITHUB_REF_NAME" dist/*.mcpb --clobber
