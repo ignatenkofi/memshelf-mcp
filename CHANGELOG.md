@@ -8,6 +8,18 @@ once code ships.
 
 ## [Unreleased]
 
+### Changed
+
+- **Tool descriptions in the MCP schema are one selection-oriented sentence
+  each; the long form moved to `docs/tools.md` (#111).** Tool schemas ride in
+  the static prefix of every session where the server is connected, whether or
+  not a tool is called, so every word of a description is re-read each turn.
+  Measured over the stdio harness on Linux: description text 5 748 → 2 401
+  chars, `tools/list` payload 28 410 → 24 981 bytes; the rest of the payload is
+  the input schemas. Names, signatures and behaviour are unchanged; nothing
+  from the old text is lost — it is in the reference doc, linked from README.
+  The cold-start prefix measurement the issue asks for is the owner's.
+
 ### Added
 
 - **`adapters/claude-code/check-shelve-copies.sh` — сверка копий скилла `shelve`
