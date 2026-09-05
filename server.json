@@ -2,6 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.ignatenkofi/memshelf-mcp",
   "description": "Working memory for AI agents: digest-indexed episodes on a git shelf, recalled a section at a time.",
+  "websiteUrl": "https://ignatenkofi.github.io/memshelf-mcp/",
   "version": "0.2.0",
   "repository": {
     "url": "https://github.com/ignatenkofi/memshelf-mcp",
