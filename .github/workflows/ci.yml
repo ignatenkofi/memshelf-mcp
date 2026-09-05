@@ -41,7 +41,17 @@ jobs:
           ruff check .
           ruff format --check .
       - name: Tests
-        run: pytest -q
+        run: |
+          # Предпосылка перед прогоном, а не после. 17 тестовых файлов начинаются
+          # с `pytest.importorskip("docshelf_mcp")` / `("mcp")`, и для голого
+          # чекаута это правильно. Но обе зависимости — жёсткие (pyproject
+          # `dependencies`), поэтому здесь скип означает не «зависимости нет по
+          # замыслу», а сломанную установку, и `pytest -q` в этом случае зелёный,
+          # не проверив ничего. Ровно это правило уже сформулировано у соседа:
+          # docshelf-mcp/.github/workflows/ci.yml — «if that ever dropped, the
+          # skips would read green. Fail loudly.»
+          python -c "import docshelf_mcp, mcp"
+          pytest -q
 
   bundle:
     # The desktop bundle is assembled by a script and checked by starting it —
