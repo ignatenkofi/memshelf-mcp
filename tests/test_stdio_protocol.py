@@ -24,6 +24,7 @@ be a dependency for punctuation.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import time
@@ -222,3 +223,44 @@ def test_a_server_that_never_answers_fails_instead_of_hanging():
         "what stopped it: " + "; ".join(f"{type(exc).__name__}: {exc}" for exc in raised)
     )
     assert elapsed < 60, f"waited {elapsed:.0f}s — the cap did not fire at all"
+
+
+def test_a_rejected_call_still_satisfies_the_tools_output_schema(tmp_path: Path):
+    """A validation failure must come back as the JSON envelope, over the wire.
+
+    Every tool here is typed as returning ``str``, and mcp 2.x derives an
+    ``outputSchema`` (``{"result": <string>}``) from that. The client SDK then
+    *enforces* it: a ``CallToolResult`` with no ``structuredContent`` is
+    rejected on the client side — "has an output schema but did not return
+    structured content" — before the caller ever sees the envelope (#121).
+
+    The manual error path in ``_ToolBoundary.call_tool`` built exactly such a
+    result, so the very case the envelope exists for (bad arguments, no shelf
+    to work on) surfaced as a transport error in real clients, while the
+    in-process contract tests never crossed the wire and stayed green.
+
+    The scenario is the desktop-extension default: no ``MEMSHELF_SHELF_PATH``
+    in the environment and no ``shelf_path`` in the call.
+    """
+    env = {k: v for k, v in os.environ.items() if k != "MEMSHELF_SHELF_PATH"}
+    server = StdioServerParameters(command=sys.executable, args=["-m", "memshelf_mcp"], env=env)
+
+    async def scenario():
+        async with stdio_client(server) as (read, write):
+            async with ClientSession(read, write, read_timeout_seconds=WIRE_TIMEOUT) as session:
+                await session.initialize()
+                result = await session.call_tool(
+                    "memshelf_recall", {"params": {"episode_id": "2026-01-01-missing"}}
+                )
+                text = "".join(
+                    block.text for block in result.content if getattr(block, "text", None)
+                )
+                envelope = json.loads(text)
+                assert envelope["status"] == "error", envelope
+                # The structured copy is the same envelope, not a second truth.
+                assert result.structured_content == {"result": text}, result.structured_content
+                # The envelope is the contract (#85): a rejected call is not a
+                # transport error, so the SDK's flag stays down.
+                assert not result.is_error, result
+
+    _run(scenario())

@@ -153,8 +153,18 @@ class _ToolBoundary(MCPServer):
             # worth reporting, so the envelope names `ValidationError` instead of
             # the SDK's transport-shaped wrapper.
             reported = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
+            text = _error_response(reported, name)
+            # Every tool is typed as returning ``str``, so mcp 2.x publishes an
+            # ``outputSchema`` of ``{"result": <string>}`` for it — and the client
+            # SDK enforces that schema on *every* result, this hand-built one
+            # included. Without the structured copy the client rejects the
+            # envelope before the caller sees it ("has an output schema but did
+            # not return structured content", #121), which turned the one case
+            # the envelope exists for into a transport error. Same text twice on
+            # purpose: one truth, two carriers.
             return CallToolResult(
-                content=[TextContent(type="text", text=_error_response(reported, name))]
+                content=[TextContent(type="text", text=text)],
+                structured_content={"result": text},
             )
 
 
