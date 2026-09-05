@@ -1,6 +1,6 @@
 # Does memshelf actually pay for itself? — a measured demo
 
-The [README](../README.md) explains the *mechanism* — offload closed topics as
+The [README](https://github.com/ignatenkofi/memshelf-mcp#readme) explains the *mechanism* — offload closed topics as
 digest-indexed episodes, keep only `INDEX.md` in context, recall one section
 when needed. This page measures whether the mechanism pays off, on **the real
 dogfood shelf**: `sqst-memshelf`, the private working-memory shelf that ran the
@@ -121,5 +121,5 @@ doctor caught above, is the difference between a convention and a contract.
 
 ---
 
-*Back to the [README](../README.md) · [M0 protocol & results](M0.md) ·
+*Back to the [README](https://github.com/ignatenkofi/memshelf-mcp#readme) · [M0 protocol & results](M0.md) ·
 [ROADMAP](ROADMAP.md).*

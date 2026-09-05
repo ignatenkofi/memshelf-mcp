@@ -17,7 +17,7 @@ my-memory-shelf/
 Wherever the shelf is attached — a Cowork mount, a remote/web session via
 `add_repo`, a plain local clone — Claude Code loads the repo's `CLAUDE.md`
 and skills automatically. **Zero per-machine installation; the shelf
-travels with its own instructions.** This is how `sqst-memshelf` is set up.
+travels with its own instructions.** This is how `main-memshelf` is set up.
 
 Best fit: users who don't keep projects on disk and work in Cowork or
 remote GitHub sessions.

@@ -61,6 +61,9 @@ memshelf-mcp = "memshelf_mcp.server:main"
 Homepage = "https://github.com/ignatenkofi/memshelf-mcp"
 Repository = "https://github.com/ignatenkofi/memshelf-mcp"
 Issues = "https://github.com/ignatenkofi/memshelf-mcp/issues"
+Documentation = "https://ignatenkofi.github.io/memshelf-mcp/"
+Changelog = "https://github.com/ignatenkofi/memshelf-mcp/blob/main/CHANGELOG.md"
+"Measured results" = "https://github.com/ignatenkofi/memshelf-mcp/blob/main/docs/demo.md"
 
 [tool.hatch.version]
 path = "src/memshelf_mcp/__init__.py"
