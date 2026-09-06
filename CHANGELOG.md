@@ -8,7 +8,31 @@ once code ships.
 
 ## [Unreleased]
 
+### Added
+
+- **`upstream-unknown`: a checkout with no tracked upstream says so instead of
+  answering anyway (main-memshelf#154).** Both the unpushed split and the
+  renderer clock need an upstream; a detached HEAD has none, and doctor used
+  to fall back to the ledger's age silently and still print a verdict about
+  the renderer. Ephemeral agent sessions — where the false verdicts were
+  measured — check out a commit, not a branch, so this was the common case,
+  not the corner one. Warning, and only on a shelf that has a remote at all:
+  a purely local shelf has no renderer to be fair to.
+
 ### Changed
+
+- **`derived-stale` measures how long the renderer has HAD the work, not how
+  long the ledger has sat still (main-memshelf#154).** The old clock was
+  `ledger.tsv`'s last commit, which answers a different question: on a shelf
+  rendered by a bot on a shared CI farm, an episode pushed twenty minutes ago
+  while the bot's run waits in the queue produced «the renderer is not
+  lagging, it is stopped» — true about the ledger, false about the renderer.
+  Measured on main-memshelf 2026-09-05 and again 2026-09-06, both times with
+  the `shelf-derived` run visibly `queued`. The clock now starts when the
+  oldest uncounted episode became visible on the tracked upstream; a shelf
+  with no upstream has no renderer to be fair to and keeps the ledger clock.
+  A renderer that has held an episode past the threshold is still an error,
+  which is the case #89 was built for.
 
 - **Tool descriptions in the MCP schema are one selection-oriented sentence
   each; the long form moved to `docs/tools.md` (#111).** Tool schemas ride in

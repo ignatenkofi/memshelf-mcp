@@ -382,8 +382,50 @@ def _derived_layer_age_hours(root: Path, now: datetime) -> float | None:
     return (now - stamp).total_seconds() / 3600
 
 
+def _oldest_visible_age_hours(
+    root: Path, uncounted: list[str], upstream: str, now: datetime
+) -> tuple[float, str] | None:
+    """How long the renderer has had the oldest uncounted episode, in hours.
+
+    The clock the renderer is judged by has to start when it could first see
+    the work, not when it last wrote something. main-memshelf#154 collects
+    false verdicts that all share one shape — the measurement was taken on
+    state the bot could not act on — and the queue case is the same shape one
+    step later: the episode *is* on ``origin``, the bot *is* alive and running,
+    but its run has been sitting in the farm's queue behind other repositories.
+    Keyed on ``ledger.tsv``'s age, doctor called that "the renderer is not
+    lagging, it is stopped" twenty minutes after the push (2026-09-05 and
+    2026-09-06, both with the run visibly ``queued``).
+
+    Returns ``(hours, rel)`` for the episode that has waited longest, or
+    ``None`` when no arrival time can be read — then the caller keeps the old
+    ledger clock rather than inventing a verdict.
+    """
+    oldest: tuple[float, str] | None = None
+    for rel in uncounted:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "log", "-1", "--format=%cI", upstream, "--", rel],
+            capture_output=True,
+            text=True,
+        )
+        line = proc.stdout.strip()
+        if proc.returncode != 0 or not line:
+            continue
+        stamp = _parse_git_timestamp(line)
+        if stamp is None:
+            continue
+        hours = (now - stamp).total_seconds() / 3600
+        if oldest is None or hours > oldest[0]:
+            oldest = (hours, rel)
+    return oldest
+
+
 def _check_derived_freshness(
-    root: Path, uncounted: list[str], now: datetime, stale_after_hours: float
+    root: Path,
+    uncounted: list[str],
+    now: datetime,
+    stale_after_hours: float,
+    upstream: str | None = None,
 ) -> list[Finding]:
     """Tell "the renderer has not run yet" apart from "the renderer cannot run" (#89).
 
@@ -399,8 +441,17 @@ def _check_derived_freshness(
     """
     if not uncounted:
         return []
-    age = _derived_layer_age_hours(root, now)
-    if age is None or age < stale_after_hours:
+    waited: tuple[float, str] | None = None
+    if upstream:
+        waited = _oldest_visible_age_hours(root, uncounted, upstream, now)
+    if waited is not None:
+        age, clock = waited[0], "the renderer has had the oldest of them"
+    else:
+        ledger_age = _derived_layer_age_hours(root, now)
+        if ledger_age is None:
+            return []
+        age, clock = ledger_age, "the derived layer has not been rewritten"
+    if age < stale_after_hours:
         return []
     shown = ", ".join(sorted(uncounted)[:3])
     if len(uncounted) > 3:
@@ -410,8 +461,8 @@ def _check_derived_freshness(
             "error",
             "derived-stale",
             "ledger.tsv",
-            f"{len(uncounted)} episode(s) have no ledger row and the derived layer has not "
-            f"been rewritten for {age:.0f}h — the renderer is not lagging, it is stopped: "
+            f"{len(uncounted)} episode(s) have no ledger row and {clock} "
+            f"for {age:.0f}h — the renderer is not lagging, it is stopped: "
             f"{shown}",
             "check the derived-files job (a dead runner, a failing step) and rerun it; "
             "on a shelf without one, run `memshelf rebuild --shelf .`",
@@ -457,6 +508,41 @@ def _split_by_upstream(root: Path, uncounted: list[str]) -> tuple[list[str], lis
         )
         (visible if seen.returncode == 0 else local_only).append(rel)
     return visible, local_only, upstream
+
+
+def _check_upstream_unknown(
+    root: Path, uncounted: list[str], upstream: str | None
+) -> list[Finding]:
+    """Name the case where the renderer cannot be judged at all (main-memshelf#154).
+
+    Both the unpushed split and the "how long has the renderer had it" clock
+    need a tracked upstream. A clone on a detached HEAD has none, and until now
+    the absence was silent: doctor quietly fell back to the ledger's own age
+    and printed a verdict about the renderer anyway. That is the exact defect
+    #154 is about — a confident answer computed from state that cannot support
+    it — and ephemeral agent sessions, where this shelf's false verdicts were
+    measured, check out a commit rather than a branch.
+
+    Only for a shelf that HAS a remote: a purely local shelf has no renderer,
+    and the ledger clock is the right one there, with nothing to warn about.
+    """
+    if not uncounted or upstream is not None or not (root / ".git").exists():
+        return []
+    remotes = subprocess.run(["git", "-C", str(root), "remote"], capture_output=True, text=True)
+    if remotes.returncode != 0 or not remotes.stdout.strip():
+        return []
+    return [
+        Finding(
+            "warning",
+            "upstream-unknown",
+            "ledger.tsv",
+            "this checkout tracks no upstream branch (detached HEAD, or a branch with no "
+            "remote counterpart), so what the renderer could see is unknown; the "
+            "`derived-stale` verdict below falls back to the ledger's own age",
+            "check out a branch that tracks the remote (`git checkout -B main origin/main`) "
+            "and re-run, or read `derived-stale` as a statement about the ledger only",
+        )
+    ]
 
 
 def _check_unpushed_episodes(local_only: list[str], upstream: str | None) -> list[Finding]:
@@ -922,8 +1008,11 @@ def check_shelf(
     # #154 — the renderer is judged only on what it could see: episodes not on
     # the upstream ref are named separately, not blamed on the bot.
     visible, local_only, upstream = _split_by_upstream(root, uncounted)
-    findings.extend(_check_derived_freshness(root, visible, now or _utc_now(), stale_after_hours))
+    findings.extend(
+        _check_derived_freshness(root, visible, now or _utc_now(), stale_after_hours, upstream)
+    )
     findings.extend(_check_unpushed_episodes(local_only, upstream))
+    findings.extend(_check_upstream_unknown(root, uncounted, upstream))
     findings.extend(_check_local_splits(root))
 
     for orphan in sorted(ledger_ids - seen):

@@ -256,7 +256,11 @@ branch phenomenon. Wait for the renderer; on a shelf without a bot, run
 
 Persisting for a *day* while episodes keep arriving is a different state — the
 renderer is stopped, not lagging — and `doctor` separates the two with
-`derived-stale` at error severity (#89).
+`derived-stale` at error severity (#89). The day is measured from the moment
+the renderer could first see the work — the oldest uncounted episode's arrival
+on the tracked upstream — because that is the only clock the renderer can be
+held to; the ledger's own age answers a different question and reported a
+healthy, queued bot as stopped (main-memshelf#154).
 
 That reclassification changes how a conflict in those files is resolved.
 Before #58 they were append-only, so a union lost nothing. After it they are a
