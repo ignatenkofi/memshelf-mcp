@@ -99,7 +99,8 @@ memshelf doctor --shelf ~/my-shelf   # exit 1 on integrity errors
 
 ## Tool surface
 
-One verb per job; the same names over MCP (`memshelf_*`) and in the CLI:
+One verb per job; the same names over MCP (`memshelf_*`) and in the CLI
+(long-form descriptions: [`docs/tools.md`](docs/tools.md)):
 
 | Tool | What it does |
 |---|---|
@@ -244,6 +245,7 @@ week-report infographic from the dogfood shelf.
 | Doc | What it covers |
 |---|---|
 | [`docs/MANIFEST.md`](docs/MANIFEST.md) | Problem, the bet, hero scenarios, principles, non-goals |
+| [`docs/tools.md`](docs/tools.md) | Tool reference: the long-form description of every `memshelf_*` tool (the MCP schema carries only the short one) |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Episode format, digest contract, storage modes, triggers, MCP tool surface, portability model, privacy, failure modes |
 | [`docs/LANDSCAPE.md`](docs/LANDSCAPE.md) | Prior-art survey (2026-07), platform built-ins, positioning, risks |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Milestones M0–M3 with exit criteria |
