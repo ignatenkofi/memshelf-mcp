@@ -161,11 +161,21 @@ merge conflict:
 If those warnings persist for a *day* while episodes keep arriving, that is a
 different state — the renderer is not lagging, it is stopped — and `doctor`
 says so separately, as `derived-stale` at error severity. The day is counted
-from when the renderer could first see the work — the oldest uncounted
-episode's arrival on the tracked upstream — not from the ledger's last commit:
-an episode pushed minutes ago onto a shelf whose ledger has not moved since
-yesterday says nothing about the renderer, and saying otherwise sent readers
-to a manual `rebuild`, which is the conflict this whole split exists to avoid.
+from when the renderer could first see the work, not from the ledger's last
+commit: an episode pushed minutes ago onto a shelf whose ledger has not moved
+since yesterday says nothing about the renderer, and saying otherwise sent
+readers to a manual `rebuild`, which is the conflict this whole split exists
+to avoid.
+
+That arrival is read from this clone's reflog for the tracked upstream — the
+one local record of *when the ref moved here*. A commit date is not a
+substitute: it says when the episode was written, and «shelve now, push when
+confirmed» is a documented way to work, so the two can be a working day apart.
+Where the reflog cannot say — a fresh clone starts an empty one, which is what
+CI and ephemeral agent sessions run in — `doctor` reports
+`renderer-wait-unknown` at the `unknown` level instead of picking a verdict:
+from there, «stopped» and «handed the work a minute ago» look the same, and
+the renderer has to be judged where it can be observed, on its own job's run.
 On a shelf with no upstream there is no renderer to be fair to, and the
 ledger's own age stays the clock.
 

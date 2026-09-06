@@ -810,6 +810,28 @@ DIGEST_FOR_ROLLUP = (
 # --- #154 option 3: the renderer is judged only on what it could see --------
 
 
+def _push_at(root, when: str, *, set_upstream: bool = False):
+    """Push to `origin` as if it happened at `when`, then fetch.
+
+    Reflog entries carry the committer date of whoever moved the ref, so
+    `GIT_COMMITTER_DATE` is what back-dates an arrival on the upstream ref —
+    verified 2026-09-06: a push with it set writes
+    `origin/main@{that date}: update by push`. Tests about how long the
+    renderer has had the work need to say *when it got it*, which is this and
+    not the episode's own commit date.
+    """
+    env = {"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+    push = ["git", "-C", str(root), "push", "-q"]
+    if set_upstream:
+        push.append("-u")
+    subprocess.run([*push, "origin", "main"], check=True, env={**os.environ, **env})
+    subprocess.run(
+        ["git", "-C", str(root), "fetch", "-q", "origin", "main"],
+        check=True,
+        env={**os.environ, **env},
+    )
+
+
 def _shelf_with_origin_and_old_ledger(tmp_path, episode_committed_at: str | None = None):
     """A bot shelf as the 2026-08-21 measurement found it: ledger rendered and
     pushed long ago, and one fresh episode sitting in a local, unpushed commit.
@@ -826,7 +848,12 @@ def _shelf_with_origin_and_old_ledger(tmp_path, episode_committed_at: str | None
     subprocess.run(["git", "-C", str(root), "commit", "-qm", "init shelf"], check=True)
     _commit_ledger_at(root, "2026-08-10T09:00:00+00:00")
     subprocess.run(["git", "-C", str(root), "remote", "add", "origin", str(origin)], check=True)
-    subprocess.run(["git", "-C", str(root), "push", "-qu", "origin", "main"], check=True)
+    # The reflog of `origin/main` is a clock the renderer is judged by, and git
+    # stamps its entries with the committer date — so the fixture's own first
+    # push has to sit at the shelf's «long ago», not at the wall clock of the
+    # machine running the suite, or every arrival looks like it happened in the
+    # future.
+    _push_at(root, "2026-08-10T09:00:00+00:00", set_upstream=True)
     shelve(
         root,
         slug="2026-08-21-unpushed",
@@ -879,20 +906,20 @@ def test_an_unpushed_episode_is_not_a_stalled_renderer(tmp_path):
 
 def test_a_pushed_episode_with_a_stopped_renderer_is_still_an_error(tmp_path):
     """The other half: once the bot has HAD the episode long enough, silence IS
-    the bot's. The episode is back-dated to a day before the verdict, so the
-    renderer has had a full day with it and written nothing."""
+    the bot's. Both clocks are back-dated a day — written then, and *pushed*
+    then, so `origin/main` provably carried it for the whole day."""
     _origin, root = _shelf_with_origin_and_old_ledger(
-        tmp_path, episode_committed_at="2026-08-20T20:00:00+00:00"
+        tmp_path, episode_committed_at="2026-08-20T19:00:00+00:00"
     )
-    subprocess.run(["git", "-C", str(root), "push", "-q", "origin", "main"], check=True)
-    subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin", "main"], check=True)
+    _push_at(root, "2026-08-20T19:30:00+00:00")
 
     report = check_shelf(root, now=datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc))
 
     assert "derived-stale" in _codes(report), report.as_dict()
     assert "episode-unpushed" not in _codes(report)
     finding = next(f for f in report.findings if f.code == "derived-stale")
-    assert "the renderer has had the oldest of them" in finding.detail
+    assert finding.level == "error"
+    assert "origin/main carry the oldest of them" in finding.detail
 
 
 def test_an_episode_pushed_minutes_ago_is_not_a_stopped_renderer(tmp_path):
@@ -912,8 +939,7 @@ def test_an_episode_pushed_minutes_ago_is_not_a_stopped_renderer(tmp_path):
     _origin, root = _shelf_with_origin_and_old_ledger(
         tmp_path, episode_committed_at="2026-08-21T19:40:00+00:00"
     )
-    subprocess.run(["git", "-C", str(root), "push", "-q", "origin", "main"], check=True)
-    subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin", "main"], check=True)
+    _push_at(root, "2026-08-21T19:41:00+00:00")
 
     report = check_shelf(root, now=datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc))
 
@@ -921,6 +947,77 @@ def test_an_episode_pushed_minutes_ago_is_not_a_stopped_renderer(tmp_path):
     # The per-episode warning stays: the row really is missing.
     assert "no-ledger-row" in _codes(report)
     assert report.as_dict()["errors"] == 0
+
+
+def test_an_episode_written_in_the_morning_and_pushed_at_night_is_not_a_stopped_renderer(
+    tmp_path,
+):
+    """The gap #134 left: a commit date is not an arrival on the upstream.
+
+    `derived-stale` was re-keyed onto `git log -1 --format=%cI <upstream> -- <ep>`
+    and documented as "when the renderer could first see the work". `%cI` is the
+    episode's own committer date, which says when it was *written*. The two come
+    apart on this shelf's documented workflow — on the owner's machine the rule is
+    «push by confirmation», so shelve-in-the-morning / push-in-the-evening is the
+    normal day, not an edge — and they come apart by exactly the amount that
+    matters: measured on a throwaway origin 2026-09-06, an episode committed at
+    11:33 and pushed at 20:33 still answered 11:33, i.e. nine hours of wait the
+    renderer never had. `git pull --rebase` does not launder it either: with the
+    remote unmoved there is nothing to replay and the date survives.
+
+    On main-memshelf that is an `error` at a 6h threshold five minutes after the
+    push, and the shelf's own fork sends an error here into a manual `rebuild` —
+    the #58 conflict this whole line of work exists to prevent."""
+    _origin, root = _shelf_with_origin_and_old_ledger(
+        tmp_path, episode_committed_at="2026-08-21T11:00:00+00:00"
+    )
+    _push_at(root, "2026-08-21T19:55:00+00:00")
+
+    report = check_shelf(
+        root, now=datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc), stale_after_hours=6
+    )
+
+    assert "derived-stale" not in _codes(report), report.as_dict()
+    assert report.as_dict()["errors"] == 0
+    # And not merely downgraded to «cannot tell»: the reflog records this
+    # clone pushing it at 19:55, which dates the arrival rather than
+    # bracketing it, so the answer here is «fresh», not «unknown».
+    assert "renderer-wait-unknown" not in _codes(report)
+
+
+def test_a_clone_that_never_watched_the_arrival_says_so_instead_of_guessing(tmp_path):
+    """The honest half of the same measurement: where the clock is unreadable.
+
+    `git clone` writes no reflog for the branch it sets up — measured
+    2026-09-06, `git reflog show origin/main` in a just-cloned repository exits
+    0 and prints nothing — so a fresh clone, which is what ephemeral agent
+    sessions and CI run in, has no record of when anything arrived. The commit
+    date still bounds the wait from above and nothing bounds it from below, so
+    «the renderer is stopped» is not a fact this checkout owns. It says so at
+    the `unknown` level (#125) rather than picking the answer that reads worse."""
+    origin, root = _shelf_with_origin_and_old_ledger(
+        tmp_path, episode_committed_at="2026-08-20T19:00:00+00:00"
+    )
+    _push_at(root, "2026-08-20T19:30:00+00:00")
+    fresh = tmp_path / "fresh"
+    subprocess.run(["git", "clone", "-q", str(origin), str(fresh)], check=True)
+    assert (
+        subprocess.run(
+            ["git", "-C", str(fresh), "reflog", "show", "origin/main"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        == ""
+    ), "fixture assumes a fresh clone records no upstream reflog"
+
+    report = check_shelf(fresh, now=datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc))
+
+    assert "derived-stale" not in _codes(report), report.as_dict()
+    assert report.as_dict()["errors"] == 0
+    finding = next(f for f in report.findings if f.code == "renderer-wait-unknown")
+    assert finding.level == "unknown"
+    assert report.as_dict()["unknowns"] >= 1
+    assert "2026-08-21-unpushed" in finding.detail
 
 
 def test_a_detached_checkout_says_the_renderer_cannot_be_judged(tmp_path):
@@ -931,7 +1028,7 @@ def test_a_detached_checkout_says_the_renderer_cannot_be_judged(tmp_path):
     what the renderer saw — so it says so, instead of printing a confident
     sentence about a renderer it cannot observe."""
     _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
-    subprocess.run(["git", "-C", str(root), "push", "-q", "origin", "main"], check=True)
+    _push_at(root, "2026-08-21T09:00:00+00:00")
     subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach"], check=True)
 
     report = check_shelf(root, now=datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc))

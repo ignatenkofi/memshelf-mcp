@@ -382,42 +382,190 @@ def _derived_layer_age_hours(root: Path, now: datetime) -> float | None:
     return (now - stamp).total_seconds() / 3600
 
 
-def _oldest_visible_age_hours(
-    root: Path, uncounted: list[str], upstream: str, now: datetime
-) -> tuple[float, str] | None:
-    """How long the renderer has had the oldest uncounted episode, in hours.
+def _committed_age_hours(root: Path, rel: str, upstream: str, now: datetime) -> float | None:
+    """Hours since ``rel`` was committed, read from ``upstream``.
 
-    The clock the renderer is judged by has to start when it could first see
-    the work, not when it last wrote something. main-memshelf#154 collects
-    false verdicts that all share one shape — the measurement was taken on
-    state the bot could not act on — and the queue case is the same shape one
-    step later: the episode *is* on ``origin``, the bot *is* alive and running,
-    but its run has been sitting in the farm's queue behind other repositories.
-    Keyed on ``ledger.tsv``'s age, doctor called that "the renderer is not
-    lagging, it is stopped" twenty minutes after the push (2026-09-05 and
-    2026-09-06, both with the run visibly ``queued``).
-
-    Returns ``(hours, rel)`` for the episode that has waited longest, or
-    ``None`` when no arrival time can be read — then the caller keeps the old
-    ledger clock rather than inventing a verdict.
+    An UPPER bound on how long the renderer has had it: work cannot reach a
+    remote before it exists. It is not the wait itself, and the gap is not an
+    edge case — this shelf's documented workflow on the owner's machine is
+    «shelve, push when confirmed», so an episode committed in the morning and
+    pushed in the evening carries a nine-hour commit date the second it lands.
+    Measured on a throwaway origin 2026-09-06: commit at 11:33, push at 20:33,
+    and ``git log -1 --format=%cI origin/main -- <episode>`` still said 11:33.
     """
-    oldest: tuple[float, str] | None = None
-    for rel in uncounted:
-        proc = subprocess.run(
-            ["git", "-C", str(root), "log", "-1", "--format=%cI", upstream, "--", rel],
+    proc = subprocess.run(
+        ["git", "-C", str(root), "log", "-1", "--format=%cI", upstream, "--", rel],
+        capture_output=True,
+        text=True,
+    )
+    line = proc.stdout.strip()
+    if proc.returncode != 0 or not line:
+        return None
+    stamp = _parse_git_timestamp(line)
+    return None if stamp is None else (now - stamp).total_seconds() / 3600
+
+
+_REFLOG_STAMP = re.compile(r"@\{(\d+)\}\s*$")
+
+
+def _upstream_reflog(root: Path, upstream: str) -> list[tuple[str, datetime, str]]:
+    """Every move of ``upstream`` this clone recorded — ``(commit, when, why)``, oldest first.
+
+    The reflog of a remote-tracking ref is the one local record of *when the
+    ref moved here*, written by the push or fetch that moved it rather than by
+    whoever authored the commit. That is the clock the renderer is owed. The
+    reason (``update by push`` vs a fetch) matters too: a push is this clone
+    putting the work on the remote, which dates the arrival exactly, while a
+    fetch only proves the work was already there by then.
+
+    It is not always there. A fresh clone starts an empty one: measured
+    2026-09-06, ``git clone`` writes ``logs/refs/remotes/origin/HEAD`` and
+    nothing for the branch, so ``git reflog show origin/main`` in a
+    just-cloned repository exits 0 and prints nothing. Ephemeral agent
+    sessions and CI are exactly that case, so «no entries» stays a
+    first-class answer rather than a zero.
+    """
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "reflog",
+            "show",
+            "--date=unix",
+            "--format=%H%x09%gd%x09%gs",
+            upstream,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return []
+    entries: list[tuple[str, datetime, str]] = []
+    for line in proc.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2 or not parts[0]:
+            continue
+        match = _REFLOG_STAMP.search(parts[1])
+        if match is None:
+            continue
+        when = datetime.fromtimestamp(int(match.group(1)), tz=timezone.utc)
+        entries.append((parts[0], when, parts[2] if len(parts) > 2 else ""))
+    entries.reverse()
+    return entries
+
+
+def _arrival_bracket(
+    root: Path, rel: str, entries: list[tuple[str, datetime, str]]
+) -> tuple[datetime | None, datetime | None]:
+    """When ``rel`` reached the upstream ref, bracketed by the reflog.
+
+    Returns ``(not_before, not_after)``. Either half is ``None`` when nothing
+    in the reflog pins that side: no entries at all (a fresh clone), or a file
+    already present in the oldest recorded move, which arrived before this
+    clone started watching.
+
+    ``not_after`` is the earliest recorded move that already carries the file.
+    ``not_before`` is normally the move just below it — the ref did not carry
+    the file then — except when the carrying move is *this clone's own push*,
+    and then the two collapse: the push is what put the work on the remote, so
+    it dates the arrival rather than bracketing it. (A push can only fast-
+    forward past someone else's commit that this clone already fetched, and
+    that fetch would be the earlier carrying entry, so «our push first carried
+    it» really does mean we put it there.) That case is the whole point on
+    this shelf: it is what tells an episode written this morning and pushed a
+    minute ago from one written this morning and pushed nine hours ago.
+
+    Binary search, assuming a file once present stays present. A force-push
+    breaks that assumption and the result stays sound: ``not_after`` is always
+    an entry that carries the file and ``not_before`` one that does not.
+    """
+    if not entries:
+        return None, None
+
+    def carries(sha: str) -> bool:
+        seen = subprocess.run(
+            ["git", "-C", str(root), "cat-file", "-e", f"{sha}:{rel}"],
             capture_output=True,
             text=True,
         )
-        line = proc.stdout.strip()
-        if proc.returncode != 0 or not line:
-            continue
-        stamp = _parse_git_timestamp(line)
-        if stamp is None:
-            continue
-        hours = (now - stamp).total_seconds() / 3600
-        if oldest is None or hours > oldest[0]:
-            oldest = (hours, rel)
-    return oldest
+        return seen.returncode == 0
+
+    lo, hi = 0, len(entries) - 1
+    if not carries(entries[hi][0]):
+        return None, None
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if carries(entries[mid][0]):
+            hi = mid
+        else:
+            lo = mid + 1
+    _sha, when, why = entries[hi]
+    if why.startswith("update by push"):
+        return when, when
+    # The loop only leaves `hi` above 0 by probing `hi - 1` and finding it bare.
+    return (entries[hi - 1][1] if hi > 0 else None), when
+
+
+def _renderer_wait_bounds(
+    root: Path, uncounted: list[str], upstream: str, now: datetime
+) -> tuple[float | None, float | None]:
+    """How long the renderer has had the work, as ``(at_most, at_least)`` hours.
+
+    Two clocks are readable without touching the network and they bound the
+    answer from opposite sides — the commit date from above, the upstream
+    ref's reflog from both sides when it recorded the arrival. The shelf-level
+    verdict takes the worst episode on each side: ``at_most`` under the
+    threshold means nobody has waited long enough, ``at_least`` over it means
+    somebody provably has.
+
+    Either half is ``None`` when nothing bounds it — and a ``None`` is the
+    point, not a gap to paper over: it is what separates «the renderer is
+    stopped» from «this clone cannot see when the renderer got it».
+    """
+    entries = _upstream_reflog(root, upstream)
+    at_most: float | None = None
+    at_least: float | None = None
+    unbounded = False
+    for rel in uncounted:
+        not_before, by = _arrival_bracket(root, rel, entries)
+        bounds = [_committed_age_hours(root, rel, upstream, now)]
+        if not_before is not None:
+            bounds.append((now - not_before).total_seconds() / 3600)
+        known = [b for b in bounds if b is not None]
+        if not known:
+            # Nothing caps this one, so nothing caps the shelf: one episode
+            # whose clock is unreadable is enough to make «all fresh» a guess.
+            unbounded = True
+        else:
+            episode_at_most = min(known)
+            if at_most is None or episode_at_most > at_most:
+                at_most = episode_at_most
+        if by is not None:
+            proven = (now - by).total_seconds() / 3600
+            if at_least is None or proven > at_least:
+                at_least = proven
+    return (None if unbounded else at_most), at_least
+
+
+def _episode_list(uncounted: list[str]) -> str:
+    shown = ", ".join(sorted(uncounted)[:3])
+    if len(uncounted) > 3:
+        shown += f", … (+{len(uncounted) - 3})"
+    return shown
+
+
+def _stopped_renderer(uncounted: list[str], age: float, clock: str) -> Finding:
+    return Finding(
+        "error",
+        "derived-stale",
+        "ledger.tsv",
+        f"{len(uncounted)} episode(s) have no ledger row and {clock} "
+        f"for {age:.0f}h — the renderer is not lagging, it is stopped: "
+        f"{_episode_list(uncounted)}",
+        "check the derived-files job (a dead runner, a failing step) and rerun it; "
+        "on a shelf without one, run `memshelf rebuild --shelf .`",
+    )
 
 
 def _check_derived_freshness(
@@ -432,8 +580,22 @@ def _check_derived_freshness(
     The per-episode ``no-ledger-row`` warnings stay exactly as they are — they
     are right for the fresh case, and the advice attached to them ("do not fix
     this by hand") is right too. This adds the shelf-level finding the fresh
-    case cannot produce: episodes uncounted *while the derived layer itself has
-    not moved for a day* mean the accounting is not lagging, it is stopped.
+    case cannot produce: episodes uncounted *while the renderer has had them
+    past the threshold* mean the accounting is not lagging, it is stopped.
+
+    The renderer is judged on a bracket, never on a proxy for it
+    (main-memshelf#154). Of the three outcomes only one is an error:
+
+    * ``at_most`` under the threshold — nobody has waited long enough; silent.
+      This covers the queued-bot case (episode pushed twenty minutes ago,
+      ledger untouched since yesterday, run visibly ``queued``) *and* the
+      shelve-in-the-morning-push-in-the-evening case, where the episode's
+      commit date is old but the reflog shows the ref moving minutes ago.
+    * ``at_least`` over the threshold — the remote provably carried the work
+      that long and nothing rendered it: the ``error`` #89 exists for.
+    * neither — the wait sits inside a bracket this clone cannot narrow. Not
+      «ok» and not «stopped» but ``unknown``, the third outcome #125 added for
+      exactly this shape of answer.
 
     One finding for the shelf rather than one per episode: the diagnosis is
     about the renderer, and N copies of it would bury the episode list they are
@@ -441,31 +603,41 @@ def _check_derived_freshness(
     """
     if not uncounted:
         return []
-    waited: tuple[float, str] | None = None
-    if upstream:
-        waited = _oldest_visible_age_hours(root, uncounted, upstream, now)
-    if waited is not None:
-        age, clock = waited[0], "the renderer has had the oldest of them"
-    else:
+    if upstream is None:
+        # No upstream: a git-local shelf has no renderer to be fair to, and a
+        # detached checkout has already been told so by `upstream-unknown`.
+        # The ledger's own age is the only clock either of them has.
         ledger_age = _derived_layer_age_hours(root, now)
-        if ledger_age is None:
+        if ledger_age is None or ledger_age < stale_after_hours:
             return []
-        age, clock = ledger_age, "the derived layer has not been rewritten"
-    if age < stale_after_hours:
+        return [
+            _stopped_renderer(uncounted, ledger_age, "the derived layer has not been rewritten")
+        ]
+
+    at_most, at_least = _renderer_wait_bounds(root, uncounted, upstream, now)
+    if at_most is not None and at_most < stale_after_hours:
         return []
-    shown = ", ".join(sorted(uncounted)[:3])
-    if len(uncounted) > 3:
-        shown += f", … (+{len(uncounted) - 3})"
+    if at_least is not None and at_least >= stale_after_hours:
+        return [
+            _stopped_renderer(
+                uncounted, at_least, f"this clone has watched {upstream} carry the oldest of them"
+            )
+        ]
+    written = f"{at_most:.0f}h ago" if at_most is not None else "at an unreadable time"
     return [
         Finding(
-            "error",
-            "derived-stale",
+            "unknown",
+            "renderer-wait-unknown",
             "ledger.tsv",
-            f"{len(uncounted)} episode(s) have no ledger row and {clock} "
-            f"for {age:.0f}h — the renderer is not lagging, it is stopped: "
-            f"{shown}",
-            "check the derived-files job (a dead runner, a failing step) and rerun it; "
-            "on a shelf without one, run `memshelf rebuild --shelf .`",
+            f"{len(uncounted)} episode(s) have no ledger row and the oldest was written "
+            f"{written}, but this clone cannot read when it reached {upstream}: the reflog "
+            f"for {upstream} does not record that arrival, and a fresh clone records none. "
+            f"A commit date is when an episode was written, not when the renderer got it, "
+            f"so «stopped» and «handed the work a minute ago» look the same from here: "
+            f"{_episode_list(uncounted)}",
+            "judge the renderer where it can be observed — the derived-files job's own run "
+            "(queued, failing, disabled) — or re-run doctor from a clone that was already "
+            "fetching this shelf when the episode landed",
         )
     ]
 
