@@ -810,9 +810,14 @@ DIGEST_FOR_ROLLUP = (
 # --- #154 option 3: the renderer is judged only on what it could see --------
 
 
-def _shelf_with_origin_and_old_ledger(tmp_path):
+def _shelf_with_origin_and_old_ledger(tmp_path, episode_committed_at: str | None = None):
     """A bot shelf as the 2026-08-21 measurement found it: ledger rendered and
-    pushed long ago, and one fresh episode sitting in a local, unpushed commit."""
+    pushed long ago, and one fresh episode sitting in a local, unpushed commit.
+
+    ``episode_committed_at`` back-dates the episode's own commit. The renderer
+    is judged by how long it has HAD the work (main-memshelf#154), so a test
+    about a stopped renderer has to say when the work reached it; left None,
+    the episode carries the wall clock, which is the freshly-shelved case."""
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
     root = _init(tmp_path / "shelf")
@@ -835,6 +840,23 @@ def _shelf_with_origin_and_old_ledger(tmp_path):
         approx_tokens=1000,
         date="2026-08-21",
     )
+    if episode_committed_at is not None:
+        env = {"GIT_AUTHOR_DATE": episode_committed_at, "GIT_COMMITTER_DATE": episode_committed_at}
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "commit",
+                "-q",
+                "--amend",
+                "--no-edit",
+                "--date",
+                episode_committed_at,
+            ],
+            check=True,
+            env={**os.environ, **env},
+        )
     return origin, root
 
 
@@ -856,8 +878,12 @@ def test_an_unpushed_episode_is_not_a_stalled_renderer(tmp_path):
 
 
 def test_a_pushed_episode_with_a_stopped_renderer_is_still_an_error(tmp_path):
-    """The other half: once the bot could see the episode, silence IS the bot's."""
-    _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
+    """The other half: once the bot has HAD the episode long enough, silence IS
+    the bot's. The episode is back-dated to a day before the verdict, so the
+    renderer has had a full day with it and written nothing."""
+    _origin, root = _shelf_with_origin_and_old_ledger(
+        tmp_path, episode_committed_at="2026-08-20T20:00:00+00:00"
+    )
     subprocess.run(["git", "-C", str(root), "push", "-q", "origin", "main"], check=True)
     subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin", "main"], check=True)
 
@@ -865,6 +891,65 @@ def test_a_pushed_episode_with_a_stopped_renderer_is_still_an_error(tmp_path):
 
     assert "derived-stale" in _codes(report), report.as_dict()
     assert "episode-unpushed" not in _codes(report)
+    finding = next(f for f in report.findings if f.code == "derived-stale")
+    assert "the renderer has had the oldest of them" in finding.detail
+
+
+def test_an_episode_pushed_minutes_ago_is_not_a_stopped_renderer(tmp_path):
+    """main-memshelf#154, the queue case — measured live 2026-09-05 and again
+    2026-09-06 on the same shelf.
+
+    The episode is on `origin`, the bot is alive and its run is `queued` behind
+    other repositories on the shared farm. Keyed on `ledger.tsv`'s age doctor
+    answered «the renderer is not lagging, it is stopped» twenty minutes after
+    the push, because the ledger had not moved for 25h — which was true and
+    said nothing about the renderer. Judged by how long the renderer has HAD
+    the work, the same state is quiet.
+
+    Without this half the check cannot fail in the direction that matters: it
+    was firing on a healthy shelf, and the documented response to it is a
+    manual `rebuild` — the #58 conflict the fork exists to prevent."""
+    _origin, root = _shelf_with_origin_and_old_ledger(
+        tmp_path, episode_committed_at="2026-08-21T19:40:00+00:00"
+    )
+    subprocess.run(["git", "-C", str(root), "push", "-q", "origin", "main"], check=True)
+    subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin", "main"], check=True)
+
+    report = check_shelf(root, now=datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc))
+
+    assert "derived-stale" not in _codes(report), report.as_dict()
+    # The per-episode warning stays: the row really is missing.
+    assert "no-ledger-row" in _codes(report)
+    assert report.as_dict()["errors"] == 0
+
+
+def test_a_detached_checkout_says_the_renderer_cannot_be_judged(tmp_path):
+    """main-memshelf#154: the silent fallback is the defect, not the fallback.
+
+    Ephemeral agent sessions check out a commit, not a branch, and that is
+    where the false verdicts were measured. With no upstream doctor cannot tell
+    what the renderer saw — so it says so, instead of printing a confident
+    sentence about a renderer it cannot observe."""
+    _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
+    subprocess.run(["git", "-C", str(root), "push", "-q", "origin", "main"], check=True)
+    subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach"], check=True)
+
+    report = check_shelf(root, now=datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc))
+
+    finding = next(f for f in report.findings if f.code == "upstream-unknown")
+    assert finding.level == "warning"
+    assert "detached HEAD" in finding.detail
+
+
+def test_a_shelf_without_a_remote_is_not_told_about_upstreams(tmp_path):
+    """The other half. A local shelf has no renderer to be fair to; warning it
+    about a missing upstream would be noise on every plain-directory shelf."""
+    root = _shelf_with_an_uncounted_episode(tmp_path)
+    _commit_ledger_at(root, "2026-08-10T09:00:00+00:00")
+
+    report = check_shelf(root, now=datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc))
+
+    assert "upstream-unknown" not in _codes(report), report.as_dict()
 
 
 # --- #125: freshness as doctor findings -------------------------------------

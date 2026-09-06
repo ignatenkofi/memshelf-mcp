@@ -160,7 +160,14 @@ merge conflict:
 
 If those warnings persist for a *day* while episodes keep arriving, that is a
 different state — the renderer is not lagging, it is stopped — and `doctor`
-says so separately, as `derived-stale` at error severity.
+says so separately, as `derived-stale` at error severity. The day is counted
+from when the renderer could first see the work — the oldest uncounted
+episode's arrival on the tracked upstream — not from the ledger's last commit:
+an episode pushed minutes ago onto a shelf whose ledger has not moved since
+yesterday says nothing about the renderer, and saying otherwise sent readers
+to a manual `rebuild`, which is the conflict this whole split exists to avoid.
+On a shelf with no upstream there is no renderer to be fair to, and the
+ledger's own age stays the clock.
 
 There was a third way to hold `stale-index` forever, and it is fixed rather
 than documented: docshelf split any episode past 50 KiB into section files
