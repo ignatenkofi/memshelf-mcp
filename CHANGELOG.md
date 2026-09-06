@@ -10,6 +10,21 @@ once code ships.
 
 ### Added
 
+- **A cap on tool-description length, and the measurement behind it
+  (`tests/test_prefix_cost.py`, #111).** #133 trimmed every description to one
+  selection-oriented sentence and moved the long form to `docs/tools.md`;
+  nothing then held that in place, and prose next to the code it describes
+  grows back a clause at a time. Measured on the `tools/list` payload, the trim
+  moved description text 5748 -> 2401 chars (longest tool 890 -> 254) and the
+  whole payload 28340 -> 24911 bytes — about 0.9K tokens at 4 chars/token, a
+  third of the 2-3K the issue set as the target. The cap is 320 chars, today's
+  longest plus room to word a new tool, and below the *pre*-trim median of 367.
+  Two neighbours ride along: `docs/tools.md` must cover exactly the published
+  roster (the trim is only honest while the long form is complete), and the
+  payload must stay dominated by derived schema rather than prose, which is the
+  premise for deliberately NOT pinning a total-payload budget here. Run the
+  file directly for the per-key and per-tool breakdown.
+
 - **`upstream-unknown`: a checkout with no tracked upstream says so instead of
   answering anyway (main-memshelf#154).** Both the unpushed split and the
   renderer clock need an upstream; a detached HEAD has none, and doctor used
