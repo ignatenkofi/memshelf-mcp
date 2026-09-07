@@ -20,7 +20,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 
-from memshelf_mcp import __version__
+from memshelf_mcp import __version__, instances
 from memshelf_mcp.tools import (
     AdviseInput,
     DoctorInput,
@@ -36,6 +36,7 @@ from memshelf_mcp.tools import (
     SearchInput,
     ShelveInput,
     StatsInput,
+    default_shelf_path,
     run_advise,
     run_doctor,
     run_import,
@@ -424,6 +425,11 @@ def main(argv: list[str] | None = None) -> None:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     logger.info("Starting memshelf-mcp %s", __version__)
+    # Register before serving so a *later* instance is visible to this one on
+    # its first call (#115). The newcomer cannot report — in the observed
+    # incident its stderr was /dev/null — so only registration happens here;
+    # the warning rides on the call path, where the live instance is.
+    instances.register(default_shelf_path())
     mcp.run()
 
 

@@ -8,6 +8,29 @@ once code ships.
 
 ## [Unreleased]
 
+### Added
+
+- **A second server instance working the same shelf is now noticed (#115).**
+  Claude Desktop was observed starting two process trees for one extension
+  launch; the orphan lived 25+ minutes with `stdout` and `stderr` on
+  `/dev/null`. That descriptor detail rules out the obvious design: a
+  "warn at startup if someone is already here" check is printed by the
+  *newcomer*, which in the observed incident was precisely the process that
+  could not write anywhere — a guard mute on its own red fixture. So every
+  instance registers itself in a small per-shelf record kept **outside** the
+  shelf (it is a git repository; a stray file would ride into a diff), and the
+  instance that is actually being called — hence the one whose descriptors
+  lead to the host log — reports the neighbour on its first shelf-scoped call.
+  Detection is advisory: it never refuses a call, and an unwritable state
+  directory degrades to silence. Scope is stated rather than implied — a
+  server that is never called and has no `$MEMSHELF_SHELF_PATH` registers
+  nothing, and pid reuse can produce a false positive whose cost is one
+  stderr line. `$MEMSHELF_STATE_DIR` moves the registry;
+  `$MEMSHELF_INSTANCE_REGISTRY=off` disables it. The other half of the issue
+  — a server exiting when it loses its client — is untouched: the observed
+  transport was not classic stdio (stdin on `/dev/null`, unix sockets on
+  fd 4-7), so "peer closed" is not "stdin gave EOF" there.
+
 ### Changed
 
 - **`stats` stopped reporting a mass that no window could hold (#110).**
