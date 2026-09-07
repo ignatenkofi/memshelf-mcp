@@ -8,6 +8,44 @@ once code ships.
 
 ## [Unreleased]
 
+### Changed
+
+- **`stats` stopped reporting a mass that no window could hold (#110).**
+  `approx_tokens` is filled in practice with the *volume of material a session
+  moved*, not with *freed context* — a session reads, discards and reads again,
+  so the two differ by an order of magnitude. Both were summed under one name
+  and fed `shelved_mass`, `compression_ratio` and `realized_savings`. On the
+  shelf that raised the issue 30 episodes of 157 each claimed more than any
+  shipped window and carried 70% of the total; one claimed 2.4M against a
+  measured p90 context of 349K.
+
+  Variant 2 of the issue, so no episode is re-shelved: the claim is clipped to
+  a context window before anything is summed, and the two quantities get
+  separate names. `shelved_mass` is now Σ min(claim, window) — freed context;
+  the raw sum moved to the new `work_volume`; `capped_episodes` and
+  `context_window` say what the clip did and with which bound.
+  `realized_savings` and the per-recall `saved_tokens` (`episode_mass`) use the
+  clipped baseline for the same reason: a recall cannot save context the window
+  never held. `banner` names the clip when there was one, and the `stats` tool
+  adds `capped_note`.
+
+  The bound resolves explicit argument → `$MEMSHELF_CONTEXT_WINDOW` →
+  `DEFAULT_CONTEXT_WINDOW` (200K), plus `--context-window` on the CLI and
+  `context_window` on the tool input. 200K is the standard window of the
+  clients this shelf is written for, and it reproduces the issue's own
+  arithmetic (718:1 → 377:1 there; 739.4:1 → 381.2:1 on the same shelf today,
+  now 197 episodes). It errs small on purpose: understating a saving is the
+  safer error for a number whose job is to claim one. A client with a larger
+  window says so, and `context_window` in the output reports which value was
+  used.
+
+- **Megatoken figures printed a trailing `.00` (`_human`).** `f"{x:.2f}M"`
+  followed by `.rstrip("0").rstrip(".")` strips nothing: the string ends on
+  `M`. So the trim was dead code and every million-scale number read `1.00M`.
+  Stripping now happens on the number, suffix appended after. The same
+  formatter is duplicated in `core/advisor.py` and had the same dead trim;
+  both are fixed and covered.
+
 ### Added
 
 - **A cap on tool-description length, and the measurement behind it

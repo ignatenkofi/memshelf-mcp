@@ -80,6 +80,16 @@ mass and compression ratio (claimed, from `approx_tokens`), plus realized
 savings from logged recalls when present. The transparent-savings number the
 project's core claim rests on; see `docs/M0.md → Measurement`.
 
+Two quantities, deliberately not one (#110). `work_volume` is the raw sum of
+`approx_tokens` — material the sessions moved. `shelved_mass` is that sum with
+each episode clipped to the context window — context actually freed, and the
+figure that feeds `compression_ratio` and `realized_savings`. `context_window`
+and `capped_episodes` report the bound used and how many episodes it clipped;
+pass `context_window` (CLI `--context-window`, else `$MEMSHELF_CONTEXT_WINDOW`)
+to match your client instead of the 200K default. That default errs small on
+purpose: understating a saving is the safer error for a number whose whole job
+is to claim one.
+
 ## `memshelf_advise`
 
 Report what your context is made of and what you could put down (#14).

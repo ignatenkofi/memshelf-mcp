@@ -29,6 +29,7 @@ from memshelf_mcp.core.shelve import (
     EpisodeExists,
     SlugContractError,
 )
+from memshelf_mcp.core.stats import CONTEXT_WINDOW_ENV, DEFAULT_CONTEXT_WINDOW
 from memshelf_mcp.tools import (
     SHELF_PATH_ENV,
     AdviseInput,
@@ -207,7 +208,7 @@ def _cmd_stats(args: argparse.Namespace) -> int:
             return 1
         print(rel)
         return 0
-    result = run_stats(StatsInput(shelf_path=args.shelf))
+    result = run_stats(StatsInput(shelf_path=args.shelf, context_window=args.context_window))
     if args.banner:
         print(result["banner"])
         return 0
@@ -525,6 +526,14 @@ def build_parser() -> argparse.ArgumentParser:
     st.add_argument("--banner", action="store_true", help="Print the one-line summary only.")
     st.add_argument(
         "--chart", action="store_true", help="(Re)draw stats.svg at the shelf root and exit."
+    )
+    st.add_argument(
+        "--context-window",
+        type=int,
+        default=None,
+        help="Context window in tokens: the per-episode cap on claimed mass (#110). "
+        f"Defaults to ${CONTEXT_WINDOW_ENV}, then to {DEFAULT_CONTEXT_WINDOW:,} — the "
+        "standard window of the clients this shelf is written for.",
     )
     st.set_defaults(func=_cmd_stats)
 

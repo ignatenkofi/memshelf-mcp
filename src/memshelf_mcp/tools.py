@@ -32,7 +32,13 @@ from memshelf_mcp.core.recall import read_index, recall, search
 from memshelf_mcp.core.resolve import resolve_shelf
 from memshelf_mcp.core.shelve import shelve
 from memshelf_mcp.core.splits import prune_split_dirs
-from memshelf_mcp.core.stats import banner, compute_stats, episode_mass
+from memshelf_mcp.core.stats import (
+    CONTEXT_WINDOW_ENV,
+    DEFAULT_CONTEXT_WINDOW,
+    banner,
+    compute_stats,
+    episode_mass,
+)
 
 SHELF_PATH_ENV = "MEMSHELF_SHELF_PATH"
 
@@ -379,18 +385,33 @@ def run_search(params: SearchInput) -> dict:
 
 
 class StatsInput(ShelfScopedInput):
-    """Nothing beyond the shelf: the accounting covers all of it."""
+    """Beyond the shelf, only the bound on one episode's claim."""
+
+    context_window: int | None = Field(
+        default=None,
+        description="Context window in tokens, used as the per-episode cap on claimed "
+        f"mass (#110). Optional: falls back to ${CONTEXT_WINDOW_ENV}, then to "
+        f"{DEFAULT_CONTEXT_WINDOW:,} — the standard window of the clients this shelf "
+        "is written for. Pass your client's real window if it is larger.",
+    )
 
 
 def run_stats(params: StatsInput) -> dict:
     """Token accounting over the shelf: claimed economy (ledger) and, if any
     recalls are logged, realized economy (recall log)."""
-    stats = compute_stats(params.shelf_path)
+    stats = compute_stats(params.shelf_path, context_window=params.context_window)
     payload = {"status": "ok", "banner": banner(stats), **stats.as_dict()}
     if stats.recalls == 0:
         payload["note"] = (
             "realized metrics are zero because no recalls are logged; "
             "recall with log=true (CLI: --log) to accumulate them."
+        )
+    if stats.capped_episodes:
+        payload["capped_note"] = (
+            f"{stats.capped_episodes} of {stats.episodes} episode(s) claim more "
+            f"approx_tokens than the {stats.context_window:,}-token window; "
+            "shelved_mass, compression_ratio and realized_savings use the clipped "
+            "value, work_volume keeps the raw sum (#110)."
         )
     return payload
 

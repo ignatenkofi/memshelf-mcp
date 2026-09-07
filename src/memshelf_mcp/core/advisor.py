@@ -200,7 +200,10 @@ class Advice:
 
 def _human(n: int) -> str:
     if abs(n) >= 1_000_000:
-        return f"{n / 1_000_000:.2f}M".rstrip("0").rstrip(".")
+        # Strip on the number, not after the suffix: ``"1.00M".rstrip("0")``
+        # ends on "M" and strips nothing, so the trailing-zero trim was dead
+        # code and every megatoken figure read "1.00M".
+        return f"{n / 1_000_000:.2f}".rstrip("0").rstrip(".") + "M"
     if abs(n) >= 1_000:
         return f"{round(n / 1_000)}K"
     return str(n)
