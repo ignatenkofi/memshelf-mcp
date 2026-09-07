@@ -257,10 +257,22 @@ branch phenomenon. Wait for the renderer; on a shelf without a bot, run
 Persisting for a *day* while episodes keep arriving is a different state — the
 renderer is stopped, not lagging — and `doctor` separates the two with
 `derived-stale` at error severity (#89). The day is measured from the moment
-the renderer could first see the work — the oldest uncounted episode's arrival
-on the tracked upstream — because that is the only clock the renderer can be
-held to; the ledger's own age answers a different question and reported a
-healthy, queued bot as stopped (main-memshelf#154).
+the renderer could first see the work, because that is the only clock the
+renderer can be held to; the ledger's own age answers a different question and
+reported a healthy, queued bot as stopped (main-memshelf#154).
+
+Reading that moment is the whole difficulty, and `doctor` reads it as a
+bracket rather than a proxy. The upper bound is the episode's commit date —
+work cannot reach a remote before it exists. The lower bound is this clone's
+reflog for the upstream ref, whose entries are stamped when the ref moved
+*here*; an entry written by this clone's own push dates the arrival exactly,
+one written by a fetch only proves the remote already had it by then. Under
+the threshold at the top means nobody waited long enough; over it at the
+bottom means somebody provably did and that is the error. Neither is the third
+outcome, `renderer-wait-unknown` at the `unknown` level (#125): a fresh clone
+records no reflog for the branch it sets up, so in CI and in ephemeral agent
+sessions the arrival is simply not observable, and a commit date pressed into
+that role reports a nine-hour wait for work pushed five minutes ago.
 
 That reclassification changes how a conflict in those files is resolved.
 Before #58 they were append-only, so a union lost nothing. After it they are a

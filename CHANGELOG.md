@@ -10,6 +10,21 @@ once code ships.
 
 ### Added
 
+- **A cap on tool-description length, and the measurement behind it
+  (`tests/test_prefix_cost.py`, #111).** #133 trimmed every description to one
+  selection-oriented sentence and moved the long form to `docs/tools.md`;
+  nothing then held that in place, and prose next to the code it describes
+  grows back a clause at a time. Measured on the `tools/list` payload, the trim
+  moved description text 5748 -> 2401 chars (longest tool 890 -> 254) and the
+  whole payload 28340 -> 24911 bytes — about 0.9K tokens at 4 chars/token, a
+  third of the 2-3K the issue set as the target. The cap is 320 chars, today's
+  longest plus room to word a new tool, and below the *pre*-trim median of 367.
+  Two neighbours ride along: `docs/tools.md` must cover exactly the published
+  roster (the trim is only honest while the long form is complete), and the
+  payload must stay dominated by derived schema rather than prose, which is the
+  premise for deliberately NOT pinning a total-payload budget here. Run the
+  file directly for the per-key and per-tool breakdown.
+
 - **`upstream-unknown`: a checkout with no tracked upstream says so instead of
   answering anyway (main-memshelf#154).** Both the unpushed split and the
   renderer clock need an upstream; a detached HEAD has none, and doctor used
@@ -18,6 +33,17 @@ once code ships.
   measured — check out a commit, not a branch, so this was the common case,
   not the corner one. Warning, and only on a shelf that has a remote at all:
   a purely local shelf has no renderer to be fair to.
+
+- **`renderer-wait-unknown`: where the arrival cannot be read, `doctor` says so
+  (`unknown`, #125).** `git clone` writes no reflog for the branch it sets up
+  — measured 2026-09-06: `git reflog show origin/main` in a just-cloned
+  repository exits 0 and prints nothing — so in CI and in the ephemeral agent
+  sessions where #154's false verdicts were collected, nothing local records
+  when work reached the remote. The commit date still caps the wait from
+  above, nothing bounds it from below, and «the renderer is stopped» is not a
+  fact that checkout owns. Reported at the third level rather than folded into
+  either «ok» or «error», with the redirect that answers it: the renderer's own
+  job run (queued, failing, disabled).
 
 ### Changed
 
@@ -28,11 +54,26 @@ once code ships.
   while the bot's run waits in the queue produced «the renderer is not
   lagging, it is stopped» — true about the ledger, false about the renderer.
   Measured on main-memshelf 2026-09-05 and again 2026-09-06, both times with
-  the `shelf-derived` run visibly `queued`. The clock now starts when the
-  oldest uncounted episode became visible on the tracked upstream; a shelf
-  with no upstream has no renderer to be fair to and keeps the ledger clock.
-  A renderer that has held an episode past the threshold is still an error,
-  which is the case #89 was built for.
+  the `shelf-derived` run visibly `queued`. A renderer that has held an
+  episode past the threshold is still an error, which is the case #89 was
+  built for; a shelf with no upstream has no renderer to be fair to and keeps
+  the ledger clock.
+
+- **…and it reads that arrival from the reflog, not from the episode's commit
+  date.** The first cut of the clock above took `git log -1 --format=%cI
+  <upstream> -- <episode>`, which is when the episode was *written*. On this
+  shelf the two are routinely a working day apart: the owner's machine runs
+  «shelve now, push when confirmed», so shelve-in-the-morning /
+  push-in-the-evening is the normal day. Measured on a throwaway origin
+  2026-09-06 — commit 11:33, push 20:33, `%cI` on `origin/main` still 11:33 —
+  and `git pull --rebase` does not launder it, because with the remote unmoved
+  there is nothing to replay. At main-memshelf's 6h threshold that is a fresh
+  `derived-stale` error five minutes after a healthy push, whose documented
+  response is the manual `rebuild` the #58 split exists to prevent. The clock
+  now brackets the arrival: the commit date bounds the wait from above, this
+  clone's reflog for the upstream ref from below, and an entry written by this
+  clone's own push dates it exactly.
+
 
 - **Tool descriptions in the MCP schema are one selection-oriented sentence
   each; the long form moved to `docs/tools.md` (#111).** Tool schemas ride in
