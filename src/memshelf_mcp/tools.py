@@ -13,6 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from memshelf_mcp import instances
 from memshelf_mcp.core.advisor import (
     DEFAULT_BUDGET_TOKENS,
     STALE_AFTER_TURNS,
@@ -89,6 +90,10 @@ class ShelfScopedInput(BaseModel):
             )
         if resolved != self.shelf_path:
             self.shelf_path = resolved
+        # This is the one place every shelf-scoped call passes through, and a
+        # call means the host is talking to *this* process — the instance with
+        # a log. Hence the neighbour check lives here and not at startup (#115).
+        instances.observe(resolved)
         return self
 
 
