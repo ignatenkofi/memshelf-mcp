@@ -97,7 +97,11 @@ def test_shell_with_pattern_in_argv_is_not_counted():
     Отсекается по `comm`: имя исполняемого файла обязано быть
     интерпретатором, а не bash.
     """
-    noise = subprocess.Popen(["bash", "-c", f"# {MARKER}\nsleep 30"],
+    # `; :` в конце обязателен: без него bash делает exec-оптимизацию —
+    # единственная внешняя команда заменяет процесс, маркер уходит из argv
+    # вместе с ним, и фикстура перестаёт воспроизводить дефект. Поймано
+    # мутацией: снятие отсева по `comm` тест не покрасило.
+    noise = subprocess.Popen(["bash", "-c", f"# {MARKER}\nsleep 30; :"],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         time.sleep(0.5)
