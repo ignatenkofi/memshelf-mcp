@@ -10,6 +10,19 @@ once code ships.
 
 ### Added
 
+- **`check-shelve-copies.sh --discover` looks for the copies instead of asking
+  you where they are (claude-bus#21).** The checker existed, but its acceptance
+  — "a comparison you can run with a command" — was only half met: the command
+  took paths, and the paths were the missing knowledge. The issue that opened
+  the subject could not locate one of the four copies at all, reporting
+  `~/.claude/plugins/marketplaces` empty while the skill was live in the
+  session; it is materialised in agent containers under
+  `~/.claude/skills/synced/<id>/`, which nobody thought to look at. The search
+  list now lives in the script, every location it tried is printed, and a host
+  that exposes no copy exits `2` with the search list rather than `0` — an
+  empty search is not a clean verdict. Named paths still work, may be mixed
+  with `--discover`, and a file reached twice is judged once.
+
 - **A second server instance working the same shelf is now noticed (#115).**
   Claude Desktop was observed starting two process trees for one extension
   launch; the orphan lived 25+ minutes with `stdout` and `stderr` on

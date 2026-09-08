@@ -14,18 +14,117 @@
 #   2. at least one line stages the episode by path: `git add [--] …docs/…`.
 #
 # Usage: check-shelve-copies.sh <SKILL.md>...
+#        check-shelve-copies.sh --discover [<SKILL.md>...]
 #   exit 0 — every copy passes; 1 — a copy fails or is missing (the report
-#   names the file and the line); 2 — no paths given.
+#   names the file and the line); 2 — nothing to compare (no arguments, or
+#   `--discover` on a host that exposes no copy at all).
 #
-# Run it over every copy you can reach — the packaged one next to this script,
-# a shelf's `.claude/skills/shelve/SKILL.md`, an account sync under
-# `~/.claude/skills/` — so a divergence is a red line, not a memory.
+# `--discover` exists because the acceptance in claude-bus#21 asks for a
+# comparison "you can run with a command", and the command that takes paths
+# demands the very knowledge that was missing: where the copies are. The issue
+# itself could not locate the fourth one — `~/.claude/plugins/marketplaces` was
+# empty on the owner's machine while the skill was live in the session. It is
+# materialised in agent containers under `~/.claude/skills/synced/<id>/`, which
+# no one thought to look at. So the search list lives here, in code, and every
+# location it tried is printed on stderr: "found none" must be readable as
+# "this host exposes none", never as "clean".
 set -u
 
-if [ "$#" -eq 0 ]; then
+usage() {
   echo "usage: $0 <SKILL.md>..." >&2
+  echo "       $0 --discover [<SKILL.md>...]" >&2
+}
+
+discover=0
+paths=""
+
+# add_path <path> — append once, physical when the directory resolves.
+# A path whose directory does NOT exist is kept verbatim: someone named it and
+# expects a verdict on it, and normalising it away would turn "no such file"
+# into silence.
+add_path() {
+  _ap="$1"
+  _ap_dir="$(cd "$(dirname "$_ap")" 2>/dev/null && pwd -P)"
+  [ -n "$_ap_dir" ] && _ap="$_ap_dir/$(basename "$_ap")"
+  if printf '%s' "$paths" | grep -qxF -- "$_ap"; then return 0; fi
+  paths="$paths$_ap
+"
+  return 0
+}
+
+# `"$@"` under `set -u` with no positional parameters is a known bash 3.2
+# trap, and 3.2 is the shell this repo's siblings are written against.
+if [ "$#" -gt 0 ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      --discover) discover=1 ;;
+      -h|--help) usage; exit 2 ;;
+      -*) echo "unknown option: $arg" >&2; usage; exit 2 ;;
+      *) add_path "$arg" ;;
+    esac
+  done
+fi
+
+if [ "$discover" -eq 1 ]; then
+  self_dir="$(cd "$(dirname "$0")" && pwd -P)"
+  # Where copies of this skill actually turn up. The packaged one goes first
+  # so its absence is loud when the script runs from a stray checkout.
+  locations="$self_dir/skills/shelve/SKILL.md
+${HOME:-}/.claude/skills/shelve/SKILL.md
+${HOME:-}/.claude/skills/synced/*/shelve/SKILL.md
+${HOME:-}/.claude/plugins/*/skills/shelve/SKILL.md
+${HOME:-}/.claude/plugins/*/*/skills/shelve/SKILL.md
+${HOME:-}/.claude/plugins/marketplaces/*/*/skills/shelve/SKILL.md
+$PWD/.claude/skills/shelve/SKILL.md"
+  [ -n "${MEMSHELF_ROOT:-}" ] && locations="$locations
+$MEMSHELF_ROOT/.claude/skills/shelve/SKILL.md"
+
+  # IFS stays on newline for the whole block, and globbing is off while the
+  # list is split: a home directory may contain a space, and default splitting
+  # would tear such a location in half — first here, then again in the inner
+  # `for`, which is why the restore comes after both loops and not between
+  # them. Pathname expansion yields one word per match either way; that part
+  # does not depend on IFS.
+  _old_ifs="$IFS"
+  IFS='
+'
+  set -f
+  set -- $locations
+  set +f
+
+  echo "looked in:" >&2
+  for pattern in "$@"; do
+    [ -n "$pattern" ] || continue
+    hits=0
+    for match in $pattern; do
+      if [ -f "$match" ]; then
+        hits=$((hits + 1))
+        add_path "$match"
+        echo "  found $match" >&2
+      fi
+    done
+    [ "$hits" -eq 0 ] && echo "  none  $pattern" >&2
+  done
+  IFS="$_old_ifs"
+fi
+
+if [ -z "$paths" ]; then
+  if [ "$discover" -eq 1 ]; then
+    echo "nothing to compare: this host exposes no copy of the skill." >&2
+    echo "An empty search is not a clean verdict." >&2
+  else
+    usage
+  fi
   exit 2
 fi
+
+# Split the collected list once, on newlines, then hand it to the loop as
+# positional parameters: IFS is back to normal before any command inside runs.
+_old_ifs="$IFS"
+IFS='
+'
+set -- $paths
+IFS="$_old_ifs"
 
 rc=0
 for path in "$@"; do
