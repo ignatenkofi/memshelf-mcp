@@ -129,6 +129,44 @@ bash-3.2 compatible (macOS). Scaffolding this into `memshelf init` (a
 `--with-hook` flag that installs it and sets `core.hooksPath`) is a planned
 follow-up — it needs the adapter files shipped as package data.
 
+## Are the copies of the skill still saying the same thing?
+
+The `shelve` skill exists in more than one place at once — the copy packaged
+here, a shelf's own `.claude/skills/shelve/SKILL.md`, and an account-level copy
+synced into agent sessions. They are **not** meant to be byte-equal: the
+packaged one is the prompt-only fallback for hosts without the MCP server,
+while the synced one drives the tool path. What they must agree on is the
+handful of rules that make an episode land cleanly — chiefly *stage the episode
+by path, never `git add -A`/`git add -u`*, whose absence from one copy went
+unnoticed for sixteen days (claude-bus#21).
+
+```bash
+adapters/claude-code/check-shelve-copies.sh --discover
+```
+
+`--discover` searches the places these copies actually turn up (`~/.claude/
+skills/`, `~/.claude/skills/synced/*/`, `~/.claude/plugins/…`, `$MEMSHELF_ROOT`,
+the current directory, and the packaged copy next to the script) and prints
+every location it tried. That matters: the issue above could not locate one of
+the copies at all, because it is materialised in agent containers and not on
+the machine where the search was run. Named paths still work and can be mixed
+in — `check-shelve-copies.sh --discover /elsewhere/SKILL.md` — and a file
+reached twice is judged once.
+
+The check is deliberately narrow, and narrow in a specific way: a copy that
+*names* the blanket command in order to forbid it stays green, because the
+first form of this acceptance ("grep finds no `git add -A`") would have
+coloured exactly the repaired copies red.
+
+| exit | meaning |
+|---|---|
+| `0` | every copy examined prescribes staging by path |
+| `1` | a copy prescribes a blanket stage, never stages by path, or is missing |
+| `2` | nothing to compare — no arguments, or `--discover` on a host that exposes no copy |
+
+`2` is not a pass. A host with no copy has proved nothing about the copies that
+exist elsewhere, and the report says so instead of printing silence.
+
 ## Chat projects (Claude Desktop / web)
 
 No hooks there: paste the block from
