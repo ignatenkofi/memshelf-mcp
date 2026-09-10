@@ -1,0 +1,2 @@
+date	episode_id	mode	approx_tokens_in	digest_tokens	notes
+2026-09-10	2026-09-10-memshelf-issue-sweep-17-18-87-115-142	live	1138000	183	approx_tokens — оценка: размер jsonl-транскрипта сессии 4.55 МБ ÷ 4, не замер токенизатором. Набор из 30 бенч-запросов остаётся в scratchpad сессии и в репо не входит.

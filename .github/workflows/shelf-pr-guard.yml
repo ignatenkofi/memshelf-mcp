@@ -1,0 +1,51 @@
+name: shelf-pr-guard
+# Гард полки проекта (shelf/). Образец — одноимённые workflow issue-kit и
+# pii-mcp, устройство полки то же: подпапка репо, storage plain, бота нет,
+# производные (ledger.tsv, INDEX.md, stats.svg, .meta.json) пишет тот же
+# коммит, что и эпизод. Отсюда обе проверки смотрят на дерево, а не на историю:
+#
+# 1. `memshelf doctor` — эпизоды здоровы, секреты на диск не попали.
+# 2. `memshelf rebuild --check` — производные соответствуют эпизодам.
+#    Отставание производных на ветке здесь не норма (как было бы при боте
+#    на main), а ровно тот дефект, который надо ловить: эпизод положили,
+#    rebuild не прогнали.
+#
+# Отличие от соседей: memshelf ставится из этого же чекаута, а не с GitHub —
+# полка проверяется тем кодом, который лежит рядом с ней. Раннер — как у
+# остальных джоб репо: ubuntu-latest.
+
+on:
+  pull_request:
+    paths:
+      - 'shelf/**'
+      - '.github/workflows/shelf-pr-guard.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'shelf/**'
+      - '.github/workflows/shelf-pr-guard.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Установить memshelf из этого чекаута
+        run: |
+          python -m pip install --upgrade pip
+          pip install --quiet .
+
+      - name: Эпизоды здоровы
+        run: memshelf doctor --shelf shelf
+
+      - name: Производные файлы соответствуют эпизодам
+        run: memshelf rebuild --shelf shelf --check

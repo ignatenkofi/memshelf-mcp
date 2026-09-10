@@ -287,6 +287,17 @@ week-report infographic from the dogfood shelf.
 | [`adapters/claude-code/`](adapters/claude-code/) | Claude Code plugin: `/shelve` skill + SessionStart/SessionEnd/PreCompact hooks |
 | [`adapters/claude-desktop/`](adapters/claude-desktop/) | Claude Desktop `.mcpb` extension: builder, bundle checker, default-shelf setting |
 
+## Project memory shelf
+
+`shelf/` is this project's own memory shelf, dogfooding the tool it ships:
+session episodes with decisions, rejected options and their reasons. Before
+asserting anything about past work here, read [`shelf/INDEX.md`](shelf/INDEX.md)
+and fetch the one episode it points at — a guess about a past decision is a
+defect, not an estimate. Derived files (`ledger.tsv`, `INDEX.md`, `stats.svg`,
+`.meta.json`) are written by the same commit as the episode
+(`memshelf rebuild --shelf shelf`); the `shelf-pr-guard` workflow fails a PR or
+a push to `main` where they drifted.
+
 ## Origin
 
 Designed as RFC-0001 in the docshelf-mcp repo

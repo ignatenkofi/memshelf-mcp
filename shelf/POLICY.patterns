@@ -1,0 +1,15 @@
+# POLICY.patterns — machine-readable redaction rules for this shelf (issue #16).
+#
+# One rule per line:  <kind><whitespace><regex>
+#   - lines starting with # and blank lines are ignored;
+#   - the FIRST whitespace run splits the kind from the regex, so the regex may
+#     contain spaces; it is an extended regular expression (grep -E / Python re);
+#   - a match is masked «redacted:<kind>» by the shelve redaction pass (fixed
+#     mask, no length leak), flagged at rest by `memshelf doctor`, and blocked
+#     by the pre-commit guard. Write both Cyrillic and Latin forms for homograph
+#     safety.
+#
+# Uncomment / adapt to your shelf's domain, e.g.:
+# email        [A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}
+# For a course shelf enforcing "codes only, no student identifiers":
+# student-id   S[0-9]{1,2}

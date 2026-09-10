@@ -1,0 +1,18 @@
+# shelf.yml — openshelf manifest (shelf-spec v0)
+spec_version: "0.1"
+mode: single
+name: "memshelf-mcp — project shelf"
+profile: memory
+docs_root: docs
+categories:
+  - topics
+  - research
+  - sessions
+index:
+  path: INDEX.md
+  generated_by: docshelf-mcp
+ledger:
+  path: ledger.tsv
+policy:
+  path: POLICY.md
+  patterns: POLICY.patterns

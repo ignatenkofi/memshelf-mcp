@@ -10,6 +10,13 @@ once code ships.
 
 ### Added
 
+- **The repo carries its own memory shelf (`shelf/`).** Storage plain, tracked
+  like the project shelves of issue-kit and pii-mcp; the first episode is the
+  2026-09-10 sweep of #17, #18, #87, #115 and #142. Derived files are written
+  by the same commit as the episode, and a `shelf-pr-guard` workflow runs
+  `memshelf doctor` and `memshelf rebuild --check` from the checkout itself
+  on every PR or push to `main` that touches `shelf/**`.
+
 - **Release signs the desktop bundles when it can, and starts the macOS one
   where it can (#87).** Two things the previous `bundles` job left open. The
   macOS bundle was cross-built on linux and never started: `release.yml` now
