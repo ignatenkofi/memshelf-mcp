@@ -14,8 +14,10 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 from typing import Any
 
+import anyio
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
@@ -414,6 +416,87 @@ def memshelf_import(params: ImportInput) -> str:
         return _error_response(exc, "memshelf_import")
 
 
+# A server that no client ever greets is the orphan of #115: the host spawned
+# it with an open pipe, never sent `initialize`, and it sat for hours with a
+# stdin that would not close. Nothing on the wire tells it apart from a slow
+# client except time, so time is the criterion.
+HANDSHAKE_TIMEOUT_ENV = "MEMSHELF_HANDSHAKE_TIMEOUT"
+DEFAULT_HANDSHAKE_TIMEOUT = 60.0
+EXIT_NO_CLIENT = 3
+
+
+def handshake_timeout() -> float:
+    """Seconds to wait for `initialize`; ``0`` (or a negative value) disables.
+
+    Read per call, not at import, for the same reason as the shelf path: the
+    host sets the environment, and the tests flip it between cases. An
+    unreadable value falls back to the default rather than to "disabled" — a
+    typo must not silently reopen the hole this closes.
+    """
+    raw = os.environ.get(HANDSHAKE_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return DEFAULT_HANDSHAKE_TIMEOUT
+    try:
+        return max(float(raw), 0.0)
+    except ValueError:
+        logger.warning(
+            "%s=%r is not a number; using the default of %s s",
+            HANDSHAKE_TIMEOUT_ENV,
+            raw,
+            DEFAULT_HANDSHAKE_TIMEOUT,
+        )
+        return DEFAULT_HANDSHAKE_TIMEOUT
+
+
+async def serve_stdio(timeout: float) -> None:
+    """Run the stdio transport; leave if no client says `initialize` in time.
+
+    The deadline is observed through the SDK's middleware chain, which sees
+    `initialize` before the handshake commits. Once a client has greeted the
+    server the watchdog stands down for good: an idle *connected* session is
+    the normal state, and stdin EOF already ends it.
+
+    The exit is ``os._exit``, not a cancellation, and that is measured rather
+    than chosen: the transport reads stdin on a worker thread with a blocking
+    ``readline``, and anyio delivers a cancellation to such a task only after
+    the thread returns — which, on the open-but-silent pipe this guards
+    against, is never. Cancelling the task group logged the deadline and then
+    hung exactly like the orphan it was meant to end.
+    """
+    greeted = anyio.Event()
+
+    async def notice_handshake(ctx: Any, call_next: Any) -> Any:
+        if ctx.method == "initialize":
+            greeted.set()
+        return await call_next(ctx)
+
+    async def watchdog() -> None:
+        with anyio.move_on_after(timeout):
+            await greeted.wait()
+        if greeted.is_set():
+            return
+        logger.error(
+            "no client completed the MCP handshake within %.0f s; exiting so this "
+            "process does not outlive a host that never used it (#115). "
+            "%s=0 disables this deadline.",
+            timeout,
+            HANDSHAKE_TIMEOUT_ENV,
+        )
+        instances.withdraw()
+        logging.shutdown()
+        os._exit(EXIT_NO_CLIENT)
+
+    mcp.middleware.append(notice_handshake)
+    try:
+        async with anyio.create_task_group() as tg:
+            if timeout > 0:
+                tg.start_soon(watchdog)
+            await mcp.run_stdio_async()
+            tg.cancel_scope.cancel()
+    finally:
+        mcp.middleware.remove(notice_handshake)
+
+
 def main(argv: list[str] | None = None) -> None:
     """Console-script entry point: launch the stdio MCP server."""
     parser = argparse.ArgumentParser(
@@ -430,7 +513,7 @@ def main(argv: list[str] | None = None) -> None:
     # incident its stderr was /dev/null — so only registration happens here;
     # the warning rides on the call path, where the live instance is.
     instances.register(default_shelf_path())
-    mcp.run()
+    anyio.run(serve_stdio, handshake_timeout())
 
 
 if __name__ == "__main__":
