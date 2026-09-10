@@ -35,11 +35,18 @@ class RecallResult:
     truncated: bool
 
 
+#: Candidates taken from each side before reciprocal-rank fusion (#17).
+FUSION_POOL = 20
+
+
 @dataclass
 class SearchHit:
     address: str
+    #: Grep: occurrence count. Hybrid (#17): reciprocal-rank-fusion score ×1000.
     score: int
     snippet: str
+    #: ``grep``, ``semantic`` or ``both`` — which ranking(s) surfaced the hit.
+    via: str = "grep"
 
 
 def read_index(shelf_root: str | Path) -> str:
@@ -141,22 +148,53 @@ def recall(
     )
 
 
-def search(shelf_root: str | Path, query: str, *, max_results: int = 10) -> list[SearchHit]:
+def search(
+    shelf_root: str | Path,
+    query: str,
+    *,
+    max_results: int = 10,
+    semantic: bool | None = None,
+) -> list[SearchHit]:
     """Grep the shelf; return episode addresses.
 
     Addresses, not paths that happen to exist here: `shelve` no longer lets
     docshelf split (#109), so every hit is a committed file and means the same
     thing in any other checkout. A shelf that still carries a split directory
     from before the fix will hit inside it — `memshelf prune-splits` clears it.
+
+    ``semantic`` (#17): ``None`` uses the embedding sidecar when it is usable
+    (enabled, model installed, index built) and plain grep otherwise; ``True``
+    insists on it and raises :class:`memshelf_mcp.core.semantic.SemanticError`
+    when it cannot; ``False`` is grep alone. In hybrid mode the two rankings
+    are fused by reciprocal rank and the hit says which side(s) found it.
     """
+    from memshelf_mcp.core import semantic as sidecar
+
+    root = Path(shelf_root).expanduser().resolve()
+    hybrid = sidecar.usable(root) if semantic is None else semantic
+    # Fusion needs a longer tail from each side than the caller asked for:
+    # a hit at grep rank 12 and semantic rank 1 should still make the top 10.
+    # The floor keeps the ranking the same whether the caller asks for 3 or
+    # 10 (a bench at k=5 and k=10 must agree on hit@1).
+    limit = max(max_results * 2, FUSION_POOL) if hybrid else max_results
+    hits = _grep(root, query, limit)
+    if not hybrid:
+        return hits
+    nearest = sidecar.query(root, query, k=limit)
+    fused = sidecar.fuse(hits, nearest, max_results=max_results)
+    return [
+        SearchHit(address=f.address, score=f.score, snippet=f.snippet, via=f.via) for f in fused
+    ]
+
+
+def _grep(root: Path, query: str, limit: int) -> list[SearchHit]:
     from docshelf_mcp.core.shelf import Shelf
 
     from memshelf_mcp.core.archive import archive_root
 
-    root = Path(shelf_root).expanduser().resolve()
     hits = [
         SearchHit(address=h["relative_path"], score=h["score"], snippet=h.get("snippet", ""))
-        for h in Shelf(root).search(query, max_results=max_results)
+        for h in Shelf(root).search(query, max_results=limit)
     ]
     # The archive is a separate docshelf shelf, so its documents are invisible
     # to the parent's search. A rolled-up episode that cannot be found is a
@@ -169,8 +207,8 @@ def search(shelf_root: str | Path, query: str, *, max_results: int = 10) -> list
                 score=h["score"],
                 snippet=h.get("snippet", ""),
             )
-            for h in Shelf(archive).search(query, max_results=max_results)
+            for h in Shelf(archive).search(query, max_results=limit)
         ]
         hits.sort(key=lambda hit: hit.score, reverse=True)
-        hits = hits[:max_results]
+        hits = hits[:limit]
     return hits

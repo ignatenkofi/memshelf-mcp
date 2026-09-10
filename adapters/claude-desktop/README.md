@@ -115,6 +115,17 @@ That catches what validation cannot: an over-pruned interpreter, a launcher that
 cannot find `lib`, vendored wheels built for the wrong ABI, and `mcp_config`
 paths pointing at files that are not in the zip.
 
+## A server the host never greets
+
+Claude Desktop has been seen spawning a server process it then never speaks
+to (#115): the pipe stays open, `initialize` never arrives, and the process
+sits there for hours. The server therefore waits `MEMSHELF_HANDSHAKE_TIMEOUT`
+seconds (default 60) for the handshake and exits with status 3 and one
+stderr line if none comes. A session that did say hello is never affected,
+however long it idles. Set the variable to `0` in the host's environment to
+switch the deadline off; `find-orphan-servers.sh` still lists whatever is
+left.
+
 A bundle can only be started on the platform it targets. `linux-x86_64` exists
 as a build target for exactly this reason — CI and the build machine can run the
 standalone path there, and a mistake in the shared machinery fails the same way

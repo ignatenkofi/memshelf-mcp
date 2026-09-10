@@ -114,21 +114,35 @@ accepted (not overridden) most of the time in dogfood use.
 
 ## M3 — Retrieval upgrades, reuse layer & second surface
 
-- Embeddings sidecar behind the same `search` signature (docshelf's
-  documented extension point).
+- ~~Embeddings sidecar behind the same `search` signature (docshelf's
+  documented extension point).~~ — **done** (#17): `memshelf semantic build`
+  writes a model2vec index under the state directory (never in the shelf);
+  `search` fuses grep and nearest-chunk rankings by reciprocal rank when the
+  index is usable and is unchanged otherwise; `MEMSHELF_SEMANTIC=off` is the
+  kill-switch; `memshelf search-bench` measures. Optional extra
+  `memshelf-mcp[semantic]`; no new MCP tool (DECISIONS 2026-09-10).
 - Chat-project surface documented end-to-end (Desktop/web, manual triggers).
 - Cross-shelf meta-INDEX experiment (federation open question).
-- **Archive-as-raw-material** (MANIFEST hero scenario 3): tag/graph views
+- ~~**Archive-as-raw-material** (MANIFEST hero scenario 3): tag/graph views
   over episodes (frontmatter tags + cross-episode links in Decisions),
   quarter retrospectives, **fork-a-thread** (bootstrap a fresh session from
   INDEX + selected episodes — continue an old discussion branch as a
-  sub-thread without its full history).
-- **Artifact mirror** experiment: INDEX (± episodes) as private claude.ai
-  artifacts for phone-side reading (open question 8).
+  sub-thread without its full history).~~ — **done** (#18): `memshelf tags`,
+  `graph` (JSON / Mermaid, edges carry the section they sit in), `retro
+  --quarter`, `fork --episode ID [--section S]`; CLI only, by decision
+  (DECISIONS 2026-09-10). One real fork on the dogfood shelf ran end-to-end.
+- ~~**Artifact mirror** experiment: INDEX (± episodes) as private claude.ai
+  artifacts for phone-side reading (open question 8).~~ — **done** (#18):
+  `memshelf mirror` renders one static page; publishing it is a host action,
+  no adapter (ARCHITECTURE open question 8, resolved).
 
-**Exit criteria:** search-miss rate measurably better than grep baseline on
-the dogfood shelves; one non-author user runs the chat-project flow from docs
-alone; one real "fork from episode" session succeeds end-to-end.
+**Exit criteria:** ~~search-miss rate measurably better than grep baseline on
+the dogfood shelves~~ (met, #17: 30 hand-written queries on the dogfood shelf —
+10 Russian paraphrases, 10 English queries against Russian episodes, 10 short
+keyword queries — grep misses 29/30, the hybrid 14/30 at k=5 and 9/30 at k=10;
+MRR 0.03 → 0.43; no query where the hybrid lost a grep hit); one non-author
+user runs the chat-project flow from docs alone; ~~one real "fork from
+episode" session succeeds end-to-end~~ (met, #18).
 
 ## Explicitly deferred
 

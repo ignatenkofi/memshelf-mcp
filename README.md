@@ -97,6 +97,11 @@ memshelf stats  --shelf ~/my-shelf   # claimed + realized savings
 memshelf doctor --shelf ~/my-shelf   # exit 1 on integrity errors
 ```
 
+`pip install 'memshelf-mcp[semantic]'` adds an embedding sidecar so `search`
+also finds paraphrases and the other language (`memshelf semantic build
+--shelf ~/my-shelf` once; `MEMSHELF_SEMANTIC=off` turns it off). Optional:
+the base install stays grep-only and as light as it is.
+
 ## Tool surface
 
 One verb per job; the same names over MCP (`memshelf_*`) and in the CLI
@@ -119,6 +124,13 @@ One verb per job; the same names over MCP (`memshelf_*`) and in the CLI
 | `resolve` | Settle multi-writer conflicts: regenerate derived, union the recall log |
 | `doctor` | Diagnose: episode schema, digest contract at rest, secret shapes, index bloat |
 | `prune-splits` | CLI only — remove H2 split directories git never got (migration for #109) |
+| `tags` | CLI only — episodes grouped by frontmatter tag (#18) |
+| `graph` | CLI only — who mentions whom: cross-episode id references as JSON or Mermaid (#18) |
+| `retro` | CLI only — one quarter of the shelf as a Markdown retrospective (#18) |
+| `fork` | CLI only — bootstrap a fresh session from INDEX + selected episodes or sections (#18) |
+| `mirror` | CLI only — INDEX (± episodes) as one self-contained HTML page for phone-side reading (#18) |
+| `semantic` | CLI only — `build` / `status` / `drop` the embedding sidecar that turns `search` hybrid; lives outside the shelf, needs `pip install 'memshelf-mcp[semantic]'` (#17) |
+| `search-bench` | CLI only — hit@1 / hit@k / MRR of grep vs hybrid on a `query<TAB>expected-id` file (#17) |
 
 ## The rules the tools enforce
 

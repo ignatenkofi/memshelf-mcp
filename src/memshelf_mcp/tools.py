@@ -381,11 +381,22 @@ def run_index(params: IndexInput) -> dict:
 
 
 def run_search(params: SearchInput) -> dict:
-    """Grep the shelf; return matching episode addresses with snippets."""
+    """Grep the shelf; return matching episode addresses with snippets.
+
+    ``mode`` says whether the semantic sidecar took part (#17): ``hybrid``
+    when it did, ``grep`` otherwise — so a caller can tell a paraphrase miss
+    from a sidecar that was never built.
+    """
+    from memshelf_mcp.core import semantic
+
     hits = search(params.shelf_path, params.query, max_results=params.max_results)
     return {
         "status": "ok",
-        "hits": [{"address": h.address, "score": h.score, "snippet": h.snippet} for h in hits],
+        "mode": "hybrid" if semantic.usable(params.shelf_path) else "grep",
+        "hits": [
+            {"address": h.address, "score": h.score, "snippet": h.snippet, "via": h.via}
+            for h in hits
+        ],
     }
 
 

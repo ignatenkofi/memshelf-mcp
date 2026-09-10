@@ -214,7 +214,7 @@ prompt) injects the current `INDEX.md` — the entire standing memory cost.
 |---|---|---|
 | `memshelf_shelve` | `Shelf.add_document` + validation | Input: episode frontmatter fields, body sections, digest. Runs redaction → validates contract → writes → reindexes → auto-commits. Returns address + final digest + redaction report. |
 | `memshelf_recall` | `Shelf` read path | By id/path, optional `section` (H2 slug). Section-sized by default; whole episode only on request. |
-| `memshelf_search` | `Shelf.search` | Grep-level, returns addresses; embeddings later. |
+| `memshelf_search` | `Shelf.search` (+ embedding sidecar, #17) | Grep-level, returns addresses. When the optional sidecar is usable (`memshelf-mcp[semantic]` installed, index built under the state dir, `$MEMSHELF_SEMANTIC` not `off`) the grep and nearest-chunk rankings are fused by reciprocal rank; `mode` and per-hit `via` say which. Same signature either way. |
 | `memshelf_index` | read `INDEX.md` | Session-start bootstrap and mid-session refresh. |
 | `memshelf_doctor` | `docshelf_doctor` + episode checks | Schema drift, missing digests, secret-shaped strings that slipped through, ledger consistency. |
 | `memshelf_stats` | `ledger.tsv` | Transparent token accounting: standing cost (INDEX + digests) vs shelved mass, compression ratio, per-episode and cumulative savings — same tokenizer methodology as docshelf's `benchmarks/token_savings.py`. |
@@ -426,7 +426,7 @@ Rules that keep the boundary honest:
 | Write-only memory (digests too vague to trigger recall) | Digest contract + referent lint; `doctor` samples episodes and flags digest/body mismatch; success criterion #3 in MANIFEST is the acceptance test |
 | INDEX grows with the shelf (hundreds of episodes) | Date-prefixed sort; periodic **rollup** when navigation reaches a real share of the window: consolidate a quarter's episodes into one digest-of-digests, move originals to an `archive` category linked as a sub-shelf |
 | INDEX *entries* overpriced (`index-bloat`) | Budget is linear in shelf size (`doctor.index_budget`), so the check is on the price of a line, not the count of them; descriptions capped by `clamp_description` on both write and render; `doctor` attributes the overage to the term that caused it. A rollup is explicitly **not** the remedy — it removes entries and their allowance together |
-| Recall misses (grep can't find it) | Tags in frontmatter are search-indexed; digests are written to be greppable (named referents); embeddings remain the documented extension point |
+| Recall misses (grep can't find it) | Tags in frontmatter are search-indexed; digests are written to be greppable (named referents); the embedding sidecar (#17) catches paraphrases and cross-language queries — on the dogfood shelf 16/30 such queries in the top 5 against grep's 1/30 — and is optional, outside the shelf, rebuildable, and off with one variable |
 | Secret leakage | Redaction pass + private default + doctor scan; raw-URL mode gated behind explicit opt-in |
 | Accidental exfiltration (push of a memory shelf to the wrong place) | Default mode has no remote to push to; `git-remote` requires explicit opt-in, private visibility enforced by `doctor`, `autopush: false` |
 | Shelve interrupted mid-write | docshelf invariant reused: disk is source of truth, INDEX is a render — `rebuild_index`/`doctor` recovers; auto-commit is one atomic commit per shelve |
@@ -466,6 +466,13 @@ Rules that keep the boundary honest:
    arithmetic, and a deterministic ranking. Deeper harness integration stays
    available as a *host adapter* that fills the same input, which is where a
    host-specific parser belongs (portability rule 2).
-8. **Artifact mirror** (ROADMAP M3): publish INDEX (and episodes?) as
-   private claude.ai artifacts for phone-side reading — worth the adapter,
-   or does MCP-everywhere make it moot?
+8. ~~**Artifact mirror**~~ Resolved 2026-09-10 (#18): **the mirror is a
+   generated static page; publishing it is the host's job, not an adapter's.**
+   `memshelf mirror --out page.html` renders INDEX (± episodes) as one
+   self-contained HTML file — no scripts, no remote assets, episode text
+   escaped, INDEX lines linking to the episodes the page carries. Whatever
+   hosts a private static page (a claude.ai artifact, a gist, a phone's Files
+   app) can show it; the shelf on disk stays the canonical store, so
+   portability principle 9 is untouched and nothing is vendor-bound. An
+   artifact-publishing adapter was rejected as exactly that binding, for a
+   read mirror that MCP-everywhere makes optional anyway.
