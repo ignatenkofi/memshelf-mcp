@@ -10,6 +10,27 @@ once code ships.
 
 ### Added
 
+- **Release signs the desktop bundles when it can, and starts the macOS one
+  where it can (#87).** Two things the previous `bundles` job left open. The
+  macOS bundle was cross-built on linux and never started: `release.yml` now
+  builds it on a `macos-latest` (arm64, asserted with `uname -m`) runner and
+  runs the same `try_bundle.py` live check the linux bundle already gets, so
+  the interpreter it ships is the one that answered. Both bundle jobs attach
+  to the release independently; `create` is best-effort and `upload
+  --clobber` idempotent, so their order does not matter.
+
+  Signing is a composite action, `.github/actions/sign-bundles`: with
+  `MCPB_SIGNING_CERT` / `MCPB_SIGNING_KEY` in the repository secrets it runs
+  `mcpb sign` and then `mcpb verify`; without them it emits a notice and ships
+  unsigned. `verify` is a gate, not a report, and the reason is measured
+  rather than assumed: mcpb 2.1.2 answers "not signed" for any certificate the
+  runner's OS trust store does not vouch for (`verifyCertificateChain` false →
+  `status: "unsigned"`), a self-signed one included. So a self-signed key —
+  the obvious no-cost option — would leave the install warning exactly where
+  it is, and the certificate stays an owner decision the workflow does not
+  fake. Evidence the macOS path works: the arm64 bundle built and started on
+  this Mac passed all `try_bundle.py` checks, before and after signing.
+
 - **`check-shelve-copies.sh --discover` looks for the copies instead of asking
   you where they are (claude-bus#21).** The checker existed, but its acceptance
   — "a comparison you can run with a command" — was only half met: the command

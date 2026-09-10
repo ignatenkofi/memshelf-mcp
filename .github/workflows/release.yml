@@ -82,13 +82,18 @@ jobs:
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish
 
-  # #87 — ship the desktop bundles with the release. Until this job, the only
-  # way to get a .mcpb was to clone and build one. Signing stays open in #87:
-  # `mcpb sign` needs a certificate and a decision about where the key lives —
-  # owner-side prerequisites this job must not fake.
+  # #87 — ship the desktop bundles with the release. Until these jobs, the
+  # only way to get a .mcpb was to clone and build one.
   #
-  # Runs-on note: this is a public repo, hosted minutes are free here; the
-  # portfolio rule «hosted only where free» is satisfied.
+  # Signing: `.github/actions/sign-bundles` signs when the repository holds
+  # MCPB_SIGNING_CERT / MCPB_SIGNING_KEY (PEM, a code-signing certificate the
+  # OS trust store vouches for) and leaves the bundles unsigned — loudly — when
+  # it does not. A self-signed certificate buys nothing here: `mcpb verify`
+  # reports it as "not signed", so the install warning would stay. The
+  # certificate is an owner decision this workflow must not fake.
+  #
+  # Runs-on note: this is a public repo, hosted minutes are free here (macOS
+  # included); the portfolio rule «hosted only where free» is satisfied.
   bundles:
     needs: gate
     runs-on: ubuntu-latest
@@ -108,13 +113,51 @@ jobs:
         # manifest and cannot notice an over-pruned interpreter or a wheel for
         # the wrong ABI; only starting the bundle can.
         run: python3 adapters/claude-desktop/try_bundle.py dist/*-linux-x86_64.mcpb
-      - name: Build the macOS standalone (cross-built, not started)
-        # A bundle can only be *started* on the platform it targets; the
-        # builder cross-installs wheels and fetches the interpreter tarball by
-        # platform, and every mistake in the shared machinery fails identically
-        # on the linux bundle above. Verified-on-macOS stays a #87 open item.
-        run: python3 adapters/claude-desktop/build.py --variant standalone --target macos-arm64 --out dist
+      - uses: ./.github/actions/sign-bundles
+        with:
+          dir: dist
+          cert: ${{ secrets.MCPB_SIGNING_CERT }}
+          key: ${{ secrets.MCPB_SIGNING_KEY }}
+          intermediates: ${{ secrets.MCPB_SIGNING_INTERMEDIATES }}
       - name: Attach to the GitHub release
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag \
+            --title "$GITHUB_REF_NAME" --generate-notes || true
+          gh release upload "$GITHUB_REF_NAME" dist/*.mcpb --clobber
+
+  # The macOS bundle is built *and started* where it can be: on a macOS arm64
+  # runner. Cross-building it on linux (the previous shape of this workflow)
+  # proved the shared machinery, never the interpreter it ships.
+  bundles-macos:
+    needs: gate
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: The runner is the bundle's platform
+        # `macos-latest` is arm64 today (actions/runner-images README). If
+        # GitHub ever re-points the label, this fails before a bundle that was
+        # never started on its own platform can reach a release.
+        run: test "$(uname -m)" = "arm64"
+      - name: Build the macOS standalone
+        run: python3 adapters/claude-desktop/build.py --variant standalone --target macos-arm64 --out dist
+      - name: Start it and talk MCP to it
+        run: python3 adapters/claude-desktop/try_bundle.py dist/*-macos-arm64.mcpb
+      - uses: ./.github/actions/sign-bundles
+        with:
+          dir: dist
+          cert: ${{ secrets.MCPB_SIGNING_CERT }}
+          key: ${{ secrets.MCPB_SIGNING_KEY }}
+          intermediates: ${{ secrets.MCPB_SIGNING_INTERMEDIATES }}
+      - name: Attach to the GitHub release
+        # Both bundle jobs may reach this step at once; `create` is best-effort
+        # and `upload --clobber` is idempotent, so the order does not matter.
         run: |
           gh release create "$GITHUB_REF_NAME" --verify-tag \
             --title "$GITHUB_REF_NAME" --generate-notes || true

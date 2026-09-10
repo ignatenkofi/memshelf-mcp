@@ -28,8 +28,29 @@ will not recognise the type — install the standalone one, which carries a
 interpreter and every dependency, and therefore cares about nothing on the
 machine except the CPU architecture.
 
-Neither bundle is signed. Desktop will say so on install; `mcpb sign` is the
-fix if that ever matters.
+## Signing
+
+A release signs its bundles when the repository holds a code-signing
+certificate in the secrets `MCPB_SIGNING_CERT` and `MCPB_SIGNING_KEY` (PEM;
+`MCPB_SIGNING_INTERMEDIATES` for a chain). Without them the bundles ship
+unsigned and the release run says so in a notice — it never fakes a signature.
+
+Only a certificate the operating system's trust store vouches for changes
+anything. `mcpb verify` (2.1.2) reports a bundle signed with any other
+certificate — a self-signed one included — as "not signed", so the install
+warning would stay; the signing step therefore runs `verify` after `sign` and
+fails the release on a certificate the verifier rejects. Put the certificate in
+place with:
+
+```bash
+gh secret set MCPB_SIGNING_CERT < cert.pem
+```
+
+```bash
+gh secret set MCPB_SIGNING_KEY < key.pem
+```
+
+Both read the PEM from a file, so nothing lands in the shell history.
 
 ## The default shelf
 
