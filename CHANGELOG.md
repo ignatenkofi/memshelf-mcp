@@ -44,6 +44,30 @@ once code ships.
   that fits. Exit criterion of #18 met: one real fork on the dogfood shelf
   produced a document the receiving session could continue from.
 
+- **A server nobody greets now leaves on its own (#115, the other half).**
+  The orphan of the issue was read as a transport puzzle: `stdin` on
+  `/dev/null`, unix sockets on fd 4-7, so "stdin EOF ends the server" could
+  not apply. Reading the SDK settled it the other way — mcp 2.0's
+  `stdio_server()` *itself* duplicates the wire to a private fd ≥ 3 and points
+  fd 0 at `/dev/null` and fd 1 at stderr while serving, so those descriptors
+  are what every healthy instance shows, and the transport is classic stdio
+  after all. The orphan is simpler than a lost peer: the host spawned it with
+  an open pipe and never sent `initialize`. Measured on the host log of the
+  reporting Mac since 2026-04-09: 85 `Starting memshelf-mcp` banners against
+  57 `initialize` requests — 28 processes that were started and never used.
+
+  Time is the only thing that tells such a process from a slow client, so the
+  server now waits `$MEMSHELF_HANDSHAKE_TIMEOUT` seconds (default 60) for
+  `initialize`, observed through the SDK's middleware chain, and exits with
+  status 3 and one stderr line if none arrives. A greeted server never
+  re-arms; stdin EOF ends it as before. `0` disables the deadline. The exit
+  is `os._exit`, and that is measured rather than chosen: the transport reads
+  stdin on a worker thread with a blocking `readline`, and cancelling the task
+  group logged the deadline and then hung exactly like the orphan (probe in
+  the PR). The registry record is withdrawn explicitly before the hard exit.
+  Covered over the real transport: a silent open pipe ends the process, a
+  greeted session outlives the deadline, EOF still exits with 0.
+
 - **`check-shelve-copies.sh --discover` looks for the copies instead of asking
   you where they are (claude-bus#21).** The checker existed, but its acceptance
   — "a comparison you can run with a command" — was only half met: the command
@@ -74,9 +98,9 @@ once code ships.
   nothing, and pid reuse can produce a false positive whose cost is one
   stderr line. `$MEMSHELF_STATE_DIR` moves the registry;
   `$MEMSHELF_INSTANCE_REGISTRY=off` disables it. The other half of the issue
-  — a server exiting when it loses its client — is untouched: the observed
-  transport was not classic stdio (stdin on `/dev/null`, unix sockets on
-  fd 4-7), so "peer closed" is not "stdin gave EOF" there.
+  — a server exiting when it loses its client — is the handshake deadline
+  below. (An earlier draft of this entry read the orphan's descriptors as
+  "not classic stdio"; that was wrong, see there.)
 
 ### Changed
 
