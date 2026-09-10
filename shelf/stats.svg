@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 340" font-family="system-ui, sans-serif">
   <title>memshelf token economy — cumulative, log scale</title>
   <text x="64" y="20" font-size="14" font-weight="600" fill="#666666">Token economy — cumulative (log scale)</text>
-  <line x1="64" x2="640" y1="290.0" y2="290.0" stroke="#d8d6cc" stroke-width="1"/><text x="56" y="294.0" text-anchor="end" font-size="11" fill="#666666">100</text><line x1="64" x2="640" y1="228.4" y2="228.4" stroke="#d8d6cc" stroke-width="1"/><text x="56" y="232.4" text-anchor="end" font-size="11" fill="#666666">1K</text><line x1="64" x2="640" y1="166.7" y2="166.7" stroke="#d8d6cc" stroke-width="1"/><text x="56" y="170.7" text-anchor="end" font-size="11" fill="#666666">10K</text><line x1="64" x2="640" y1="105.1" y2="105.1" stroke="#d8d6cc" stroke-width="1"/><text x="56" y="109.1" text-anchor="end" font-size="11" fill="#666666">100K</text><line x1="64" x2="640" y1="43.5" y2="43.5" stroke="#d8d6cc" stroke-width="1"/><text x="56" y="47.5" text-anchor="end" font-size="11" fill="#666666">1.00M</text>
+  <line x1="64" x2="640" y1="290.0" y2="290.0" stroke="#d8d6cc" stroke-width="1"/><text x="56" y="294.0" text-anchor="end" font-size="11" fill="#666666">100</text><line x1="64" x2="640" y1="229.0" y2="229.0" stroke="#d8d6cc" stroke-width="1"/><text x="56" y="233.0" text-anchor="end" font-size="11" fill="#666666">1K</text><line x1="64" x2="640" y1="168.1" y2="168.1" stroke="#d8d6cc" stroke-width="1"/><text x="56" y="172.1" text-anchor="end" font-size="11" fill="#666666">10K</text><line x1="64" x2="640" y1="107.1" y2="107.1" stroke="#d8d6cc" stroke-width="1"/><text x="56" y="111.1" text-anchor="end" font-size="11" fill="#666666">100K</text><line x1="64" x2="640" y1="46.1" y2="46.1" stroke="#d8d6cc" stroke-width="1"/><text x="56" y="50.1" text-anchor="end" font-size="11" fill="#666666">1.00M</text>
   <line x1="64" x2="640" y1="290" y2="290" stroke="#9a978c" stroke-width="1"/>
   <polyline points="352.0,40.0" fill="none" stroke="#9a978c" stroke-width="2" stroke-linejoin="round"/><circle cx="352.0" cy="40.0" r="3" fill="#9a978c"/>
-  <polyline points="352.0,273.8" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round"/><circle cx="352.0" cy="273.8" r="3" fill="#2a78d6"/>
-  <text x="648" y="44.0" font-size="12" fill="#9a978c">without memshelf: 1.14M</text>
-  <text x="648" y="277.8" font-size="12" fill="#2a78d6">on the shelf: 183</text>
-  <text x="648" y="160.9" font-size="12" font-weight="600" fill="#666666">saved 6218.6:1</text>
+  <polyline points="352.0,270.1" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round"/><circle cx="352.0" cy="270.1" r="3" fill="#2a78d6"/>
+  <text x="648" y="44.0" font-size="12" fill="#9a978c">without memshelf: 1.26M</text>
+  <text x="648" y="274.1" font-size="12" fill="#2a78d6">on the shelf: 212</text>
+  <text x="648" y="159.1" font-size="12" font-weight="600" fill="#666666">saved 5943.4:1</text>
   <text x="352.0" y="308" text-anchor="middle" font-size="10" fill="#666666">09-10</text>
   <text x="64" y="330" font-size="10" fill="#9a978c">digests only; INDEX adds a small flat cost per session · chars/4 estimate · redrawn by memshelf rebuild · as of 2026-09-10</text>
 </svg>
