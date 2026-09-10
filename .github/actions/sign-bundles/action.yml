@@ -1,0 +1,60 @@
+name: sign desktop bundles
+description: >-
+  Sign every .mcpb in a directory with `mcpb sign` when a signing certificate
+  is configured, and refuse to ship a signature the verifier rejects. With no
+  certificate the bundles are left unsigned and the run says so — it never
+  fakes a signature (#87).
+inputs:
+  dir:
+    description: Directory holding the .mcpb files.
+    required: true
+  cert:
+    description: PEM certificate (secrets.MCPB_SIGNING_CERT); empty skips signing.
+    required: false
+    default: ""
+  key:
+    description: PEM private key (secrets.MCPB_SIGNING_KEY).
+    required: false
+    default: ""
+  intermediates:
+    description: Optional PEM chain, one or more certificates concatenated.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Unsigned, and said so
+      if: inputs.cert == '' || inputs.key == ''
+      shell: bash
+      run: |
+        echo "::notice title=bundles unsigned::No MCPB_SIGNING_CERT/MCPB_SIGNING_KEY secrets; the .mcpb files ship unsigned (#87)."
+    - name: Sign and verify
+      if: inputs.cert != '' && inputs.key != ''
+      shell: bash
+      env:
+        MCPB_CERT: ${{ inputs.cert }}
+        MCPB_KEY: ${{ inputs.key }}
+        MCPB_INTERMEDIATES: ${{ inputs.intermediates }}
+        BUNDLE_DIR: ${{ inputs.dir }}
+      run: |
+        set -euo pipefail
+        work=$(mktemp -d)
+        trap 'rm -rf "$work"' EXIT
+        printf '%s\n' "$MCPB_CERT" > "$work/cert.pem"
+        printf '%s\n' "$MCPB_KEY" > "$work/key.pem"
+        chmod 600 "$work/key.pem"
+        extra=()
+        if [ -n "$MCPB_INTERMEDIATES" ]; then
+          printf '%s\n' "$MCPB_INTERMEDIATES" > "$work/chain.pem"
+          extra=(--intermediate "$work/chain.pem")
+        fi
+        for bundle in "$BUNDLE_DIR"/*.mcpb; do
+          npx --yes @anthropic-ai/mcpb@2.1.2 sign "$bundle" \
+            --cert "$work/cert.pem" --key "$work/key.pem" "${extra[@]}"
+          # `verify` answers "not signed" for any certificate the runner's OS
+          # trust store does not vouch for — a self-signed one included
+          # (measured on 2.1.2: sign succeeds, verify says unsigned). A bundle
+          # whose signature the verifier rejects is not a signed bundle, so
+          # this is a gate, not a report.
+          npx --yes @anthropic-ai/mcpb@2.1.2 verify "$bundle"
+        done
