@@ -8,6 +8,22 @@ once code ships.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-10
+
+Cut because **every installed consumer still serves the August code.** The
+desktop extension, the pipx copy and `uvx memshelf-mcp` all resolve to 0.2.0,
+which predates the tool-boundary fix (#121): a `memshelf_shelve` call with any
+field added since — `approx_tokens_source`, the sync/publish switches — is
+rejected by pydantic, and the rejection leaves the server without
+`structured_content`, so the client drops the envelope and the caller sees
+"did not return structured content" instead of the reason (#147). Fifty-one
+commits sit between v0.2.0 and this tag; the entries below are the ones that
+accumulated under Unreleased since 2026-08-04, headline items being the
+semantic sidecar behind `memshelf_search` (#17), the archive tools — tags,
+graph, retro, fork, mirror (#18) — the single-instance guard and handshake
+timeout (#115), freshness findings in `doctor` (#125), and the project's own
+`shelf/` (#146).
+
 ### Added
 
 - **The repo carries its own memory shelf (`shelf/`).** Storage plain, tracked
@@ -1201,6 +1217,7 @@ success, and leaves an artifact it would itself call broken.
 - Token accounting (`ledger.tsv`) is built into the core loop.
 - Repository made public 2026-07-13; the dogfood shelf stays private.
 
-[Unreleased]: https://github.com/ignatenkofi/memshelf-mcp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ignatenkofi/memshelf-mcp/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ignatenkofi/memshelf-mcp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ignatenkofi/memshelf-mcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ignatenkofi/memshelf-mcp/releases/tag/v0.1.0

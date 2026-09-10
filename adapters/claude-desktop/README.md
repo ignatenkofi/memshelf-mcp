@@ -100,7 +100,7 @@ own download table is a good source), its sha256, and the pip platform tags.
 `mcpb validate` reads the manifest and stops there. This does not:
 
 ```sh
-python3 adapters/claude-desktop/try_bundle.py dist/memshelf-0.2.0-uv.mcpb
+python3 adapters/claude-desktop/try_bundle.py dist/memshelf-0.3.0-uv.mcpb
 ```
 
 It unpacks the bundle, expands the manifest's own `${__dirname}` and
@@ -134,7 +134,7 @@ on both.
 ## Layout of what gets built
 
 ```
-memshelf-0.2.0-uv.mcpb            memshelf-0.2.0-macos-arm64.mcpb
+memshelf-0.3.0-uv.mcpb            memshelf-0.3.0-macos-arm64.mcpb
 ├── manifest.json                 ├── manifest.json
 ├── pyproject.toml                ├── runtime/            <- CPython 3.12, pruned
 └── src/                          └── server/
