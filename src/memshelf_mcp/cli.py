@@ -2,7 +2,9 @@
 
 Anything that can run a shell command can drive the shelf: ``init``,
 ``shelve``, ``recall``, ``index``, ``search``, ``stats``, ``advise``,
-``rebuild``, ``rollup``, ``purge``, ``resolve``, ``doctor``, ``lint-digest``.
+``rebuild``, ``rollup``, ``purge``, ``resolve``, ``doctor``, ``lint-digest``,
+and the archive-reuse views (#18): ``tags``, ``graph``, ``retro``, ``fork``,
+``mirror``.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from memshelf_mcp import __version__
+from memshelf_mcp.core import reuse
 from memshelf_mcp.core.advisor import DEFAULT_BUDGET_TOKENS, STALE_AFTER_TURNS
 from memshelf_mcp.core.archive import ArchiveError
 from memshelf_mcp.core.doctor import DERIVED_STALE_AFTER_HOURS
@@ -403,6 +406,66 @@ def _cmd_import(args: argparse.Namespace) -> int:
     return 0
 
 
+def _emit(text: str, out: str | None) -> int:
+    """Print, or write to ``--out`` and say where (on stderr, stdout stays pipeable)."""
+    if out:
+        path = Path(out).expanduser()
+        path.write_text(text, encoding="utf-8")
+        print(f"memshelf: wrote {path}", file=sys.stderr)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+def _cmd_tags(args: argparse.Namespace) -> int:
+    report = reuse.tags(args.shelf)
+    if args.json:
+        print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))
+        return 0
+    for tag, ids in report.tags.items():
+        print(f"{tag}\t{len(ids)}\t{' '.join(ids)}")
+    if report.untagged:
+        print(f"(untagged)\t{len(report.untagged)}\t{' '.join(report.untagged)}")
+    return 0
+
+
+def _cmd_graph(args: argparse.Namespace) -> int:
+    g = reuse.graph(args.shelf, section=args.section)
+    text = (
+        g.to_json() + "\n" if args.format == "json" else g.to_mermaid(connected_only=not args.all)
+    )
+    return _emit(text, args.out)
+
+
+def _cmd_retro(args: argparse.Namespace) -> int:
+    try:
+        text = reuse.retro(args.shelf, args.quarter or reuse.quarter_of())
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    return _emit(text, args.out)
+
+
+def _cmd_fork(args: argparse.Namespace) -> int:
+    try:
+        text = reuse.fork(
+            args.shelf, args.episode, sections=args.section or None, with_index=not args.no_index
+        )
+    except (EpisodeNotFound, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    return _emit(text, args.out)
+
+
+def _cmd_mirror(args: argparse.Namespace) -> int:
+    try:
+        text = reuse.mirror(args.shelf, episode_ids=args.episode, include_all=args.all)
+    except (EpisodeNotFound, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    return _emit(text, args.out)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="memshelf", description="Working-memory shelf CLI.")
     parser.add_argument("--version", action="version", version=f"memshelf {__version__}")
@@ -700,6 +763,54 @@ def build_parser() -> argparse.ArgumentParser:
     im.add_argument("--select", help="extract: conversation id / title / index.")
     im.add_argument("--out", help="extract: output file for the cleaned transcript.")
     im.set_defaults(func=_cmd_import)
+
+    tg = sub.add_parser("tags", help="Episodes grouped by frontmatter tag (#18).")
+    tg.add_argument("--shelf", help=_SHELF_HELP)
+    tg.add_argument("--json", action="store_true", help="JSON instead of tag<TAB>count<TAB>ids.")
+    tg.set_defaults(func=_cmd_tags)
+
+    gr = sub.add_parser("graph", help="Cross-episode mentions as JSON or Mermaid (#18).")
+    gr.add_argument("--shelf", help=_SHELF_HELP)
+    gr.add_argument("--format", choices=("json", "mermaid"), default="json")
+    gr.add_argument("--section", help="Only count mentions inside this H2, e.g. Decisions.")
+    gr.add_argument("--all", action="store_true", help="mermaid: draw isolated episodes too.")
+    gr.add_argument("--out", help="Write here instead of stdout.")
+    gr.set_defaults(func=_cmd_graph)
+
+    rt = sub.add_parser("retro", help="One quarter of the shelf as a Markdown retrospective.")
+    rt.add_argument("--shelf", help=_SHELF_HELP)
+    rt.add_argument("--quarter", help="Like 2026Q3. Default: the current quarter.")
+    rt.add_argument("--out", help="Write here instead of stdout.")
+    rt.set_defaults(func=_cmd_retro)
+
+    fk = sub.add_parser(
+        "fork",
+        help="Bootstrap a fresh session from INDEX + selected episodes (#18).",
+        description=(
+            "Prints one Markdown document: the shelf INDEX and each requested episode "
+            "(or only the named sections of it), every block inside the recall data "
+            "envelope. Paste it as the first message of a new session to continue the thread."
+        ),
+    )
+    fk.add_argument("--shelf", help=_SHELF_HELP)
+    fk.add_argument("--episode", action="append", required=True, metavar="ID", help="Repeatable.")
+    fk.add_argument(
+        "--section", action="append", metavar="NAME", help="Only these H2 sections. Repeatable."
+    )
+    fk.add_argument(
+        "--no-index",
+        action="store_true",
+        help="Leave the INDEX out (on a 110-episode shelf it is ~94%% of the bytes).",
+    )
+    fk.add_argument("--out", help="Write here instead of stdout.")
+    fk.set_defaults(func=_cmd_fork)
+
+    mr = sub.add_parser("mirror", help="INDEX (± episodes) as one self-contained HTML page.")
+    mr.add_argument("--shelf", help=_SHELF_HELP)
+    mr.add_argument("--episode", action="append", metavar="ID", help="Include this episode.")
+    mr.add_argument("--all", action="store_true", help="Include every live episode.")
+    mr.add_argument("--out", help="Write here instead of stdout.")
+    mr.set_defaults(func=_cmd_mirror)
 
     return parser
 

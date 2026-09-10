@@ -119,6 +119,11 @@ One verb per job; the same names over MCP (`memshelf_*`) and in the CLI
 | `resolve` | Settle multi-writer conflicts: regenerate derived, union the recall log |
 | `doctor` | Diagnose: episode schema, digest contract at rest, secret shapes, index bloat |
 | `prune-splits` | CLI only — remove H2 split directories git never got (migration for #109) |
+| `tags` | CLI only — episodes grouped by frontmatter tag (#18) |
+| `graph` | CLI only — who mentions whom: cross-episode id references as JSON or Mermaid (#18) |
+| `retro` | CLI only — one quarter of the shelf as a Markdown retrospective (#18) |
+| `fork` | CLI only — bootstrap a fresh session from INDEX + selected episodes or sections (#18) |
+| `mirror` | CLI only — INDEX (± episodes) as one self-contained HTML page for phone-side reading (#18) |
 
 ## The rules the tools enforce
 

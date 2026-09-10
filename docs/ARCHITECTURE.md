@@ -466,6 +466,13 @@ Rules that keep the boundary honest:
    arithmetic, and a deterministic ranking. Deeper harness integration stays
    available as a *host adapter* that fills the same input, which is where a
    host-specific parser belongs (portability rule 2).
-8. **Artifact mirror** (ROADMAP M3): publish INDEX (and episodes?) as
-   private claude.ai artifacts for phone-side reading — worth the adapter,
-   or does MCP-everywhere make it moot?
+8. ~~**Artifact mirror**~~ Resolved 2026-09-10 (#18): **the mirror is a
+   generated static page; publishing it is the host's job, not an adapter's.**
+   `memshelf mirror --out page.html` renders INDEX (± episodes) as one
+   self-contained HTML file — no scripts, no remote assets, episode text
+   escaped, INDEX lines linking to the episodes the page carries. Whatever
+   hosts a private static page (a claude.ai artifact, a gist, a phone's Files
+   app) can show it; the shelf on disk stays the canonical store, so
+   portability principle 9 is untouched and nothing is vendor-bound. An
+   artifact-publishing adapter was rejected as exactly that binding, for a
+   read mirror that MCP-everywhere makes optional anyway.
