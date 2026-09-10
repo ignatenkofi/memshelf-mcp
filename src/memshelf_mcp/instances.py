@@ -157,6 +157,17 @@ def _unregister(path: Path) -> None:
         pass
 
 
+def withdraw() -> None:
+    """Drop every record this process wrote. For exits that skip ``atexit``.
+
+    The handshake deadline (#115) leaves through ``os._exit`` because the
+    transport's blocking stdin reader cannot be cancelled, and that path runs
+    no exit hooks. Idempotent: the hook finds nothing left to do afterwards.
+    """
+    for path in list(_registered):
+        _unregister(path)
+
+
 def neighbours(shelf: str) -> list[Instance]:
     """Live *other* instances registered on ``shelf``; prunes dead records."""
     if not shelf:
