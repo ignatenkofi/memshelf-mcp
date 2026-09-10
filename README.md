@@ -4,6 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/memshelf-mcp)](https://pypi.org/project/memshelf-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/memshelf-mcp)](https://pypi.org/project/memshelf-mcp/)
+[![Glama](https://glama.ai/mcp/servers/ignatenkofi/memshelf-mcp/badges/score.svg)](https://glama.ai/mcp/servers/ignatenkofi/memshelf-mcp)
 [![ci](https://github.com/ignatenkofi/memshelf-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/ignatenkofi/memshelf-mcp/actions/workflows/ci.yml)
 [![security](https://github.com/ignatenkofi/memshelf-mcp/actions/workflows/security.yml/badge.svg)](https://github.com/ignatenkofi/memshelf-mcp/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)

@@ -12,6 +12,7 @@ description: "Put your agent's memory on a shelf, hand it the index."
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ignatenkofi/memshelf-mcp/blob/main/LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-purple.svg)](https://modelcontextprotocol.io/)
+[![Glama](https://glama.ai/mcp/servers/ignatenkofi/memshelf-mcp/badges/score.svg)](https://glama.ai/mcp/servers/ignatenkofi/memshelf-mcp)
 [![Sibling: docshelf](https://img.shields.io/badge/sibling-docshelf--mcp-green.svg)](https://ignatenkofi.github.io/docshelf-mcp/)
 
 An [MCP](https://modelcontextprotocol.io/) server that gives a long-running AI
