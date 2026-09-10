@@ -8,4 +8,4 @@ Markdown episodes, then recall them by index instead of re-deriving. See
 #: Single source of truth for the package version — pyproject.toml reads it
 #: via hatch's dynamic version ([tool.hatch.version] path = ...), and the
 #: release gate refuses a tag that disagrees with it or with server.json.
-__version__ = "0.2.0"
+__version__ = "0.3.0"
