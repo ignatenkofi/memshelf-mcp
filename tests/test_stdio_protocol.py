@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -264,3 +265,72 @@ def test_a_rejected_call_still_satisfies_the_tools_output_schema(tmp_path: Path)
                 assert not result.is_error, result
 
     _run(scenario())
+
+
+# --- the handshake deadline (#115) -----------------------------------------
+#
+# The orphan in #115 is a server the host spawned and never greeted: its stdin
+# stays open, so "EOF ends the server" never fires. Three facts pin the fix:
+# a silent pipe ends the process, a greeting keeps it, and EOF still ends it.
+
+
+def _spawn_server(tmp_path: Path, **env_overrides: str) -> subprocess.Popen[bytes]:
+    env = dict(os.environ, MEMSHELF_SHELF_PATH=str(_seeded_shelf(tmp_path)), **env_overrides)
+    return subprocess.Popen(
+        [sys.executable, "-m", "memshelf_mcp"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+
+
+def test_a_server_no_client_greets_exits_on_its_own(tmp_path: Path):
+    proc = _spawn_server(tmp_path, MEMSHELF_HANDSHAKE_TIMEOUT="1")
+    try:
+        # stdin stays open and silent for the whole wait: exactly the orphan's
+        # pipe. (`communicate` would close it, and EOF is the *other* exit.)
+        proc.wait(timeout=WIRE_TIMEOUT)
+        assert proc.stderr is not None
+        err = proc.stderr.read().decode(errors="replace")
+    finally:
+        proc.kill()
+    assert proc.returncode == 3, err
+    lines = [line for line in err.splitlines() if "handshake" in line]
+    assert len(lines) == 1, err
+    assert "MEMSHELF_HANDSHAKE_TIMEOUT=0" in lines[0]
+
+
+def test_a_greeted_server_outlives_the_deadline(tmp_path: Path):
+    async def scenario() -> list[str]:
+        env = dict(os.environ, MEMSHELF_HANDSHAKE_TIMEOUT="1")
+        params = StdioServerParameters(command=sys.executable, args=["-m", "memshelf_mcp"], env=env)
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write, read_timeout_seconds=WIRE_TIMEOUT) as session:
+                await session.initialize()
+                await asyncio.sleep(2.5)  # well past the 1 s the server was given
+                return [tool.name for tool in (await session.list_tools()).tools]
+
+    assert "memshelf_index" in _run(scenario())
+
+
+def test_stdin_eof_still_ends_the_server(tmp_path: Path):
+    proc = _spawn_server(tmp_path, MEMSHELF_HANDSHAKE_TIMEOUT="0")
+    try:
+        assert proc.stdin is not None
+        proc.stdin.close()
+        proc.wait(timeout=WIRE_TIMEOUT)
+    finally:
+        proc.kill()
+    assert proc.returncode == 0
+
+
+def test_the_deadline_can_be_switched_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from memshelf_mcp import server
+
+    monkeypatch.setenv("MEMSHELF_HANDSHAKE_TIMEOUT", "0")
+    assert server.handshake_timeout() == 0.0
+    monkeypatch.setenv("MEMSHELF_HANDSHAKE_TIMEOUT", "not a number")
+    assert server.handshake_timeout() == server.DEFAULT_HANDSHAKE_TIMEOUT
+    monkeypatch.delenv("MEMSHELF_HANDSHAKE_TIMEOUT")
+    assert server.handshake_timeout() == server.DEFAULT_HANDSHAKE_TIMEOUT
