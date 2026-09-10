@@ -1,0 +1,4 @@
+# docshelf — local-only artefacts
+.DS_Store
+*.swp
+__pycache__/

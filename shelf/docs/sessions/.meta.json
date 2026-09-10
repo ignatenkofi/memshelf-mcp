@@ -1,0 +1,6 @@
+{
+  "2026-09-10-memshelf-issue-sweep-17-18-87-115-142.md": {
+    "title": "memshelf-mcp: ночная смена по всем открытым issue (#17, #18, #87, #115, #142)",
+    "description": "Пять issue закрыты пятью PR; сайдкар model2vec + RRF поднял hit@5 с 0.03 до 0.53; конфликты — merge, не rebase."
+  }
+}
