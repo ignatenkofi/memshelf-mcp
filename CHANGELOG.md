@@ -10,6 +10,25 @@ once code ships.
 
 ### Added
 
+- **The archive is raw material now: `memshelf tags`, `graph`, `retro`, `fork`,
+  `mirror` (#18, ROADMAP M3).** Five read-only views over the episodes already
+  on the shelf, `archive/` included. `tags` groups episodes by frontmatter tag;
+  `graph` finds cross-episode references — an episode names another by writing
+  its id into a section, no link syntax to learn — and reports them with the
+  section they sit in, as JSON or Mermaid; `retro --quarter 2026Q3` lists a
+  quarter by month and kind with the tags, the most-referenced episodes, and
+  every `Open threads` section; `fork --episode ID [--section S]` prints one
+  document — INDEX plus the chosen episodes, each block in the recall data
+  envelope — that a fresh session can start from, which is what "continue an
+  old thread without its history" took by hand before; `mirror --out page.html`
+  renders INDEX (± episodes) as one static page with no scripts or remote
+  assets, the deliverable of the artifact-mirror experiment (ARCHITECTURE open
+  question 8, now answered). No MCP tool was added: every published tool is
+  charged to every turn's prefix (#111), and each of these views is read
+  outside a session or fed to a *different* one, so the CLI is the surface
+  that fits. Exit criterion of #18 met: one real fork on the dogfood shelf
+  produced a document the receiving session could continue from.
+
 - **A server nobody greets now leaves on its own (#115, the other half).**
   The orphan of the issue was read as a transport puzzle: `stdin` on
   `/dev/null`, unix sockets on fd 4-7, so "stdin EOF ends the server" could

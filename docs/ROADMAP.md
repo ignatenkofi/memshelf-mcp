@@ -118,17 +118,22 @@ accepted (not overridden) most of the time in dogfood use.
   documented extension point).
 - Chat-project surface documented end-to-end (Desktop/web, manual triggers).
 - Cross-shelf meta-INDEX experiment (federation open question).
-- **Archive-as-raw-material** (MANIFEST hero scenario 3): tag/graph views
+- ~~**Archive-as-raw-material** (MANIFEST hero scenario 3): tag/graph views
   over episodes (frontmatter tags + cross-episode links in Decisions),
   quarter retrospectives, **fork-a-thread** (bootstrap a fresh session from
   INDEX + selected episodes — continue an old discussion branch as a
-  sub-thread without its full history).
-- **Artifact mirror** experiment: INDEX (± episodes) as private claude.ai
-  artifacts for phone-side reading (open question 8).
+  sub-thread without its full history).~~ — **done** (#18): `memshelf tags`,
+  `graph` (JSON / Mermaid, edges carry the section they sit in), `retro
+  --quarter`, `fork --episode ID [--section S]`; CLI only, by decision
+  (DECISIONS 2026-09-10). One real fork on the dogfood shelf ran end-to-end.
+- ~~**Artifact mirror** experiment: INDEX (± episodes) as private claude.ai
+  artifacts for phone-side reading (open question 8).~~ — **done** (#18):
+  `memshelf mirror` renders one static page; publishing it is a host action,
+  no adapter (ARCHITECTURE open question 8, resolved).
 
 **Exit criteria:** search-miss rate measurably better than grep baseline on
 the dogfood shelves; one non-author user runs the chat-project flow from docs
-alone; one real "fork from episode" session succeeds end-to-end.
+alone; ~~one real "fork from episode" session succeeds end-to-end~~ (met, #18).
 
 ## Explicitly deferred
 
