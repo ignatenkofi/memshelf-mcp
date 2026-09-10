@@ -52,6 +52,11 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.5.0",
 ]
+# Embedding sidecar for search (#17). Static embeddings, no GPU, no service;
+# the default model downloads ~1 GB on first use.
+semantic = [
+    "model2vec>=0.9",
+]
 
 [project.scripts]
 memshelf = "memshelf_mcp.cli:main"

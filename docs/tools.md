@@ -73,6 +73,29 @@ Grep the shelf for episodes matching every query token; returns their
 addresses and snippets. Split episodes match at the section level, so the hit
 names the section to recall, not just the episode.
 
+**Semantic sidecar (#17).** Grep is an AND over literal tokens: a paraphrase,
+an inflected word, or a query in the other language misses. When the optional
+embedding sidecar is *usable* — `pip install 'memshelf-mcp[semantic]'` done, an
+index built with `memshelf semantic build --shelf …`, and `$MEMSHELF_SEMANTIC`
+not set to `off` — the tool fuses the grep ranking with a nearest-chunk
+ranking by reciprocal rank and reports `mode: "hybrid"`; every hit then
+carries `via`: `grep`, `semantic`, or `both`. Otherwise `mode` is `grep` and
+the result is byte-for-byte what it was before the sidecar existed. The tool
+signature and description do not change (#111); a caller reads `mode` to tell
+a paraphrase miss from a sidecar that was never built.
+
+The index is a JSON file under the state directory
+(`~/.local/state/memshelf-mcp/semantic/<shelf-key>/index.json`), never inside
+the shelf — a shelf is a git repository and a derived blob would ride into
+every diff. It is rebuilt from the episodes, incrementally by file `(mtime,
+size)`; `memshelf semantic status` reports how many files went stale since.
+The model (`minishlab/potion-multilingual-128M`, override with
+`$MEMSHELF_SEMANTIC_MODEL`) is static embeddings: no GPU, no service, loaded
+once per process. Measured on the dogfood shelf, 30 hand-written paraphrase /
+cross-language / keyword queries: grep found 1, the hybrid 16 in the top 5 and
+21 in the top 10 (`memshelf search-bench`, ROADMAP M3). Build: 209 files,
+1,319 chunks, 2.9 s.
+
 ## `memshelf_stats`
 
 Report the shelf's token economy: standing cost (INDEX + digests) vs shelved
