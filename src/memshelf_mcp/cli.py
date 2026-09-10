@@ -17,7 +17,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from memshelf_mcp import __version__
-from memshelf_mcp.core import reuse
+from memshelf_mcp.core import reuse, semantic
 from memshelf_mcp.core.advisor import DEFAULT_BUDGET_TOKENS, STALE_AFTER_TURNS
 from memshelf_mcp.core.archive import ArchiveError
 from memshelf_mcp.core.doctor import DERIVED_STALE_AFTER_HOURS
@@ -25,7 +25,7 @@ from memshelf_mcp.core.episode import EpisodeError
 from memshelf_mcp.core.gitsync import DirtyShelfError, PushRejectedError, SyncDivergedError
 from memshelf_mcp.core.importer import TranscriptError
 from memshelf_mcp.core.init import InitError
-from memshelf_mcp.core.recall import EpisodeNotFound
+from memshelf_mcp.core.recall import EpisodeNotFound, search
 from memshelf_mcp.core.shelve import (
     AmendTargetMissing,
     DigestContractError,
@@ -466,6 +466,84 @@ def _cmd_mirror(args: argparse.Namespace) -> int:
     return _emit(text, args.out)
 
 
+def _cmd_semantic(args: argparse.Namespace) -> int:
+    try:
+        if args.action == "build":
+            report = semantic.build(args.shelf, force=args.force).as_dict()
+        elif args.action == "drop":
+            report = {
+                "dropped": semantic.drop(args.shelf),
+                "path": str(semantic.index_path(args.shelf)),
+            }
+        else:
+            report = semantic.status(args.shelf)
+    except semantic.SemanticError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _read_bench_queries(path: str) -> list[tuple[str, str]]:
+    """``query<TAB>expected`` per line; ``#`` comments and blanks skipped."""
+    pairs: list[tuple[str, str]] = []
+    for raw in Path(path).expanduser().read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        query, sep, expected = line.partition("\t")
+        if not sep or not expected.strip():
+            raise SystemExit(f"search-bench: expected 'query<TAB>expected-id' but got {line!r}")
+        pairs.append((query.strip(), expected.strip()))
+    return pairs
+
+
+def _cmd_search_bench(args: argparse.Namespace) -> int:
+    """hit@1 / hit@k / MRR for grep alone vs the hybrid, on a hand-written query set.
+
+    The query set stays outside the repo on purpose: it names episodes of a
+    private shelf. The numbers are what travel (ROADMAP M3 exit criterion).
+    """
+    pairs = _read_bench_queries(args.queries)
+    if not pairs:
+        print("search-bench: no queries", file=sys.stderr)
+        return 2
+    modes = [("grep", False), ("hybrid", True)]
+    results: dict[str, dict] = {}
+    for label, flag in modes:
+        ranks: list[int | None] = []
+        misses: list[str] = []
+        for query, expected in pairs:
+            try:
+                found = search(args.shelf, query, max_results=args.k, semantic=flag)
+            except semantic.SemanticError as exc:
+                print(f"search-bench: {label}: {exc}", file=sys.stderr)
+                return 1
+            rank = next((i for i, h in enumerate(found, start=1) if expected in h.address), None)
+            ranks.append(rank)
+            if rank is None:
+                misses.append(query)
+        n = len(pairs)
+        results[label] = {
+            "hit@1": sum(1 for r in ranks if r == 1) / n,
+            f"hit@{args.k}": sum(1 for r in ranks if r is not None) / n,
+            "mrr": sum(1 / r for r in ranks if r) / n,
+            "misses": misses,
+        }
+    print(f"queries: {len(pairs)}  k: {args.k}")
+    print(f"{'mode':8}{'hit@1':>8}{f'hit@{args.k}':>8}{'mrr':>8}{'misses':>8}")
+    for label, r in results.items():
+        print(
+            f"{label:8}{r['hit@1']:>8.2f}{r[f'hit@{args.k}']:>8.2f}{r['mrr']:>8.2f}"
+            f"{len(r['misses']):>8}"
+        )
+    if args.verbose:
+        for label, r in results.items():
+            for query in r["misses"]:
+                print(f"miss[{label}]\t{query}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="memshelf", description="Working-memory shelf CLI.")
     parser.add_argument("--version", action="version", version=f"memshelf {__version__}")
@@ -811,6 +889,30 @@ def build_parser() -> argparse.ArgumentParser:
     mr.add_argument("--all", action="store_true", help="Include every live episode.")
     mr.add_argument("--out", help="Write here instead of stdout.")
     mr.set_defaults(func=_cmd_mirror)
+
+    sm = sub.add_parser(
+        "semantic",
+        help="Embedding sidecar for search (#17): build, status, drop.",
+        description=(
+            "The sidecar lives under the state directory, never in the shelf, and is "
+            "rebuilt from the episodes. Needs `pip install 'memshelf-mcp[semantic]'`. "
+            f"${semantic.SEMANTIC_ENV}=off switches it off without dropping it."
+        ),
+    )
+    sm.add_argument("action", choices=("build", "status", "drop"))
+    sm.add_argument("--shelf", help=_SHELF_HELP)
+    sm.add_argument("--force", action="store_true", help="build: re-embed every file.")
+    sm.set_defaults(func=_cmd_semantic)
+
+    sb = sub.add_parser(
+        "search-bench",
+        help="Compare grep vs hybrid search on a query<TAB>expected-id file (#17).",
+    )
+    sb.add_argument("--shelf", help=_SHELF_HELP)
+    sb.add_argument("--queries", required=True, help="File: one `query<TAB>episode-id` per line.")
+    sb.add_argument("--k", type=int, default=5, help="Cut-off for hit@k (default 5).")
+    sb.add_argument("--verbose", action="store_true", help="List the missed queries per mode.")
+    sb.set_defaults(func=_cmd_search_bench)
 
     return parser
 

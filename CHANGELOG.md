@@ -10,6 +10,21 @@ once code ships.
 
 ### Added
 
+- **`search` finds paraphrases and the other language: an embedding sidecar
+  (#17, ROADMAP M3).** `pip install 'memshelf-mcp[semantic]'` and `memshelf
+  semantic build --shelf …` write a model2vec index under the state directory —
+  never inside the shelf — and from then on `memshelf_search` / `memshelf
+  search` fuse the grep ranking with a nearest-chunk ranking by reciprocal
+  rank; the response says `mode: hybrid` and each hit says `via: grep |
+  semantic | both`. Without the extra, without an index, or with
+  `MEMSHELF_SEMANTIC=off` the search is byte-for-byte what it was. The index
+  is incremental (unchanged files keep their vectors), `semantic status`
+  counts stale files, `semantic drop` removes it. `memshelf search-bench
+  --queries FILE` reports hit@1 / hit@k / MRR for grep vs hybrid; on the
+  dogfood shelf (30 hand-written paraphrase, cross-language and keyword
+  queries) grep found 1 in the top 5, the hybrid 16 — the M3 exit criterion.
+  No new MCP tool; the `memshelf_search` description is unchanged (#111).
+
 - **The archive is raw material now: `memshelf tags`, `graph`, `retro`, `fork`,
   `mirror` (#18, ROADMAP M3).** Five read-only views over the episodes already
   on the shelf, `archive/` included. `tags` groups episodes by frontmatter tag;
