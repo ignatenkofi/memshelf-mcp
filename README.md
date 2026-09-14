@@ -286,6 +286,7 @@ week-report infographic from the dogfood shelf.
 | [`docs/examples/`](docs/examples/) | A worked episode file and a memory-shelf INDEX |
 | [`adapters/claude-code/`](adapters/claude-code/) | Claude Code plugin: `/shelve` skill + SessionStart/SessionEnd/PreCompact hooks |
 | [`adapters/claude-desktop/`](adapters/claude-desktop/) | Claude Desktop `.mcpb` extension: builder, bundle checker, default-shelf setting |
+| [`adapters/claude-account/`](adapters/claude-account/) | Mirror of record for the claude.ai account skill — not installable, exists to be compared |
 
 ## Project memory shelf
 
