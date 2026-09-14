@@ -28,6 +28,14 @@
 # no one thought to look at. So the search list lives here, in code, and every
 # location it tried is printed on stderr: "found none" must be readable as
 # "this host exposes none", never as "clean".
+#
+# Correction, measured 2026-09-14 (claude-bus#45): "only in a container" was
+# the boundary of the search, not a fact about the copy. Claude Desktop lays
+# the same account skill down on the Mac, inside the `anthropic-skills` plugin
+# bundle under `~/Library/Application Support/Claude/…`, and no location above
+# reached it — so `none` was printed for a file two directories away. That
+# location is in the list now, and the copy has a source of record in this
+# repository: `adapters/claude-account/skills/shelve/SKILL.md`.
 set -u
 
 usage() {
@@ -67,14 +75,17 @@ fi
 
 if [ "$discover" -eq 1 ]; then
   self_dir="$(cd "$(dirname "$0")" && pwd -P)"
+  adapters_dir="$(dirname "$self_dir")"
   # Where copies of this skill actually turn up. The packaged one goes first
   # so its absence is loud when the script runs from a stray checkout.
   locations="$self_dir/skills/shelve/SKILL.md
+$adapters_dir/claude-account/skills/shelve/SKILL.md
 ${HOME:-}/.claude/skills/shelve/SKILL.md
 ${HOME:-}/.claude/skills/synced/*/shelve/SKILL.md
 ${HOME:-}/.claude/plugins/*/skills/shelve/SKILL.md
 ${HOME:-}/.claude/plugins/*/*/skills/shelve/SKILL.md
 ${HOME:-}/.claude/plugins/marketplaces/*/*/skills/shelve/SKILL.md
+${HOME:-}/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/*/*/skills/shelve/SKILL.md
 $PWD/.claude/skills/shelve/SKILL.md"
   [ -n "${MEMSHELF_ROOT:-}" ] && locations="$locations
 $MEMSHELF_ROOT/.claude/skills/shelve/SKILL.md"
