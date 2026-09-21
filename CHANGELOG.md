@@ -8,6 +8,23 @@ once code ships.
 
 ## [Unreleased]
 
+### Added
+
+- **A source of record for the claude.ai account copy of `shelve`
+  (`adapters/claude-account/`, #150).** The skill exists in a fourth copy this
+  repository never produced — an account skill on claude.ai, pushed to every
+  signed-in host — and nothing in git could be compared with it
+  (claude-bus#45). `adapters/claude-account/skills/shelve/SKILL.md` is that
+  copy byte for byte: a mirror of record, not an install (no plugin manifest
+  on purpose — two skills named `shelve` in one bundle collide). The account
+  copy is also laid down on macOS inside Claude Desktop's `anthropic-skills`
+  plugin bundle, where `check-shelve-copies.sh --discover` used to print
+  `none` for a file two directories away; that location is in its search
+  list now. `tests/test_shelve_account_mirror.py` pins the mirror's digest,
+  keeps it judged by the step-7 checker, and where the account copy is
+  materialised compares the two byte for byte — drift is a red run, not a
+  silent divergence.
+
 ## [0.3.0] — 2026-09-10
 
 Cut because **every installed consumer still serves the August code.** The
