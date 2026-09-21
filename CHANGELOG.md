@@ -25,6 +25,12 @@ once code ships.
   materialised compares the two byte for byte — drift is a red run, not a
   silent divergence.
 
+### Changed
+
+- **Dependency floors follow the dependabot bump (#138).** Runtime:
+  `mcp>=2.1.1,<3` and `pydantic>=2.13.5,<3` (were `>=2.0.0` and `>=2.6`);
+  dev tools: `pytest>=9.1.1`, `ruff>=0.16.6`. Ceilings unchanged.
+
 ## [0.3.0] — 2026-09-10
 
 Cut because **every installed consumer still serves the August code.** The
