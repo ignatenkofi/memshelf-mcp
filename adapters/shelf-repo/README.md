@@ -6,7 +6,7 @@
 | файл | куда класть | что делает |
 |---|---|---|
 | `workflows/shelf-derived.yml` | `.github/workflows/` полки | на push в `main` пересобирает `ledger.tsv`, `INDEX.md`, `stats.svg`, `docs/*/.meta.json` (плюс индекс архива) из эпизодов и коммитит, если что-то изменилось |
-| `workflows/shelf-pr-guard.yml` | `.github/workflows/` полки | на PR роняет дифф, который трогает производные пути, и прогоняет `memshelf doctor` |
+| `workflows/shelf-pr-guard.yml` | `.github/workflows/` полки | на PR роняет дифф, который трогает производные пути, прогоняет `memshelf doctor` и сверяет список запрещённых путей со списком, который стейджит бот |
 
 ## Что где проверяется — и почему не наоборот
 
