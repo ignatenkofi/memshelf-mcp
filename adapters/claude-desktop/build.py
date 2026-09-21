@@ -53,8 +53,10 @@ DEPENDENCIES = ["mcp>=2.0.0,<3", "pydantic>=2.6,<3", "pyyaml>=6.0,<7"]
 # docshelf drags in pymupdf4llm -> pymupdf, onnxruntime, numpy, sympy: ~200 MB
 # of PDF ingestion that a memory shelf never reaches. memshelf touches exactly
 # one docshelf module (`core.shelf`), which imports none of it, so the package
-# is installed with --no-deps and the three shared deps above cover it.
-DEPENDENCIES_NO_DEPS = ["docshelf-mcp>=0.2,<1"]
+# is installed with --no-deps and the three shared deps above cover it. The
+# floor is the one pyproject.toml declares (#109): below 0.4.1 the same shelf
+# renders differently on the machine that holds an H2 split.
+DEPENDENCIES_NO_DEPS = ["docshelf-mcp>=0.4.1,<1"]
 
 # The same amputation for the uv bundle, where resolution happens on the user's
 # machine: an override with an unsatisfiable marker removes the requirement
