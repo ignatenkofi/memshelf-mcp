@@ -27,10 +27,11 @@ concurrency: shelf-derived
 jobs:
   regenerate:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -52,25 +53,69 @@ jobs:
           rebuild_archive_index(".")
           PY
 
-      - name: Doctor (errors блокируют)
-        run: memshelf doctor --shelf .
-
       # Регенерация обязана быть неподвижной точкой: второй прогон не должен
       # ничего менять. Иначе рендер недетерминирован, и бот будет коммитить шум
       # каждую ночь. Тот же двойной прогон, что гоняет CI атласа.
       - name: Регенерация идемпотентна
         run: memshelf rebuild --shelf . --check
 
-      - name: Закоммитить, если что-то изменилось
+      # Push с пересчётом при отказе (memshelf-mcp#157). Пока прогон работает,
+      # в main штатно ложатся чужие шелвы (окно 1,5–3 минуты, поверхностей
+      # несколько), и голый push отвергался «fetch first»: рендер был выполнен
+      # и выброшен вместе с раннером, main оставался без производных. Из
+      # вариантов issue взят второй — «пересчёт после fetch», не rebase
+      # готового коммита: rebase запушил бы производные, посчитанные ДО чужого
+      # эпизода, и main носил бы учёт, отстающий на одну запись, до следующего
+      # прогона — который может проиграть ту же гонку. Пересчёт от свежего main
+      # всегда пушит производные, соответствующие main на момент push. Попытки
+      # ограничены тремя; плотнее — честная красная джоба с внятным текстом:
+      # отказ push обязан отличаться от «рендер не смог посчитаться».
+      - name: Закоммитить, если что-то изменилось (push с пересчётом при отказе)
         run: |
           set -euo pipefail
           git config user.name "shelf-bot"
           git config user.email "shelf-bot@users.noreply.github.com"
-          git add -- ledger.tsv INDEX.md stats.svg 'docs/*/.meta.json' \
-                     'archive/INDEX.md' 'archive/docs/*/.meta.json'
-          if git diff --cached --quiet; then
-            echo "::notice::производные файлы уже соответствуют эпизодам"
-            exit 0
-          fi
-          git commit -m "chore: regenerate derived files [skip ci]"
-          git push
+          for attempt in 1 2 3; do
+            git add -- ledger.tsv INDEX.md stats.svg 'docs/*/.meta.json' \
+                       'archive/INDEX.md' 'archive/docs/*/.meta.json'
+            if git diff --cached --quiet; then
+              echo "::notice::производные файлы уже соответствуют эпизодам"
+              exit 0
+            fi
+            git commit -m "chore: regenerate derived files [skip ci]"
+            if git push; then
+              exit 0
+            fi
+            echo "::warning::push отвергнут (попытка ${attempt} из 3) — за время прогона в main лёг чужой шелв; пересчёт от свежего main (memshelf-mcp#157)"
+            git fetch origin main
+            git reset --hard origin/main
+            memshelf rebuild --shelf .
+            python -c "from memshelf_mcp.core.archive import rebuild_archive_index; rebuild_archive_index('.')"
+            memshelf rebuild --shelf . --check
+          done
+          echo "::error::push отвергнут трижды подряд — рендер НЕ потерян молча: это отказ доставки при плотной череде шелвов, последний пересчёт остался на раннере; прогон, поднятый последним шелвом, догонит (memshelf-mcp#157)"
+          exit 1
+
+      # Doctor — ПОСЛЕ коммита, и это главное в порядке шагов.
+      #
+      # Пока он стоял перед коммитом, один эпизод с неверным kind останавливал
+      # бухгалтерию ВСЕЙ полки: на main-memshelf 2026-08-13 три эпизода с
+      # `kind: session` без секции `## Timeline` уронили шаг, шаги
+      # «идемпотентно» и «закоммитить» ушли в skipped, производные
+      # пересобирались в рабочей копии и выбрасывались вместе с ней. Десять
+      # эпизодов остались вне `ledger.tsv` и `INDEX.md` — то есть вне точки
+      # входа recall, — а единственным видимым симптомом были warning'и
+      # `no-ledger-row`, которые правило полки справедливо велит не трогать
+      # руками (main-memshelf#130).
+      #
+      # Обмен, который здесь сделан: контроль качества эпизодов перестаёт быть
+      # затвором бухгалтерии. Джоба по-прежнему краснеет — doctor блокирующий,
+      # exit 1 роняет прогон, — но остальные эпизоды свою строку получают.
+      # Ошибка в одном эпизоде остаётся ошибкой; она больше не наказывает полку
+      # целиком.
+      #
+      # `if: always()` намеренно НЕ ставится: если упал rebuild или гард
+      # идемпотентности, коммита не было, и производные на диске не те, о
+      # которых doctor будет отчитываться. Красный шаг выше и так красит прогон.
+      - name: Doctor (errors блокируют)
+        run: memshelf doctor --shelf .

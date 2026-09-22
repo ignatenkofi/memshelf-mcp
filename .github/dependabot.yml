@@ -30,3 +30,18 @@ updates:
     groups:
       python-deps:
         patterns: ["*"]
+
+  # Шаблоны адаптера shelf-repo — те же `uses:` с версиями, но лежат вне
+  # `.github/workflows`, и запись с directory "/" их не видит: так они и
+  # отстали до checkout@v4 / setup-python@v5 при v7 в собственном CI.
+  # Для некорневого directory dependabot берёт *.yml прямо из каталога
+  # (dependabot-core, github_actions/file_fetcher.rb).
+  - package-ecosystem: "github-actions"
+    directory: "/adapters/shelf-repo/workflows"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    groups:
+      shelf-repo-actions:
+        patterns: ["*"]

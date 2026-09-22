@@ -23,12 +23,13 @@ permissions:
 jobs:
   guard:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -40,7 +41,12 @@ jobs:
           set -euo pipefail
           BASE="origin/${{ github.base_ref }}"
           CHANGED=$(git diff --name-only "$BASE...HEAD")
-          BAD=$(printf '%s\n' "$CHANGED" | grep -E '^(ledger\.tsv|INDEX\.md|stats\.svg|docs/[^/]+/\.meta\.json)$' || true)
+          # Список обязан совпадать с тем, что стейджит бот в shelf-derived.yml
+          # (`git add -- …`). До правки он отставал на две позиции: archive/INDEX.md
+          # и archive/docs/*/.meta.json бот перезаписывает, а гард их не запрещал —
+          # то есть PR, правящий их руками, получал «дифф чист», после чего бот
+          # затирал правку. Расхождение двух списков стережёт последний шаг джобы.
+          BAD=$(printf '%s\n' "$CHANGED" | grep -E '^(ledger\.tsv|INDEX\.md|stats\.svg|docs/[^/]+/\.meta\.json|archive/INDEX\.md|archive/docs/[^/]+/\.meta\.json)$' || true)
           if [ -n "$BAD" ]; then
             echo "::error::PR правит производные файлы — их собирает бот на main (#58):"
             printf '  %s\n' $BAD
@@ -49,5 +55,45 @@ jobs:
           fi
           echo "дифф чист: производных путей не трогает"
 
+      # Ветка с upstream, а не detached HEAD: doctor (с memshelf-mcp#154)
+      # судит рендерер только по эпизодам, которые тот мог видеть, а «мог
+      # видеть» он читает из @{u}. Без upstream'а эпизод этого PR считался бы
+      # видимым боту, и при ledger.tsv старше суток гард краснел бы
+      # derived-stale на каждом shelve-PR — тем же ложным вердиктом, что
+      # развилка 2026-08-21 (main-memshelf#154): замер на состоянии, которого
+      # бот не видел. С upstream'ом эпизод ветки — warning episode-unpushed,
+      # а derived-stale остаётся тем, чем должен быть: сигналом про main.
       - name: Эпизоды здоровы
-        run: memshelf doctor --shelf .
+        run: |
+          git checkout -q -B pr-head
+          git branch --set-upstream-to=origin/${{ github.base_ref }} pr-head
+          memshelf doctor --shelf .
+
+      - name: Списки производных путей у бота и у гарда сходятся
+        # Место — КОНЕЦ джобы: блокирующий шаг в середине прячет всё, что стоит
+        # за ним, а за этим шагом не стоит ничего. Проверка нужна потому, что
+        # список путей существует в двух местах, и разойтись они могут молча —
+        # ровно так гард и отстал от бота на archive/*.
+        run: |
+          python3 - <<'PY'
+          import re, sys, pathlib
+
+          bot = pathlib.Path(".github/workflows/shelf-derived.yml").read_text(encoding="utf-8")
+          guard = pathlib.Path(".github/workflows/shelf-pr-guard.yml").read_text(encoding="utf-8")
+
+          m = re.search(r"git add -- (.+?)\n\s*if git diff", bot, re.S)
+          if not m:
+              sys.exit("::error::не нашёл строку `git add --` бота — разбор устарел, а не список сошёлся")
+          staged = [a or b for a, b in re.findall(r"'([^']+)'|([^\s\\']+)", m.group(1).replace("\\\n", " ")) if (a or b)]
+
+          g = re.search(r"grep -E '\^\((.+?)\)\$'", guard)
+          if not g:
+              sys.exit("::error::не нашёл регекс гарда — разбор устарел")
+          rx = re.compile("^(" + g.group(1) + ")$")
+
+          missing = [p for p in staged if not rx.match(p.replace("*", "sessions"))]
+          print("бот стейджит:", " ".join(staged))
+          if missing:
+              sys.exit("::error::гард не запрещает пути, которые бот перезаписывает: " + ", ".join(missing))
+          print("списки производных путей сходятся")
+          PY
