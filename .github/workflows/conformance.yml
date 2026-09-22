@@ -1,0 +1,73 @@
+name: shelf-conformance
+# The reference implementation validates what it writes against shelf-spec,
+# in CI — the obligation docshelf-mcp has carried since its ADR-0005 and this
+# repository never picked up. `memshelf init` writes shelf.yml, the manifest
+# the spec validates; `shelve` and `rebuild` write everything else the spec
+# has an opinion on (episode frontmatter, ledger.tsv, INDEX.md, .meta.json).
+# Nothing here ran `shelf-spec validate` over any of it, and the manifest
+# carried a key the schema rejected (`policy.patterns`) from the day init
+# started writing it: `validate --ci` answered config-error (rc 2) for the
+# project's own shelf/ and for every shelf init made, and no run ever said so.
+#
+# shelf-spec is installed from its tip, not from PyPI, on purpose (as in
+# docshelf-mcp): this job checks the implementation against the spec as it
+# stands, not as it was last cut. Blocking: an advisory stage is a stage
+# nobody reads.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install memshelf-mcp (this checkout, with dev tools) and shelf-spec (tip)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install "git+https://github.com/ignatenkofi/shelf-spec.git"
+
+      - name: Scaffold a shelf with memshelf's own tools
+        # The user's path, not a hand-written fixture: init writes the
+        # manifest, shelve the episode, rebuild the derived files the spec
+        # also reads. A static fixture would keep passing while the tools
+        # drift — the check has to judge what the tools write today.
+        run: |
+          memshelf init --shelf "$RUNNER_TEMP/ci-shelf" --name "ci conformance"
+          memshelf shelve --shelf "$RUNNER_TEMP/ci-shelf" --slug 2026-09-21-conformance --kind topic \
+            --digest "The conformance fixture: init, shelve and rebuild wrote this shelf and shelf-spec validate judges the result. The decided scaffold is the CLI path, not a hand-written fixture; a static fixture was rejected because it would pass while the tools drift. Open: nothing." \
+            --section "Decisions=Scaffold through the tools, not a fixture."
+          memshelf rebuild --shelf "$RUNNER_TEMP/ci-shelf"
+
+      - name: Validate against shelf-spec
+        # Exit contract: 0 conforms (info allowed; with --strict, warnings
+        # fail too), 1 spec violations, 2 config-error — an invalid manifest
+        # lands there, which is where the policy.patterns finding sat.
+        run: shelf-spec validate --ci --strict "$RUNNER_TEMP/ci-shelf"
+
+      - name: The same scenario as a test
+        # Opt-in by environment, not importorskip: a missing validator must
+        # be a red run here, not a skip that reads green (ci.yml applies the
+        # same rule to the hard dependencies).
+        env:
+          MEMSHELF_CONFORMANCE: "1"
+        run: pytest -q tests/test_shelf_spec_conformance.py
+
+      - name: The project's own shelf conforms
+        run: shelf-spec validate --ci --strict shelf

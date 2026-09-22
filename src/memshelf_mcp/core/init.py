@@ -82,7 +82,7 @@ def _shelf_yaml(name: str) -> str:
     # shelf-spec v0 (openshelf SPEC.md §3): one file makes the shelf
     # conformant; .docshelf.json stays the implementation config.
     return (
-        "# shelf.yml — openshelf manifest (shelf-spec v0)\n"
+        "# shelf.yml — shelf-spec manifest (shelf-spec v0)\n"
         f'spec_version: "0.1"\n'
         "mode: single\n"
         f'name: "{name}"\n'
