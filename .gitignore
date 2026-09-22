@@ -14,3 +14,6 @@ venv/
 .ruff_cache/
 .coverage
 htmlcov/
+
+# macOS Finder metadata (was tracked once)
+.DS_Store

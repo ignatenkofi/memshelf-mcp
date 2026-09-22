@@ -94,6 +94,7 @@ memshelf shelve --shelf ~/my-shelf --slug 2026-07-23-topic --kind topic \
   --digest "What was decided, what was rejected and why, what stays open." \
   --section "Decisions=What was decided, and what was rejected instead — one line each."
 memshelf recall --shelf ~/my-shelf --id 2026-07-23-topic --section Decisions --log
+memshelf rebuild --shelf ~/my-shelf  # render ledger/INDEX from the episode (a bot's job on shelves that have one)
 memshelf stats  --shelf ~/my-shelf   # claimed + realized savings
 memshelf doctor --shelf ~/my-shelf   # exit 1 on integrity errors
 ```
