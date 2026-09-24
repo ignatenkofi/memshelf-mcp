@@ -31,6 +31,39 @@ once code ships.
   `mcp>=2.1.1,<3` and `pydantic>=2.13.5,<3` (were `>=2.0.0` and `>=2.6`);
   dev tools: `pytest>=9.1.1`, `ruff>=0.16.6`. Ceilings unchanged.
 
+### Fixed
+
+- **`doctor` no longer reads a shallow clone's cut as a fresh commit (#154).**
+  The upper bound on how long the renderer has had an episode came from
+  `git log -1 --format=%cI <upstream> -- <episode>`. In a `--depth N` clone —
+  how cloud agent sessions clone — the walk ends at the boundary commit,
+  which has no parents there and so reads as introducing every file it
+  carries: an episode untouched since the cut answered the boundary's date,
+  newer than its own by however much history the clone dropped. A fresh
+  boundary put the bound under the threshold, the freshness check went
+  quiet, and a renderer dead for eight days (main-memshelf, measured
+  2026-09-24, 17 uncounted episodes) drew neither `derived-stale` nor
+  `renderer-wait-unknown`. The commit `git log` finds is now checked against
+  `.git/shallow`; a boundary commit bounds nothing, the shelf goes unbounded
+  and doctor answers `renderer-wait-unknown` — what the same clone said once
+  `git fetch --shallow-since` had deepened it. Regression test: a two-commit
+  origin cloned with `--depth 1`.
+- **`shelve` no longer refuses a single-branch clone with «diverged» when
+  nothing diverged (#155).** `git clone --depth N` implies `--single-branch`,
+  so origin's refspec maps `main` alone; a session branch published with
+  `push -u` gets no `refs/remotes/origin/<branch>`, `git fetch origin <branch>`
+  lands in `FETCH_HEAD` only, and `merge --ff-only origin/<branch>` failed with
+  «not something we can merge» — reported as a divergence, with a catch-up
+  hint (`pull --rebase`) that creates no tracking ref either, so the next
+  shelve refused the same way. The preflight fetch (and the push retry's)
+  now names the destination — `+refs/heads/<b>:refs/remotes/<remote>/<b>` —
+  so the ref exists in every clone shape, and «diverged» is said only when
+  `merge-base --is-ancestor` finds both sides moved; a ref the fetch could
+  not produce is a skipped sync with the reason, and any other failed
+  fast-forward keeps git's words without the word. Regression tests: the
+  issue's steps (bare origin, `--depth 1` clone, `push -u` of a new branch)
+  for the clean, behind, genuinely diverged and race-on-push cases.
+
 ## [0.3.0] — 2026-09-10
 
 Cut because **every installed consumer still serves the August code.** The

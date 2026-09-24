@@ -154,6 +154,21 @@ def _dirty_tracked(root: Path) -> list[str]:
     return [line[3:] for line in out.splitlines() if line.strip() and line[3:] not in _DIRTY_EXEMPT]
 
 
+def _fetch_branch(root: Path, remote: str, branch: str) -> subprocess.CompletedProcess[str]:
+    """Fetch ``branch`` from ``remote`` into ``refs/remotes/<remote>/<branch>``.
+
+    Spelled as an explicit refspec, not ``git fetch <remote> <branch>``: the
+    short form updates the remote-tracking ref only where the configured
+    refspec maps it, and a ``--single-branch`` clone — what ``--depth N``
+    implies, and how agent sessions clone — maps ``main`` alone. There a
+    branch published with ``push -u`` has no ``refs/remotes/<remote>/<branch>``,
+    the short fetch lands in ``FETCH_HEAD`` only, and everything that reads
+    ``<remote>/<branch>`` afterwards — the fast-forward, the behind-count, the
+    retry's rebase — sees a ref that does not exist (#155).
+    """
+    return _git(root, "fetch", remote, f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}")
+
+
 def preflight(root: Path) -> SyncReport:
     """Fetch and fast-forward the shelf before anything is written (#108).
 
@@ -180,7 +195,7 @@ def preflight(root: Path) -> SyncReport:
             "episodes get lost (#108)."
         )
 
-    fetched = _git(root, "fetch", report.remote, report.branch)
+    fetched = _fetch_branch(root, report.remote, report.branch)
     if fetched.returncode != 0:
         message = _err(fetched)
         if "couldn't find remote ref" in message:
@@ -194,12 +209,32 @@ def preflight(root: Path) -> SyncReport:
 
     upstream = f"{report.remote}/{report.branch}"
     behind = _git(root, "rev-list", "--count", f"HEAD..{upstream}")
+    if behind.returncode != 0:
+        # The fetch succeeded and still the ref it writes cannot be read. Not
+        # a divergence — and git's words for it («not something we can merge»)
+        # are the ones #155 found dressed up as one.
+        report.skipped_reason = f"fetched, but {upstream} cannot be read: {_err(behind)}"
+        return report
+    # «Diverged» only when both sides moved: HEAD is not in the remote's
+    # history (nothing to fast-forward onto) and the remote is not in HEAD's
+    # (so it is not just local commits waiting for the push). Any other reason
+    # a fast-forward fails keeps git's own words, without the word.
+    if (
+        _git(root, "merge-base", "--is-ancestor", "HEAD", upstream).returncode != 0
+        and _git(root, "merge-base", "--is-ancestor", upstream, "HEAD").returncode != 0
+    ):
+        ahead = _git(root, "rev-list", "--count", f"{upstream}..HEAD").stdout.strip() or "?"
+        raise SyncDivergedError(
+            f"shelve refused before writing: this clone and {upstream} have "
+            f"diverged — {ahead} local commit(s) against {behind.stdout.strip()} on the "
+            f"remote, so a fast-forward is impossible. Catch up deliberately, then shelve:\n  "
+            + hint_command(root, report.remote, report.branch)
+        )
     merged = _git(root, "merge", "--ff-only", upstream)
     if merged.returncode != 0:
         raise SyncDivergedError(
-            f"shelve refused before writing: this clone and {upstream} have "
-            f"diverged — a fast-forward is impossible ({_err(merged)}). "
-            f"Catch up deliberately, then shelve:\n  "
+            f"shelve refused before writing: fast-forwarding to {upstream} failed "
+            f"({_err(merged)}). Catch up deliberately, then shelve:\n  "
             + hint_command(root, report.remote, report.branch)
         )
     report.performed = True
@@ -291,7 +326,7 @@ def push_with_retry(root: Path, report: SyncReport) -> None:
         # One retry, whatever the rejection: for a non-fast-forward the rebase
         # is the fix; for anything else (auth, protection) the retry is a
         # no-op that ends in the same git message — surfaced verbatim below.
-        fetched = _git(root, "fetch", report.remote, report.branch)
+        fetched = _fetch_branch(root, report.remote, report.branch)
         if fetched.returncode != 0:
             raise PushRejectedError(
                 f"push rejected ({_err(first)}); the retry's fetch then failed too: {_err(fetched)}"

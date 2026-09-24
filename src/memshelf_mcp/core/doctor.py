@@ -382,7 +382,40 @@ def _derived_layer_age_hours(root: Path, now: datetime) -> float | None:
     return (now - stamp).total_seconds() / 3600
 
 
-def _committed_age_hours(root: Path, rel: str, upstream: str, now: datetime) -> float | None:
+def _shallow_boundary(root: Path) -> frozenset[str]:
+    """The commits a shallow clone's history is cut at — empty for a full clone.
+
+    ``git clone --depth N`` (how ephemeral agent sessions clone) keeps the last
+    N commits and records where it cut in ``.git/shallow``: one sha per
+    boundary commit, a commit whose parents the clone does not hold. Located
+    through ``rev-parse --git-path`` rather than a literal ``.git/shallow`` so
+    a worktree, where ``.git`` is a file, resolves too.
+    """
+    shallow = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--is-shallow-repository"],
+        capture_output=True,
+        text=True,
+    )
+    if shallow.returncode != 0 or shallow.stdout.strip() != "true":
+        return frozenset()
+    where = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--git-path", "shallow"],
+        capture_output=True,
+        text=True,
+    )
+    path = Path(where.stdout.strip())
+    if not path.is_absolute():
+        path = root / path
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return frozenset()
+    return frozenset(line.strip() for line in lines if line.strip())
+
+
+def _committed_age_hours(
+    root: Path, rel: str, upstream: str, now: datetime, boundary: frozenset[str] = frozenset()
+) -> float | None:
     """Hours since ``rel`` was committed, read from ``upstream``.
 
     An UPPER bound on how long the renderer has had it: work cannot reach a
@@ -392,16 +425,30 @@ def _committed_age_hours(root: Path, rel: str, upstream: str, now: datetime) -> 
     pushed in the evening carries a nine-hour commit date the second it lands.
     Measured on a throwaway origin 2026-09-06: commit at 11:33, push at 20:33,
     and ``git log -1 --format=%cI origin/main -- <episode>`` still said 11:33.
+
+    In a shallow clone it is no bound at all once the walk ends at the cut
+    (#154). ``boundary`` is that cut: the boundary commit has no parents here,
+    so ``git log`` reads it as introducing every file it carries, and an
+    episode untouched since the cut answers the boundary's date — newer than
+    its own by however much history the clone dropped. ``None`` then: the
+    shelf goes unbounded and doctor says ``renderer-wait-unknown`` rather than
+    «nobody has waited long enough». Measured on main-memshelf 2026-09-24 from
+    a ``--depth 1`` session clone: a renderer dead for eight days, 17 uncounted
+    episodes, and doctor silent until ``git fetch --shallow-since`` deepened
+    the clone past the episodes.
     """
     proc = subprocess.run(
-        ["git", "-C", str(root), "log", "-1", "--format=%cI", upstream, "--", rel],
+        ["git", "-C", str(root), "log", "-1", "--format=%H%x09%cI", upstream, "--", rel],
         capture_output=True,
         text=True,
     )
     line = proc.stdout.strip()
     if proc.returncode != 0 or not line:
         return None
-    stamp = _parse_git_timestamp(line)
+    commit, _, stamp_text = line.partition("\t")
+    if commit in boundary:
+        return None
+    stamp = _parse_git_timestamp(stamp_text)
     return None if stamp is None else (now - stamp).total_seconds() / 3600
 
 
@@ -524,12 +571,13 @@ def _renderer_wait_bounds(
     stopped» from «this clone cannot see when the renderer got it».
     """
     entries = _upstream_reflog(root, upstream)
+    boundary = _shallow_boundary(root)
     at_most: float | None = None
     at_least: float | None = None
     unbounded = False
     for rel in uncounted:
         not_before, by = _arrival_bracket(root, rel, entries)
-        bounds = [_committed_age_hours(root, rel, upstream, now)]
+        bounds = [_committed_age_hours(root, rel, upstream, now, boundary)]
         if not_before is not None:
             bounds.append((now - not_before).total_seconds() / 3600)
         known = [b for b in bounds if b is not None]

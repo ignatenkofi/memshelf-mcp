@@ -1049,6 +1049,55 @@ def test_a_shelf_without_a_remote_is_not_told_about_upstreams(tmp_path):
     assert "upstream-unknown" not in _codes(report), report.as_dict()
 
 
+def test_a_shallow_clone_does_not_read_the_cut_as_a_fresh_commit(tmp_path):
+    """#154: in a `--depth N` clone the commit date is not even an upper bound.
+
+    `git log -1 <upstream> -- <episode>` walks back to the cut; the boundary
+    commit has no parents there, so it reads as introducing every file it
+    carries, and an episode untouched since the cut answers the boundary's
+    date. Measured 2026-09-24 on main-memshelf from a `--depth 1` session
+    clone: a renderer dead for eight days, 17 uncounted episodes, and doctor
+    silent — the boundary was hours old, so «nobody has waited long enough».
+    A full clone of the same origin, and the shallow one after
+    `git fetch --shallow-since`, both said `renderer-wait-unknown`."""
+    origin, root = _shelf_with_origin_and_old_ledger(
+        tmp_path, episode_committed_at="2026-09-10T10:00:00+00:00"
+    )
+    _push_at(root, "2026-09-10T10:30:00+00:00")
+    # An unrelated commit after the episode: the one a `--depth 1` clone stops at.
+    (root / "notes.txt").write_text("unrelated\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
+    cut = "2026-09-24T20:00:00+00:00"
+    subprocess.run(
+        ["git", "-C", str(root), "commit", "-q", "-m", "unrelated"],
+        check=True,
+        env={**os.environ, "GIT_AUTHOR_DATE": cut, "GIT_COMMITTER_DATE": cut},
+    )
+    _push_at(root, cut)
+    shallow = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", f"file://{origin}", str(shallow)], check=True
+    )
+    probe = subprocess.run(
+        ["git", "-C", str(shallow), "log", "-1", "--format=%cI", "origin/main", "--", "docs"],
+        capture_output=True,
+        text=True,
+    )
+    assert probe.stdout.startswith("2026-09-24T20:00"), (
+        "fixture assumes the cut hides the episode's own commit date"
+    )
+
+    report = check_shelf(
+        shallow, now=datetime(2026, 9, 25, 0, 0, tzinfo=timezone.utc), stale_after_hours=6
+    )
+
+    assert "derived-stale" not in _codes(report), report.as_dict()
+    finding = next(f for f in report.findings if f.code == "renderer-wait-unknown")
+    assert finding.level == "unknown"
+    assert "at an unreadable time" in finding.detail
+    assert "2026-08-21-unpushed" in finding.detail
+
+
 # --- #125: freshness as doctor findings -------------------------------------
 
 
