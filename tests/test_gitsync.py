@@ -18,6 +18,7 @@ from memshelf_mcp.core.gitsync import (  # noqa: E402
     PushRejectedError,
     SyncDivergedError,
     SyncReport,
+    preflight,
     push_with_retry,
 )
 from memshelf_mcp.core.shelve import shelve  # noqa: E402
@@ -433,3 +434,129 @@ def test_any_other_dirty_tracked_file_still_refuses(tmp_path):
             sections=SECTIONS,
             date="2026-08-31",
         )
+
+
+# --- #155: a single-branch clone has no tracking ref for its own branch ----
+
+
+def _origin_with_two_commits(tmp_path):
+    origin, seed = _shelf_with_origin(tmp_path)
+    (seed / "second.txt").write_text("second\n", encoding="utf-8")
+    _must(seed, "add", "-A")
+    _must(seed, "commit", "-q", "-m", "second commit")
+    _must(seed, "push", "-q", "origin", "main")
+    return origin, seed
+
+
+def _single_branch_clone(tmp_path, origin, name="session"):
+    """`git clone --depth 1` — the cloud-session shape (#155). Depth implies
+    `--single-branch`, so origin's refspec maps `main` and nothing else."""
+    clone = tmp_path / name
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", f"file://{origin}", str(clone)], check=True
+    )
+    _must(clone, "config", "user.email", "s@t.test")
+    _must(clone, "config", "user.name", name)
+    assert _must(clone, "config", "--get-all", "remote.origin.fetch").stdout.split() == [
+        "+refs/heads/main:refs/remotes/origin/main"
+    ], "fixture assumes a single-branch refspec"
+    return clone
+
+
+def _publish_branch(clone, branch="feature/x"):
+    """`checkout -b`, one commit, `push -u` — after which `@{u}` does not
+    resolve and `refs/remotes/origin/<branch>` does not exist (#155, step 4)."""
+    _must(clone, "checkout", "-qb", branch)
+    (clone / "on-branch.txt").write_text("session work\n", encoding="utf-8")
+    _must(clone, "add", "-A")
+    _must(clone, "commit", "-q", "-m", "session commit")
+    _must(clone, "push", "-q", "-u", "origin", branch)
+    assert _git(clone, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode != 0
+    assert (
+        _git(clone, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}").returncode != 0
+    )
+    return branch
+
+
+def _advance_branch_on_origin(tmp_path, origin, branch, name="other"):
+    """Someone else moves `origin/<branch>` — from a full clone, where the
+    default refspec maps every branch."""
+    clone = _second_clone(tmp_path, origin, name=name)
+    _must(clone, "checkout", "-q", branch)
+    (clone / f"{name}.txt").write_text("moved on the remote\n", encoding="utf-8")
+    _must(clone, "add", "-A")
+    _must(clone, "commit", "-q", "-m", f"{name} commit")
+    _must(clone, "push", "-q", "origin", branch)
+
+
+def test_a_branch_pushed_from_a_single_branch_clone_is_not_diverged(tmp_path):
+    """#155, steps 1-5: the clone matched origin exactly and preflight said
+    «diverged» — `git fetch origin feature/x` had updated only FETCH_HEAD."""
+    origin, _seed = _origin_with_two_commits(tmp_path)
+    work = _single_branch_clone(tmp_path, origin)
+    branch = _publish_branch(work)
+
+    report = preflight(work)
+
+    assert report.performed and report.commits_pulled == 0
+    assert (report.remote, report.branch) == ("origin", branch)
+    # The fetch wrote the ref the rest of the sync reads.
+    assert (
+        _git(work, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}").returncode == 0
+    )
+
+
+def test_a_single_branch_clone_fast_forwards_to_the_moved_branch(tmp_path):
+    origin, _seed = _origin_with_two_commits(tmp_path)
+    work = _single_branch_clone(tmp_path, origin)
+    branch = _publish_branch(work)
+    _advance_branch_on_origin(tmp_path, origin, branch)
+
+    report = preflight(work)
+
+    assert report.performed and report.commits_pulled == 1
+    assert (work / "other.txt").exists()
+
+
+def test_a_single_branch_clone_that_really_diverged_still_refuses(tmp_path):
+    origin, _seed = _origin_with_two_commits(tmp_path)
+    work = _single_branch_clone(tmp_path, origin)
+    branch = _publish_branch(work)
+    _advance_branch_on_origin(tmp_path, origin, branch)
+    (work / "local.txt").write_text("local\n", encoding="utf-8")
+    _must(work, "add", "-A")
+    _must(work, "commit", "-q", "-m", "local-only commit")
+
+    with pytest.raises(SyncDivergedError) as exc:
+        preflight(work)
+    assert "diverged" in str(exc.value)
+    assert f"pull --rebase origin {branch}" in str(exc.value)
+
+
+def test_the_push_retry_rebases_in_a_single_branch_clone_too(tmp_path):
+    """The same short fetch sat in `push_with_retry`; its rebase onto
+    `origin/<branch>` would have failed on the missing ref."""
+    origin, _seed = _origin_with_two_commits(tmp_path)
+    work = _single_branch_clone(tmp_path, origin)
+    branch = _publish_branch(work)
+    _advance_branch_on_origin(tmp_path, origin, branch)
+    (work / "local.txt").write_text("local\n", encoding="utf-8")
+    _must(work, "add", "-A")
+    _must(work, "commit", "-q", "-m", "local-only commit")
+
+    report = SyncReport()
+    push_with_retry(work, report)
+
+    assert report.pushed and report.push_retries == 1 and report.commits_pulled == 1
+    assert report.final_sha == _must(origin, "rev-parse", branch).stdout.strip()
+
+
+def test_a_branch_origin_does_not_have_yet_is_still_a_skip(tmp_path):
+    """The explicit refspec must keep the «no such branch yet» reading."""
+    _origin, work = _shelf_with_origin(tmp_path)
+    _must(work, "checkout", "-qb", "unpublished")
+
+    report = preflight(work)
+
+    assert not report.performed
+    assert report.skipped_reason == "remote has no 'unpublished' yet — nothing to sync from"
