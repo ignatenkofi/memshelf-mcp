@@ -27,6 +27,7 @@ shelf.
 | `memshelf_rollup` | shelf + derived | navigation has grown large |
 | `memshelf_purge` | shelf (deletes) | episodes are past `retain_until` |
 | `memshelf_resolve` | derived | two writers shelved on parallel branches |
+| `memshelf_sync` | git (fast-forward) | the clone is behind its remote — the bot rendered, or another session shelved |
 | `memshelf_doctor` | none | the shelf's integrity is the question |
 
 ## `memshelf_shelve`
@@ -42,6 +43,16 @@ says so (`shelf_totals.derived_stale`, `next`). A contract violation comes back
 as an error carrying the exact fixes — nothing is written. Returns the episode
 address, redaction report, and any digest warnings. `amend=true` rewrites an
 existing episode in place under the same slug.
+
+After a `push` to a shelf with the render bot (`shelf-derived.yml`), shelve
+waits for the bot's commit and fast-forwards onto it (#157): without that the
+clone ends every shelve one bot commit behind, and the next doctor reports
+`stale-index` + `no-ledger-row` for an episode that is fine. The wait happens
+only when the push left the derived files out of date (the bot's own
+`rebuild --check`), polls every 5 s and gives up after 60 s —
+`await_render_s` overrides the limit, `0` switches the wait off. The outcome is
+in `sync.render_pulled` / `sync.render_note`; a render that did not arrive is a
+note, never an error — the episode is on the remote already.
 
 ## `memshelf_lint_digest`
 
@@ -179,6 +190,15 @@ from both sides, rebuild `INDEX.md` and `stats.svg` from `docs/`, then run
 doctor. Conflicting episode files are reported as unresolved, never
 auto-merged. Also safe outside a conflict — degrades to a derived-files
 rebuild.
+
+## `memshelf_sync`
+
+Fetch and fast-forward the shelf clone to its remote — the shelve preflight
+(#108) on its own, writing nothing else. For a clone that fell behind without
+shelving: the bot rendered after an earlier push, or another session shelved.
+A dirty tracked tree or a diverged branch is a refusal with the executable fix,
+exactly as in shelve; a failed fetch is reported as a skip with git's words.
+Returns the same `sync` block shelve does, plus the resulting `head` (#157).
 
 ## `memshelf_doctor`
 

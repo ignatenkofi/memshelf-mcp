@@ -10,6 +10,25 @@ once code ships.
 
 ### Added
 
+- **`shelve` waits for the bot's render and lands on it (#157).** After a push
+  to a shelf with the `shelf-derived` bot, the clone used to end every shelve
+  one bot commit behind — so the next `doctor` reported `stale-index` +
+  `no-ledger-row` for an episode that was fine, every session. Now shelve
+  polls the remote (every 5 s, up to 60 s — two measured renders took 28 and
+  30 s) for a commit on top of the push that touches a derived file, and
+  fast-forwards onto it. It waits only where a render can come: the bot
+  workflow exists and the push left derived files out of date by the bot's
+  own `rebuild --check`. `await_render_s` / `--await-render` sets the limit,
+  `0` switches it off. A render that does not arrive, a dirty tracked tree
+  or a clone that is no longer an ancestor is a `sync.render_note`, never an
+  error — the episode is on the remote already. `final_sha` stays the
+  episode's own commit.
+- **`memshelf_sync` / `memshelf sync` (#157).** The shelve preflight on its
+  own: fetch and fast-forward, nothing else written. For a clone left behind
+  without shelving — a render that took longer than the wait, another
+  session's shelve. Refuses on a dirty tracked tree or a diverged branch with
+  the same executable fix as shelve.
+
 - **A source of record for the claude.ai account copy of `shelve`
   (`adapters/claude-account/`, #150).** The skill exists in a fourth copy this
   repository never produced — an account skill on claude.ai, pushed to every
@@ -27,11 +46,20 @@ once code ships.
 
 ### Changed
 
+- **The account copy of `shelve` reads the render outcome (#157).** Steps 4
+  and 6 and the «doctor right after shelve lies» pitfall now start from
+  `sync.render_pulled`; the mirror's digest is repinned. The live account
+  skill has to be saved from the same text for the comparison to go green.
+
 - **Dependency floors follow the dependabot bump (#138).** Runtime:
   `mcp>=2.1.1,<3` and `pydantic>=2.13.5,<3` (were `>=2.0.0` and `>=2.6`);
   dev tools: `pytest>=9.1.1`, `ruff>=0.16.6`. Ceilings unchanged.
 
 ### Fixed
+
+- **The bot template cited the wrong #157.** `shelf-derived.yml` named its
+  push-with-recount `memshelf-mcp#157`; the issue it implements is
+  main-memshelf#157, and memshelf-mcp#157 is now this change.
 
 - **`doctor` no longer reads a shallow clone's cut as a fresh commit (#154).**
   The upper bound on how long the renderer has had an episode came from

@@ -51,6 +51,7 @@ from memshelf_mcp.tools import (
     SearchInput,
     ShelveInput,
     StatsInput,
+    SyncInput,
     default_shelf_path,
     run_advise,
     run_doctor,
@@ -67,6 +68,7 @@ from memshelf_mcp.tools import (
     run_search,
     run_shelve,
     run_stats,
+    run_sync,
 )
 
 _SHELF_HELP = (
@@ -130,6 +132,7 @@ def _cmd_shelve(args: argparse.Namespace) -> int:
         sync=not args.no_sync,
         push=args.push,
         publish=args.publish,
+        await_render_s=args.await_render,
     )
     try:
         result = run_shelve(params)
@@ -144,6 +147,16 @@ def _cmd_shelve(args: argparse.Namespace) -> int:
         PushRejectedError,
     ) as exc:
         # Expected, actionable failures: print the fix to stderr, exit non-zero.
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_sync(args: argparse.Namespace) -> int:
+    try:
+        result = run_sync(SyncInput(shelf_path=args.shelf))
+    except (DirtyShelfError, SyncDivergedError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -611,6 +624,15 @@ def build_parser() -> argparse.ArgumentParser:
         "PR. Exclusive with --push; the checkout never switches branches.",
     )
     sh.add_argument(
+        "--await-render",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="After --push: wait up to SECONDS for the shelf bot's render and "
+        "fast-forward onto it (#157). Default: 60 when the shelf has the "
+        "shelf-derived bot and the push left derived files out of date; 0 = never.",
+    )
+    sh.add_argument(
         "--amend",
         action="store_true",
         help="Rewrite an episode already on the shelf under the same slug: one episode, "
@@ -618,6 +640,13 @@ def build_parser() -> argparse.ArgumentParser:
         "Fails if the slug is not there.",
     )
     sh.set_defaults(func=_cmd_shelve)
+
+    sy = sub.add_parser(
+        "sync",
+        help="Fetch and fast-forward the shelf clone to its remote (#157).",
+    )
+    sy.add_argument("--shelf", help=_SHELF_HELP)
+    sy.set_defaults(func=_cmd_sync)
 
     ld = sub.add_parser(
         "lint-digest",

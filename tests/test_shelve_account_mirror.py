@@ -18,11 +18,13 @@ ADAPTERS = Path(__file__).resolve().parent.parent / "adapters"
 MIRROR = ADAPTERS / "claude-account" / "skills" / "shelve" / "SKILL.md"
 CHECK = ADAPTERS / "claude-code" / "check-shelve-copies.sh"
 
-# Measured 2026-09-14 on the owner's Mac; the digest the 2026-09-10 container
-# run reported is the same one, which is what makes the two measurements one
-# fact instead of two copies.
-ACCOUNT_SHA256 = "f45c70be04b51b0e67c4b3713a4b0c25ad4922c3d83eeb24cd2d60179dcb33c9"
-ACCOUNT_BYTES = 14038
+# First measured 2026-09-14 on the owner's Mac (the 2026-09-10 container run
+# reported the same digest). Repinned 2026-09-25 with #157: steps 4 and 6 and
+# the doctor pitfall now read `sync.render_pulled`. Until the owner saves that
+# text as the account skill, the live-copy comparison below is red on hosts
+# that materialise the old one — which is the alarm working, not a flake.
+ACCOUNT_SHA256 = "b3a0ad1c49f8900516305661d0cc60016bbf6375cc35e6564eb02713d78fbcc0"
+ACCOUNT_BYTES = 15293
 
 # Where the account copy is materialised. Claude Desktop uses the
 # `anthropic-skills` plugin bundle, two UUID levels deep; agent containers join

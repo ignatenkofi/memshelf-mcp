@@ -22,6 +22,17 @@ Two moves, both explicit in the report:
 A clean run still says so: «pulled 0, retries 0» is a statement, not an
 omission — absence of signal must not look like normal (#146 lesson, the
 failure class main-memshelf#148 files under the same name).
+
+A third move closes the loop the first two leave open (#157):
+
+* ``await_render`` — after a push to a shelf with a render bot: poll the
+  remote until the bot's commit lands on top of the pushed one, then
+  fast-forward. Without it the clone is one bot commit behind *by
+  construction* after every shelve, and the next ``doctor`` reports
+  ``stale-index`` + ``no-ledger-row`` for an episode that is fine — every
+  session, on every shelf with a bot. A render that does not arrive in time
+  is a statement in the report, never a failure: the episode is already on
+  the remote.
 """
 
 from __future__ import annotations
@@ -30,6 +41,8 @@ import os
 import re
 import shlex
 import subprocess
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -91,6 +104,15 @@ class SyncReport:
     publish_requested: bool = False
     published_branch: str | None = None
     compare_url: str | None = None
+    #: #157 — the wait for the bot's render after the push. ``render_awaited``
+    #: says whether a wait was attempted at all; ``render_pulled`` whether the
+    #: render landed *and* this clone fast-forwarded onto it. When it did not,
+    #: ``render_note`` says why in words (not expected / timed out / could not
+    #: fast-forward) — three different states, never folded into one «no».
+    render_awaited: bool = False
+    render_pulled: bool = False
+    render_waited_s: float = 0.0
+    render_note: str | None = None
 
     def line(self) -> str:
         """One human sentence for CLI output and warnings."""
@@ -106,6 +128,10 @@ class SyncReport:
             )
         else:
             parts.append("retries 0")
+        if self.render_pulled:
+            parts.append(f"bot render pulled after {self.render_waited_s:.0f}s")
+        elif self.render_note:
+            parts.append(f"bot render not pulled — {self.render_note}")
         return ", ".join(parts)
 
 
@@ -349,3 +375,111 @@ def push_with_retry(root: Path, report: SyncReport) -> None:
             )
     report.pushed = True
     report.final_sha = _git(root, "rev-parse", "HEAD").stdout.strip() or None
+
+
+#: What the render bot commits — the ``git add`` list of
+#: ``adapters/shelf-repo/workflows/shelf-derived.yml``, as pathspecs. A commit
+#: on top of the push that touches none of these is somebody else's work, not
+#: the render being waited for.
+DERIVED_PATHSPECS = (
+    "ledger.tsv",
+    "INDEX.md",
+    "stats.svg",
+    ":(glob)docs/*/.meta.json",
+    "archive/INDEX.md",
+    ":(glob)archive/docs/*/.meta.json",
+)
+
+#: Measured 2026-09-25 on main-memshelf: push → bot commit on origin took 30 s
+#: and 28 s (shelf-derived runs 318, 319). Twice that, so a slow runner queue
+#: still lands inside the wait, and short enough that a shelve call does not
+#: outlive a client's tool timeout.
+DEFAULT_RENDER_WAIT_S = 60.0
+RENDER_POLL_S = 5.0
+
+
+def await_render(
+    root: Path,
+    report: SyncReport,
+    *,
+    timeout: float = DEFAULT_RENDER_WAIT_S,
+    interval: float = RENDER_POLL_S,
+    sleep: Callable[[float], None] | None = None,
+    clock: Callable[[], float] | None = None,
+) -> None:
+    """Wait for the bot's render of the pushed commit and fast-forward onto it (#157).
+
+    The render counts as arrived when ``<pushed>..<remote>/<branch>`` holds a
+    commit touching a derived file (``DERIVED_PATHSPECS``). Then — and only if
+    the fast-forward is clean — the clone moves onto it, so the next doctor
+    sees the ledger row and INDEX entry it would otherwise miss.
+
+    Never raises: the episode is on the remote already, so every way this can
+    end short of a pull is a ``render_note`` in the report, not an error.
+    Mutates ``report``: ``render_awaited``, ``render_pulled``,
+    ``render_waited_s``, ``render_note`` and ``commits_pulled``.
+    """
+    # Resolved per call, not bound at definition, so a test can stand in for
+    # the clock and the bot without threads.
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    report.render_awaited = True
+    if not report.pushed or not report.final_sha or report.remote is None or report.branch is None:
+        report.render_note = "nothing was pushed"
+        return
+    upstream = f"{report.remote}/{report.branch}"
+    start = clock()
+    last_fetch_error: str | None = None
+    while True:
+        fetched = _fetch_branch(root, report.remote, report.branch)
+        if fetched.returncode != 0:
+            last_fetch_error = _err(fetched)
+        else:
+            last_fetch_error = None
+            rendered = _git(
+                root,
+                "rev-list",
+                "--count",
+                f"{report.final_sha}..{upstream}",
+                "--",
+                *DERIVED_PATHSPECS,
+            )
+            if rendered.returncode == 0 and int(rendered.stdout.strip() or 0) > 0:
+                report.render_waited_s = clock() - start
+                _fast_forward_onto_render(root, report, upstream)
+                return
+        elapsed = clock() - start
+        if elapsed + interval > timeout:
+            report.render_waited_s = elapsed
+            tail = f"; the last fetch failed: {last_fetch_error}" if last_fetch_error else ""
+            report.render_note = (
+                f"no render on {upstream} within {timeout:.0f}s{tail} — "
+                "catch up later with `memshelf sync`"
+            )
+            return
+        sleep(interval)
+
+
+def _fast_forward_onto_render(root: Path, report: SyncReport, upstream: str) -> None:
+    """The render is on the remote: move the clone onto it, or say why not."""
+    if _git(root, "merge-base", "--is-ancestor", "HEAD", upstream).returncode != 0:
+        report.render_note = (
+            f"the render landed, but this clone is not an ancestor of {upstream} "
+            "any more — nothing was pulled; catch up with `memshelf sync`"
+        )
+        return
+    dirty = _dirty_tracked(root)
+    if dirty:
+        report.render_note = (
+            "the render landed, but tracked files are modified "
+            f"({', '.join(dirty[:3])}{'…' if len(dirty) > 3 else ''}) — nothing was "
+            "pulled over them; commit or stash, then `memshelf sync`"
+        )
+        return
+    behind = _git(root, "rev-list", "--count", f"HEAD..{upstream}")
+    merged = _git(root, "merge", "--ff-only", upstream)
+    if merged.returncode != 0:
+        report.render_note = f"the render landed, but the fast-forward failed: {_err(merged)}"
+        return
+    report.commits_pulled += int(behind.stdout.strip() or 0)
+    report.render_pulled = True

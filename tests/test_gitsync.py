@@ -18,6 +18,7 @@ from memshelf_mcp.core.gitsync import (  # noqa: E402
     PushRejectedError,
     SyncDivergedError,
     SyncReport,
+    await_render,
     preflight,
     push_with_retry,
 )
@@ -560,3 +561,256 @@ def test_a_branch_origin_does_not_have_yet_is_still_a_skip(tmp_path):
 
     assert not report.performed
     assert report.skipped_reason == "remote has no 'unpublished' yet — nothing to sync from"
+
+
+# --- #157: wait for the bot's render and land on it ------------------------
+#
+# The bot is played by `_advance_origin` from inside the injected sleep: the
+# render arrives *while* the shelve is waiting, which is the order of events
+# on a real shelf (push → ~30 s → bot commit), without threads or wall time.
+
+
+class _FakeClock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+def _bot_after(polls, tmp_path, origin, clock, filename="ledger.tsv"):
+    """A sleep that advances the fake clock and renders on the n-th poll."""
+    calls = {"n": 0}
+
+    def sleep(seconds):
+        clock.now += seconds
+        calls["n"] += 1
+        if calls["n"] == polls:
+            _advance_origin(tmp_path, origin, filename=filename, name=f"bot{calls['n']}")
+
+    return sleep
+
+
+def _pushed(tmp_path, slug="2026-09-25-render-wait"):
+    origin, work = _shelf_with_origin(tmp_path)
+    result = shelve(
+        work,
+        slug=slug,
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections=SECTIONS,
+        push=True,
+        await_render_s=0,
+    )
+    assert result.sync.pushed and not result.sync.render_awaited
+    return origin, work, result.sync
+
+
+def test_the_render_is_pulled_and_the_clone_ends_level_with_origin(tmp_path):
+    origin, work, report = _pushed(tmp_path)
+    pushed = report.final_sha
+    clock = _FakeClock()
+
+    await_render(
+        work,
+        report,
+        timeout=60,
+        interval=5,
+        sleep=_bot_after(2, tmp_path, origin, clock),
+        clock=clock,
+    )
+
+    assert report.render_pulled and report.render_note is None
+    assert _must(work, "rev-parse", "HEAD").stdout.strip() == _origin_head(origin)
+    assert report.commits_pulled == 1
+    assert report.render_waited_s == 10
+    # The quotable sha stays the episode's own commit, not the bot's.
+    assert report.final_sha == pushed
+    assert "bot render pulled after 10s" in report.line()
+
+
+def test_no_render_in_time_is_a_note_not_a_failure(tmp_path):
+    _origin, work, report = _pushed(tmp_path)
+    head = _must(work, "rev-parse", "HEAD").stdout.strip()
+    clock = _FakeClock()
+
+    def sleep(seconds):
+        clock.now += seconds
+
+    await_render(work, report, timeout=20, interval=5, sleep=sleep, clock=clock)
+
+    assert not report.render_pulled
+    assert "no render on origin/main within 20s" in report.render_note
+    assert "memshelf sync" in report.render_note
+    assert _must(work, "rev-parse", "HEAD").stdout.strip() == head
+    assert "bot render not pulled" in report.line()
+
+
+def test_a_foreign_commit_is_not_mistaken_for_the_render(tmp_path):
+    """Another session's work on top of the push touches no derived file —
+    pulling it and calling that the render would stop the wait early and
+    leave doctor exactly as noisy as before."""
+    origin, work, report = _pushed(tmp_path)
+    clock = _FakeClock()
+
+    await_render(
+        work,
+        report,
+        timeout=20,
+        interval=5,
+        sleep=_bot_after(1, tmp_path, origin, clock, filename="notes.txt"),
+        clock=clock,
+    )
+
+    assert not report.render_pulled
+    assert report.render_note.startswith("no render")
+
+
+def test_a_dirty_tracked_file_is_never_fast_forwarded_over(tmp_path):
+    origin, work, report = _pushed(tmp_path)
+    _dirty_a_tracked_file(work)
+    report.final_sha = _must(work, "rev-parse", "HEAD").stdout.strip()
+    clock = _FakeClock()
+
+    await_render(
+        work,
+        report,
+        timeout=60,
+        interval=5,
+        sleep=_bot_after(1, tmp_path, origin, clock),
+        clock=clock,
+    )
+
+    assert not report.render_pulled
+    assert "tracked files are modified (tracked.txt)" in report.render_note
+    assert (work / "tracked.txt").read_text(encoding="utf-8") == "local edit\n"
+
+
+def test_nothing_pushed_means_nothing_to_wait_for(tmp_path):
+    _origin, work = _shelf_with_origin(tmp_path)
+    report = SyncReport()
+
+    await_render(work, report, timeout=60, sleep=lambda s: pytest.fail("must not wait"))
+
+    assert report.render_awaited and report.render_note == "nothing was pushed"
+
+
+def _dirty_a_tracked_file(work):
+    """Commit a file, push it, then modify it — a tracked, dirty tree."""
+    (work / "tracked.txt").write_text("committed\n", encoding="utf-8")
+    _must(work, "add", "-A")
+    _must(work, "commit", "-q", "-m", "track a file")
+    _must(work, "push", "-q", "origin", "main")
+    (work / "tracked.txt").write_text("local edit\n", encoding="utf-8")
+
+
+def _with_bot_workflow(work):
+    wf = work / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "shelf-derived.yml").write_text("name: shelf-derived\n", encoding="utf-8")
+    _must(work, "add", "-A")
+    _must(work, "commit", "-q", "-m", "ci: the render bot")
+    _must(work, "push", "-q", "origin", "main")
+
+
+def test_shelve_waits_for_the_render_by_default_on_a_shelf_with_the_bot(tmp_path, monkeypatch):
+    from memshelf_mcp.core import gitsync
+    from memshelf_mcp.tools import ShelveInput, run_shelve
+
+    origin, work = _shelf_with_origin(tmp_path)
+    _with_bot_workflow(work)
+    clock = _FakeClock()
+    monkeypatch.setattr(gitsync.time, "monotonic", clock)
+    monkeypatch.setattr(gitsync.time, "sleep", _bot_after(1, tmp_path, origin, clock))
+
+    out = run_shelve(
+        ShelveInput(
+            shelf_path=str(work),
+            slug="2026-09-25-default-wait",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections=SECTIONS,
+            push=True,
+        )
+    )
+
+    assert out["sync"]["render_pulled"] is True
+    assert out["sync"]["render_awaited"] is True
+    assert _must(work, "rev-parse", "HEAD").stdout.strip() == _origin_head(origin)
+    assert out["next"].startswith("pushed, and the bot's render is pulled")
+
+
+def test_no_bot_workflow_means_no_wait(tmp_path, monkeypatch):
+    from memshelf_mcp.core import gitsync
+
+    _origin, work = _shelf_with_origin(tmp_path)
+    monkeypatch.setattr(gitsync.time, "sleep", lambda s: pytest.fail("must not wait"))
+
+    result = shelve(
+        work,
+        slug="2026-09-25-no-bot",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections=SECTIONS,
+        push=True,
+    )
+
+    assert result.sync.pushed and not result.sync.render_awaited
+
+
+def test_await_render_zero_switches_the_wait_off_even_with_the_bot(tmp_path, monkeypatch):
+    from memshelf_mcp.core import gitsync
+
+    _origin, work = _shelf_with_origin(tmp_path)
+    _with_bot_workflow(work)
+    monkeypatch.setattr(gitsync.time, "sleep", lambda s: pytest.fail("must not wait"))
+
+    result = shelve(
+        work,
+        slug="2026-09-25-wait-off",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections=SECTIONS,
+        push=True,
+        await_render_s=0,
+    )
+
+    assert result.sync.pushed and not result.sync.render_awaited
+
+
+def test_a_negative_wait_is_refused_before_anything_is_written(tmp_path):
+    _origin, work = _shelf_with_origin(tmp_path)
+    with pytest.raises(ValueError, match="await_render_s must be >= 0"):
+        shelve(
+            work,
+            slug="2026-09-25-negative",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections=SECTIONS,
+            push=True,
+            await_render_s=-1,
+        )
+    assert not list((work / "docs" / "topics").glob("*.md"))
+
+
+def test_sync_fast_forwards_a_clone_the_bot_left_behind(tmp_path):
+    from memshelf_mcp.tools import SyncInput, run_sync
+
+    origin, work = _shelf_with_origin(tmp_path)
+    _advance_origin(tmp_path, origin)
+
+    out = run_sync(SyncInput(shelf_path=str(work)))
+
+    assert out["sync"]["performed"] and out["sync"]["commits_pulled"] == 1
+    assert out["head"] == _origin_head(origin)
+
+
+def test_sync_refuses_a_dirty_tree_with_the_same_words_as_shelve(tmp_path):
+    from memshelf_mcp.tools import SyncInput, run_sync
+
+    origin, work = _shelf_with_origin(tmp_path)
+    _dirty_a_tracked_file(work)
+    _advance_origin(tmp_path, origin)
+
+    with pytest.raises(DirtyShelfError, match="tracked.txt"):
+        run_sync(SyncInput(shelf_path=str(work)))
