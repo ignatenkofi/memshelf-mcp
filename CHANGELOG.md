@@ -10,6 +10,19 @@ once code ships.
 
 ### Added
 
+- **`adapters/claude-desktop/refresh.sh` and `build.py --local-version`
+  (#158).** Reinstalling the Desktop extension after a merge into `src` was a
+  manual ritual whose outcome the version number could not show: every
+  bundle read `0.3.0`. `--local-version` appends `+g<sha>[.dirty]` to the
+  manifest, the staged `pyproject.toml` and the file name (PEP 440 local
+  segment, semver build metadata), leaving `__version__` alone so the served
+  code still hashes like its checkout. `refresh.sh` builds the uv bundle
+  that way and opens it; `refresh.sh --check`, after the restart, probes the
+  extension's interpreter for the directory it imports and compares its hash
+  with the checkout — exit 0 current, 1 stale, 2 not found or not started
+  yet (never folded into «fresh»). `MEMSHELF_EXTENSIONS_DIR` points
+  `discover_consumers()` at another extensions folder for fixtures.
+
 - **`shelve` waits for the bot's render and lands on it (#157).** After a push
   to a shelf with the `shelf-derived` bot, the clone used to end every shelve
   one bot commit behind — so the next `doctor` reported `stale-index` +
