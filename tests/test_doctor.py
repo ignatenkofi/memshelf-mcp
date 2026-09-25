@@ -616,6 +616,115 @@ def test_a_shelf_shelved_a_minute_ago_stays_a_warning(tmp_path):
     assert report.as_dict()["errors"] == 0
 
 
+def _commit_everything_at(root, when: str, message: str):
+    """Commit whatever is uncommitted with `when` as the date — a later, unrelated commit."""
+    env = {"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "commit", "-q", "-m", message],
+        check=True,
+        env={**os.environ, **env},
+    )
+
+
+def _detached_clone(source, dest, *, depth=None):
+    """A clone the way an ephemeral agent session holds one: shallow, no upstream."""
+    cmd = ["git", "clone", "-q"]
+    if depth is not None:
+        cmd += ["--depth", str(depth)]
+    cmd += [f"file://{source}", str(dest)]
+    subprocess.run(cmd, check=True)
+    subprocess.run(["git", "-C", str(dest), "checkout", "-q", "--detach"], check=True)
+    return dest
+
+
+def test_a_shallow_clone_cannot_vouch_for_the_ledger_clock(tmp_path):
+    """`git log -- ledger.tsv` in a depth-1 clone answers with the boundary commit.
+
+    Measured on this repository's own shelf/ (2026-09-25): the shallow clone
+    dated the ledger by its HEAD while the real last change was fifteen days
+    older. Under the threshold that is not «fresh» — it is «cannot tell», and
+    doctor has to say so instead of clearing a renderer it never saw.
+    """
+    root = _shelf_with_an_uncounted_episode(tmp_path / "origin")
+    _commit_ledger_at(root, "2026-08-10T09:00:00+00:00")
+    # A later, unrelated commit: the only one a depth-1 clone will hold.
+    (root / "NOTES.md").write_text("later\n", encoding="utf-8")
+    _commit_everything_at(root, "2026-08-14T19:30:00+00:00", "notes")
+    now = datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc)
+
+    shallow = _detached_clone(root, tmp_path / "shallow", depth=1)
+    report = check_shelf(shallow, now=now)
+    codes = _codes(report)
+    assert "derived-age-unknown" in codes, report.as_dict()
+    assert "derived-stale" not in codes, "a verdict the clone cannot support"
+    finding = next(f for f in report.findings if f.code == "derived-age-unknown")
+    assert finding.level == "unknown"
+    assert "2026-08-13-uncounted" in finding.detail
+    assert report.as_dict()["errors"] == 0
+    assert report.as_dict()["unknowns"] >= 1
+
+    # The same history in full: the clock is readable and the renderer is stopped.
+    full = _detached_clone(root, tmp_path / "full")
+    report = check_shelf(full, now=now)
+    codes = _codes(report)
+    assert "derived-stale" in codes, report.as_dict()
+    assert "derived-age-unknown" not in codes
+
+
+def test_a_shallow_clone_that_still_reads_stale_stays_an_error(tmp_path):
+    """Lower bound: when even the boundary date is past the threshold, the
+    renderer is provably stopped — the cut must not soften a real error."""
+    root = _shelf_with_an_uncounted_episode(tmp_path / "origin")
+    _commit_ledger_at(root, "2026-08-01T09:00:00+00:00")
+    (root / "NOTES.md").write_text("later\n", encoding="utf-8")
+    _commit_everything_at(root, "2026-08-10T09:00:00+00:00", "notes")
+
+    shallow = _detached_clone(root, tmp_path / "shallow", depth=1)
+    report = check_shelf(shallow, now=datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc))
+
+    assert "derived-stale" in _codes(report), report.as_dict()
+    assert "derived-age-unknown" not in _codes(report)
+
+
+def test_a_shelf_inside_a_repository_is_dated_by_git_not_mtime(tmp_path):
+    """A nested shelf (repo/shelf/) has no .git of its own; git still dates it.
+
+    Before, the check looked for `root/.git` and fell back to mtime for every
+    such shelf — where a fresh checkout reads as rendered a minute ago.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t.test"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "tester"], check=True)
+    root = repo / "shelf"
+    root.mkdir()
+    Shelf(root).init(name="t", default_categories=["topics", "research", "sessions"])
+    shelve(
+        root,
+        slug="2026-08-13-uncounted",
+        kind="topic",
+        digest=(
+            "The renderer writes ledger.tsv from the episodes, so a freshly shelved "
+            "episode has no row until it runs. The decided approach keeps that warning "
+            "as it is. Open: nothing."
+        ),
+        sections={"Decisions": "kept"},
+        approx_tokens=1000,
+        date="2026-08-13",
+        autocommit=False,
+    )
+    (root / "ledger.tsv").write_text(
+        "date\tepisode_id\tmode\tapprox_tokens_in\tdigest_tokens\tnotes\n", encoding="utf-8"
+    )
+    _commit_everything_at(repo, "2026-08-10T09:00:00+00:00", "chore: regenerate derived files")
+    # mtime is «now»; only git knows the ledger is four days old.
+    report = check_shelf(root, now=datetime(2026, 8, 14, 20, 0, tzinfo=timezone.utc))
+
+    assert "derived-stale" in _codes(report), report.as_dict()
+
+
 def test_an_old_but_complete_shelf_is_not_stale(tmp_path):
     """Age alone is not the finding — an uncounted episode is what makes it one.
 

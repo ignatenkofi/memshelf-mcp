@@ -57,6 +57,15 @@ once code ships.
 
 ### Fixed
 
+- **`doctor` no longer clears a stopped renderer from a shallow clone.** In a
+  `--depth N` clone `git log -- ledger.tsv` answers with the boundary commit,
+  so the ledger looked as fresh as the clone itself (measured on this repo's
+  `shelf/`: dated 25.09, really last touched 10.09) and `derived-stale` could
+  never fire from an ephemeral session. Under the threshold that clock is now
+  the third outcome, `unknown derived-age-unknown`, with the advice to deepen
+  the history; a boundary date already past the threshold stays the error it
+  is. Shelves nested inside a repository (`repo/shelf/`) are now dated by git
+  as well instead of by mtime, which a fresh checkout resets.
 - **The bot template cited the wrong #157.** `shelf-derived.yml` named its
   push-with-recount `memshelf-mcp#157`; the issue it implements is
   main-memshelf#157, and memshelf-mcp#157 is now this change.
