@@ -334,3 +334,42 @@ def test_the_deadline_can_be_switched_off(tmp_path: Path, monkeypatch: pytest.Mo
     assert server.handshake_timeout() == server.DEFAULT_HANDSHAKE_TIMEOUT
     monkeypatch.delenv("MEMSHELF_HANDSHAKE_TIMEOUT")
     assert server.handshake_timeout() == server.DEFAULT_HANDSHAKE_TIMEOUT
+
+
+def test_the_handshake_names_served_code_freshness(tmp_path: Path):
+    """«Unknown» is said once, in the handshake — never as a per-call warning.
+
+    A shelf with no memshelf-mcp checkout beside it is the desktop default
+    (#125, #158): nothing to compare the served code with. The per-call
+    warning stays silent — a warning on every call with no fix attached is
+    noise — but the `initialize` instructions must say the freshness is
+    unknown and how to make it known, and only the wire shows what a client
+    receives there.
+    """
+    root = _seeded_shelf(tmp_path)
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in {"MEMSHELF_CHECKOUT", "MEMSHELF_FRESHNESS_WARNING"}
+    }
+    env["MEMSHELF_SHELF_PATH"] = str(root)
+    params = StdioServerParameters(command=sys.executable, args=["-m", "memshelf_mcp"], env=env)
+
+    async def scenario():
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write, read_timeout_seconds=WIRE_TIMEOUT) as session:
+                init = await session.initialize()
+                assert init.instructions, init
+                assert "UNKNOWN" in init.instructions, init.instructions
+                assert "MEMSHELF_CHECKOUT" in init.instructions, init.instructions
+
+                result = await session.call_tool(
+                    "memshelf_index", {"params": {"shelf_path": str(root)}}
+                )
+                envelope = json.loads(
+                    "".join(block.text for block in result.content if getattr(block, "text", None))
+                )
+                assert envelope["status"] == "ok", envelope
+                assert "warning" not in envelope, envelope
+
+    _run(scenario())

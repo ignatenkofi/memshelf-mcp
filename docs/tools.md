@@ -30,6 +30,16 @@ shelf.
 | `memshelf_sync` | git (fast-forward) | the clone is behind its remote — the bot rendered, or another session shelved |
 | `memshelf_doctor` | none | the shelf's integrity is the question |
 
+**The envelope's first key may be a `warning`** (#125, #158). When the code
+answering the call is not the code in the `memshelf-mcp` checkout next to the
+shelf (or at `$MEMSHELF_CHECKOUT`), every tool's answer — success or error —
+opens with `"warning": "served-code-differs: …"`, naming both short hashes and
+where each lives; read it before trusting the result, since a merged fix may
+not be serving. Identical code adds no key. No checkout to compare with adds
+none either, and the `initialize` instructions say the freshness is unknown
+and how to make it known. `MEMSHELF_FRESHNESS_WARNING=0` switches the warning
+off for a host where the copy is meant to differ.
+
 ## `memshelf_shelve`
 
 Offload one closed topic to the shelf as a durable, indexed episode.
@@ -208,7 +218,9 @@ structural checks. With `check_remote=true` it also fails a shelf whose git
 remote is publicly visible (the one network probe, opt-in). Read-only; reports
 findings, fixes nothing. Errors are meant to block a push; warnings name known
 states (`stale-index`, `episode-unpushed`, `index-bloat`) that a shelf's own
-rules decide how to treat.
+rules decide how to treat. Its `served-code-differs` finding is also
+prepended by the server to every tool's envelope (see the note under the
+table), so that gap is not found only by whoever runs doctor.
 
 ## `memshelf_import`
 

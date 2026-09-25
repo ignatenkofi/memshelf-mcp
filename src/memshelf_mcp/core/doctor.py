@@ -792,19 +792,23 @@ def _check_unpushed_episodes(local_only: list[str], upstream: str | None) -> lis
     ]
 
 
-def _find_reference_checkout(root: Path) -> Path | None:
+def find_reference_checkout(root: Path | None) -> Path | None:
     """The memshelf-mcp source checkout to judge the served code against.
 
     Explicit before conventional: ``$MEMSHELF_CHECKOUT`` names one directly
     (the freshness module's own doctrine — guessed consumers give silent
     misses); otherwise the documented layout, the tool repo cloned next to
     the shelf. Nothing found is not «fine» — the caller reports UNKNOWN.
+
+    Shared with the server's per-call verdict (``memshelf_mcp.served``), which
+    may have no shelf at all — then only the override can answer.
     """
     override = os.environ.get("MEMSHELF_CHECKOUT", "").strip()
     candidates = []
     if override:
         candidates.append(Path(override).expanduser())
-    candidates.append(root.parent / "memshelf-mcp" / "src" / "memshelf_mcp")
+    if root is not None:
+        candidates.append(root.parent / "memshelf-mcp" / "src" / "memshelf_mcp")
     for candidate in candidates:
         if (candidate / "__init__.py").is_file():
             return candidate.resolve()
@@ -856,7 +860,7 @@ def _check_served_freshness(root: Path) -> list[Finding]:
                 "a pin is a deliberate, temporary state; unpin or release when done",
             )
         )
-    checkout = _find_reference_checkout(root)
+    checkout = find_reference_checkout(root)
     if checkout is None:
         findings.append(
             Finding(

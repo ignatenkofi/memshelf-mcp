@@ -131,6 +131,20 @@ as a build target for exactly this reason — CI and the build machine can run t
 standalone path there, and a mistake in the shared machinery fails the same way
 on both.
 
+## A bundle that has fallen behind
+
+A bundle's `src/memshelf_mcp` is a copy, and its version does not move
+between releases — so a bundle two merges behind `main` answers every call
+with the old behaviour and nothing in the manifest says so (#125, #158; the
+2026-09-25 case was a false `digest-body-mismatch` from a bundle two commits
+back). The server compares the code it serves with the `memshelf-mcp` checkout
+next to the shelf (or `MEMSHELF_CHECKOUT`) and, when they differ, opens every
+tool answer with a `warning` carrying `served-code-differs` and both hashes;
+the `initialize` instructions carry the same verdict, or «unknown» when there
+is no checkout to compare with. Rebuild the bundle from the checkout and
+reinstall it to clear the warning. If the copy is meant to differ, set
+`MEMSHELF_FRESHNESS_WARNING=0` in the bundle's environment.
+
 ## Layout of what gets built
 
 ```

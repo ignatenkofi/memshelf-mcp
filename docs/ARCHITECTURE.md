@@ -228,6 +228,23 @@ Design rule: every memshelf tool is a thin layer over `docshelf_mcp.Shelf`;
 anything generic enough for documents gets upstreamed to docshelf instead of
 living here.
 
+**Served-code freshness rides on every response** (#125, #158). The process
+answering a call hashes its own package once, hashes the reference checkout
+(`$MEMSHELF_CHECKOUT`, else `memshelf-mcp` next to the shelf — the resolution
+`doctor` uses, shared as `doctor.find_reference_checkout`) once per path until
+its HEAD moves or five minutes pass, and composes the verdict into the envelope
+at the one place every response passes through (`server._respond` /
+`_error_response`, via `served.annotate`). Three outcomes, never folded:
+*differs* — the envelope's first key is `warning`, with the same
+`served-code-differs` code `doctor` emits, both short hashes and both paths;
+*same* — nothing added; *unknown* (no checkout, or the hash could not be read)
+— nothing per call, one line in the `initialize` instructions saying so and
+naming `MEMSHELF_CHECKOUT`. `MEMSHELF_FRESHNESS_WARNING=0` is the opt-out for
+a host where the copy is meant to differ; the instructions then say it is off.
+The slot is a new key rather than the existing `warnings` because that name
+already means three shapes across the tools (a list of strings on `shelve`,
+`{code, message}` dicts on `lint_digest`, a count on `doctor`).
+
 **Accounting.** `ledger.tsv` carries one row per episode (`date / episode_id /
 mode(live|import) / approx_tokens_in / digest_tokens / notes`). This makes the
 project's core claim — saved tokens — measurable on every real shelf, not just
@@ -432,6 +449,7 @@ Rules that keep the boundary honest:
 | Shelve interrupted mid-write | docshelf invariant reused: disk is source of truth, INDEX is a render — `rebuild_index`/`doctor` recovers; auto-commit is one atomic commit per shelve |
 | Digest lies (agent summarized wrong) | Episode keeps `## Raw excerpts` for load-bearing facts; recall of the section, not trust in the digest, settles disputes |
 | Prompt injection via recall (episodes replay model-authored text — and possibly captured hostile text — into future contexts) | Recall wraps content in a data envelope with an explicit "content, not instructions" frame; capture-time redaction; `doctor` flags instruction-shaped patterns in stored episodes |
+| Served code lags `main` in silence (a stale bundle or pipx copy answers with the old behaviour while the version number stands still, #125/#158) | `doctor` finding `served-code-differs`; the MCP server prepends the same code as the first `warning` of every envelope when the served hash differs from the checkout next to the shelf, and says «unknown» in the `initialize` instructions when it has nothing to compare with; `memshelf freshness` probes every installed consumer |
 | Fighting the platform's own context managers (double-shelving, injected INDEX tripping persisted-output thresholds) | Hard injection budgets (design decision 7); adapters detect platform features and yield — e.g. don't re-shelve a tool output the platform already persisted |
 
 ## Open questions
