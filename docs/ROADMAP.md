@@ -79,7 +79,11 @@ shelve→compact→recall cycle survives without manual repair; `doctor` clean.
   category.~~ — **done** (#15): `memshelf rollup` moves a period's episodes
   into the `archive/` sub-shelf behind one digest-of-digests. Navigation
   shrinks; recall, search, ledger and stats are untouched.
-- Configurable PII/secret pattern packs per shelf.
+- ~~Configurable PII/secret pattern packs per shelf.~~ — **done** (#16):
+  a flat `POLICY.patterns` file (`<kind> <regex>`, `#` comments) at the shelf
+  root, read by the shelve redaction pass, by `doctor`
+  (`policy-pattern-at-rest`, `policy-pattern-invalid`) and by the pre-commit
+  guard alike — one pack, three consumers; `init` scaffolds the template.
 - ~~**Derived files rendered by a bot, not by `shelve`**~~ (#58, decided
   2026-07-31) — **done**: `date`/`notes`/`display_title`/`description` moved
   into the episode frontmatter, `shelve` writes and stages only the episode,
