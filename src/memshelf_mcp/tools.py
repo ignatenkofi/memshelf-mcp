@@ -8,6 +8,7 @@ lets the CLI and the tests reuse it without importing the MCP SDK.
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 from typing import Literal
 
@@ -24,6 +25,7 @@ from memshelf_mcp.core.archive import purge as purge_shelf
 from memshelf_mcp.core.archive import rollup as rollup_shelf
 from memshelf_mcp.core.digest import validate_digest
 from memshelf_mcp.core.doctor import DERIVED_STALE_AFTER_HOURS, check_shelf
+from memshelf_mcp.core.gitsync import SyncReport, preflight
 from memshelf_mcp.core.importer import discover as import_discover
 from memshelf_mcp.core.importer import extract as import_extract
 from memshelf_mcp.core.init import init_shelf
@@ -159,6 +161,14 @@ class ShelveInput(ShelfScopedInput):
         "requires a PR. Exclusive with `push`; the local checkout never switches "
         "branches, so recall keeps working from this clone.",
     )
+    await_render_s: float | None = Field(
+        default=None,
+        ge=0,
+        description="After a push: seconds to wait for the shelf bot's render and "
+        "fast-forward onto it, so the clone ends level with the remote (#157). "
+        "Omit for the default — wait (60 s) only when the shelf has the "
+        "shelf-derived bot and the push left derived files out of date; 0 = never.",
+    )
     amend: bool = Field(
         default=False,
         description="Rewrite an episode already on the shelf, under the same slug (#71): "
@@ -191,6 +201,7 @@ def run_shelve(params: ShelveInput) -> dict:
         sync=params.sync,
         push=params.push,
         publish=params.publish,
+        await_render_s=params.await_render_s,
     )
     totals = compute_stats(params.shelf_path)
     root = Path(params.shelf_path).expanduser().resolve()
@@ -209,25 +220,7 @@ def run_shelve(params: ShelveInput) -> dict:
         "moved_from": result.moved_from,
         # #108 — what the sync around this shelve did, stated even when it did
         # nothing: a clean run says pulled 0 / retries 0 explicitly.
-        "sync": None
-        if result.sync is None
-        else {
-            "performed": result.sync.performed,
-            "skipped_reason": result.sync.skipped_reason,
-            "remote": result.sync.remote,
-            "branch": result.sync.branch,
-            "commits_pulled": result.sync.commits_pulled,
-            "push_requested": result.sync.push_requested,
-            "pushed": result.sync.pushed,
-            "push_retries": result.sync.push_retries,
-            "final_sha": result.sync.final_sha,
-            "hint": result.sync.hint,
-            # #118 — the branch destination, stated like everything else.
-            "publish_requested": result.sync.publish_requested,
-            "published_branch": result.sync.published_branch,
-            "compare_url": result.sync.compare_url,
-            "summary": result.sync.line(),
-        },
+        "sync": None if result.sync is None else _sync_dict(result.sync),
         "redaction": {
             "total": result.redaction.total,
             "counts": result.redaction.counts,
@@ -259,6 +252,51 @@ def run_shelve(params: ShelveInput) -> dict:
             else ""
         ),
     }
+
+
+def _sync_dict(report: SyncReport) -> dict:
+    """The SyncReport as the tools return it — shared by shelve and sync."""
+    return {
+        "performed": report.performed,
+        "skipped_reason": report.skipped_reason,
+        "remote": report.remote,
+        "branch": report.branch,
+        "commits_pulled": report.commits_pulled,
+        "push_requested": report.push_requested,
+        "pushed": report.pushed,
+        "push_retries": report.push_retries,
+        "final_sha": report.final_sha,
+        "hint": report.hint,
+        # #118 — the branch destination, stated like everything else.
+        "publish_requested": report.publish_requested,
+        "published_branch": report.published_branch,
+        "compare_url": report.compare_url,
+        # #157 — the wait for the bot's render, stated even when skipped.
+        "render_awaited": report.render_awaited,
+        "render_pulled": report.render_pulled,
+        "render_waited_s": round(report.render_waited_s, 1),
+        "render_note": report.render_note,
+        "summary": report.line(),
+    }
+
+
+class SyncInput(ShelfScopedInput):
+    pass
+
+
+def run_sync(params: SyncInput) -> dict:
+    """Fetch and fast-forward the shelf clone — the shelve preflight on its own (#157).
+
+    For the clone that fell behind without shelving: the bot rendered after
+    the last push, or another session shelved. Refuses on a dirty tracked
+    tree or a diverged branch with the executable fix, exactly like shelve.
+    """
+    root = Path(params.shelf_path).expanduser().resolve()
+    report = preflight(root)
+    head = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    return {"status": "ok", "sync": _sync_dict(report), "head": head or None}
 
 
 def _episodes_on_disk(root: Path) -> int:
@@ -301,6 +339,16 @@ def _derived_next_step(root: Path, result) -> str:
             "include it yet: run `memshelf rebuild` (plain shelf — no git, no bot)"
         )
     if result.sync is not None and result.sync.pushed:
+        if result.sync.render_pulled:
+            return (
+                "pushed, and the bot's render is pulled — this clone matches the "
+                "remote; nothing else to do"
+            )
+        if bot and result.sync.render_note:
+            return (
+                "pushed — the shelf bot renders derived files on main; this clone "
+                f"is not level with it yet ({result.sync.render_note})"
+            )
         if bot:
             return "pushed — the shelf bot renders derived files on main; nothing else to do"
         return (

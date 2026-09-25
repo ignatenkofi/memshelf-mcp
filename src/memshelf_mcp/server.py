@@ -38,6 +38,7 @@ from memshelf_mcp.tools import (
     SearchInput,
     ShelveInput,
     StatsInput,
+    SyncInput,
     default_shelf_path,
     run_advise,
     run_doctor,
@@ -53,6 +54,7 @@ from memshelf_mcp.tools import (
     run_search,
     run_shelve,
     run_stats,
+    run_sync,
 )
 
 _READ_ONLY = {
@@ -375,6 +377,26 @@ def memshelf_resolve(params: ResolveInput) -> str:
         return _serialize(run_resolve(params))
     except Exception as exc:
         return _error_response(exc, "memshelf_resolve")
+
+
+@mcp.tool(
+    name="memshelf_sync",
+    annotations={
+        "title": "Fast-forward the shelf clone to its remote",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+def memshelf_sync(params: SyncInput) -> str:
+    """Fetch and fast-forward the shelf clone to its remote, writing nothing
+    else — for a clone behind the bot's render or another session's shelve.
+    Refuses on a dirty tree or a diverged branch, with the fix."""
+    try:
+        return _serialize(run_sync(params))
+    except Exception as exc:
+        return _error_response(exc, "memshelf_sync")
 
 
 @mcp.tool(

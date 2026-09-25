@@ -36,7 +36,9 @@ from memshelf_mcp.core.episode import (
     compose_episode,
 )
 from memshelf_mcp.core.gitsync import (
+    DEFAULT_RENDER_WAIT_S,
     SyncReport,
+    await_render,
     hint_command,
     preflight,
     publish_branch,
@@ -44,6 +46,29 @@ from memshelf_mcp.core.gitsync import (
 )
 from memshelf_mcp.core.policy import load_pattern_pack
 from memshelf_mcp.core.redact import RedactionReport, redact
+
+
+def _render_wait(root: Path, requested: float | None) -> float:
+    """Seconds to wait for the bot's render after a push (#157).
+
+    An explicit number is obeyed. The default waits only where waiting can
+    end in a render: the shelf has the bot, and the derived files in this
+    clone no longer match its episodes — the same ``rebuild --check`` the bot
+    runs. An amend that changes nothing derived gets no render, and waiting
+    for one would cost the whole timeout for nothing.
+    """
+    if requested is not None:
+        return requested
+    if not (root / ".github" / "workflows" / "shelf-derived.yml").is_file():
+        return 0.0
+    from memshelf_mcp.core.rebuild import rebuild  # lazy: rebuild imports shelve
+
+    try:
+        drifted = rebuild(root, check=True).drifted
+    except Exception:  # noqa: BLE001 — unknown drift: waiting is the safe side
+        return DEFAULT_RENDER_WAIT_S
+    return DEFAULT_RENDER_WAIT_S if drifted else 0.0
+
 
 LEDGER_HEADER = "date\tepisode_id\tmode\tapprox_tokens_in\tdigest_tokens\tnotes\n"
 
@@ -260,6 +285,7 @@ def shelve(
     sync: bool = True,
     push: bool = False,
     publish: bool = False,
+    await_render_s: float | None = None,
 ) -> ShelveResult:
     """Shelve one episode into an initialized docshelf shelf.
 
@@ -298,6 +324,13 @@ def shelve(
     already ended — and the episode must leave the container anyway. The
     local checkout never switches branches, so recall keeps answering from
     this clone; publication does not depend on any PR being opened.
+
+    ``await_render_s`` (#157) — after a successful ``push``, wait up to this
+    many seconds for the shelf bot's render and fast-forward onto it, so the
+    clone ends the call level with the remote instead of one bot commit
+    behind. ``None`` (default) means: ``DEFAULT_RENDER_WAIT_S`` when the shelf
+    has the bot (``.github/workflows/shelf-derived.yml``) and the push left
+    the derived files out of date, else no wait. ``0`` switches it off.
     """
     from docshelf_mcp.core.shelf import DocumentExistsError, Shelf  # heavy dep, lazy
     from docshelf_mcp.core.slugify import slugify
@@ -314,6 +347,8 @@ def shelve(
         raise ValueError(
             "publish=True needs autocommit=True — without the commit there is nothing to publish"
         )
+    if await_render_s is not None and await_render_s < 0:
+        raise ValueError("await_render_s must be >= 0 (0 switches the wait off)")
     if publish and push:
         raise ValueError(
             "push=True and publish=True are two destinations for one commit — "
@@ -566,6 +601,7 @@ def shelve(
             push=push,
             publish=publish,
             sync_report=sync_report,
+            await_render_s=await_render_s,
         )
 
     # Write through docshelf.
@@ -652,6 +688,7 @@ def shelve(
         push=push,
         publish=publish,
         sync_report=sync_report,
+        await_render_s=await_render_s,
     )
 
 
@@ -675,6 +712,7 @@ def _finish_shelve(
     push: bool,
     publish: bool,
     sync_report: SyncReport | None,
+    await_render_s: float | None = None,
 ) -> ShelveResult:
     """Everything after the episode's bytes are on disk: commit, push, report.
 
@@ -715,6 +753,14 @@ def _finish_shelve(
             if sync_report is None:
                 sync_report = SyncReport()
             push_with_retry(root, sync_report)
+            # #157 — without this the clone ends every shelve one bot commit
+            # behind, and the next doctor reports stale-index + no-ledger-row
+            # for an episode that is fine.
+            wait = _render_wait(root, await_render_s)
+            if wait > 0:
+                await_render(root, sync_report, timeout=wait)
+                if sync_report.render_note:
+                    warnings.append(f"bot render not pulled — {sync_report.render_note}")
     # #118 — the branch destination: for a shelf whose main requires a PR, the
     # episode must leave the container even though no push to main can. The
     # branch name comes from the file stem (slugified, ref-safe), the local

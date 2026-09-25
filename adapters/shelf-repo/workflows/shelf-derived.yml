@@ -59,7 +59,7 @@ jobs:
       - name: Регенерация идемпотентна
         run: memshelf rebuild --shelf . --check
 
-      # Push с пересчётом при отказе (memshelf-mcp#157). Пока прогон работает,
+      # Push с пересчётом при отказе (main-memshelf#157). Пока прогон работает,
       # в main штатно ложатся чужие шелвы (окно 1,5–3 минуты, поверхностей
       # несколько), и голый push отвергался «fetch first»: рендер был выполнен
       # и выброшен вместе с раннером, main оставался без производных. Из
@@ -86,14 +86,14 @@ jobs:
             if git push; then
               exit 0
             fi
-            echo "::warning::push отвергнут (попытка ${attempt} из 3) — за время прогона в main лёг чужой шелв; пересчёт от свежего main (memshelf-mcp#157)"
+            echo "::warning::push отвергнут (попытка ${attempt} из 3) — за время прогона в main лёг чужой шелв; пересчёт от свежего main (main-memshelf#157)"
             git fetch origin main
             git reset --hard origin/main
             memshelf rebuild --shelf .
             python -c "from memshelf_mcp.core.archive import rebuild_archive_index; rebuild_archive_index('.')"
             memshelf rebuild --shelf . --check
           done
-          echo "::error::push отвергнут трижды подряд — рендер НЕ потерян молча: это отказ доставки при плотной череде шелвов, последний пересчёт остался на раннере; прогон, поднятый последним шелвом, догонит (memshelf-mcp#157)"
+          echo "::error::push отвергнут трижды подряд — рендер НЕ потерян молча: это отказ доставки при плотной череде шелвов, последний пересчёт остался на раннере; прогон, поднятый последним шелвом, догонит (main-memshelf#157)"
           exit 1
 
       # Doctor — ПОСЛЕ коммита, и это главное в порядке шагов.
