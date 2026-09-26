@@ -95,6 +95,39 @@ Two things the builder does that are worth knowing:
 Adding a platform is a `Target` entry in `build.py`: the interpreter URL (uv's
 own download table is a good source), its sha256, and the pip platform tags.
 
+## Refreshing the installed extension from a checkout
+
+After a merge into `src` the extension Claude Desktop runs is stale until it is
+rebuilt and reinstalled, and `doctor` says so (`served-code-differs`). The
+manifest version alone never showed it: a bundle built today and one built a
+week ago both read `0.3.0` (#158, same class as #125). Two pieces close that:
+
+```sh
+adapters/claude-desktop/refresh.sh
+```
+
+builds the uv bundle with `build.py --local-version`, which appends
+`+g<sha>[.dirty]` to the version in `manifest.json`, the staged
+`pyproject.toml` and the file name — so the Install dialog and the Extensions
+list show which commit the bundle carries — and opens it. Install and the
+restart of Claude Desktop are yours; Desktop has no CLI for either. Then:
+
+```sh
+adapters/claude-desktop/refresh.sh --check
+```
+
+asks the extension's own interpreter which directory it imports and compares
+that directory's hash with `src/memshelf_mcp` of this checkout — the same probe
+`memshelf freshness` runs, not a comparison of version strings. Exit 0: the
+extension serves this checkout; 1: it is stale; 2: it was not found or has not
+started yet (no `.venv` until Desktop launches it once) — reported as «don't
+know», never as fresh. `--dry-run` prints the commands without building.
+
+`__version__` inside the package is left untouched on purpose: the served code
+has to hash identically to the checkout it came from, or the check above would
+flag a current bundle as stale. `memshelf freshness` still marks such a bundle
+`not-a-release` — correct, it is not one.
+
 ## Checking a bundle before shipping it
 
 `mcpb validate` reads the manifest and stops there. This does not:

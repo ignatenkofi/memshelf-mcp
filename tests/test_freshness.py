@@ -145,3 +145,26 @@ def test_a_probeable_consumer_reports_what_it_serves(tmp_path):
     assert rep.served_dir is not UNKNOWN
     assert rep.served_sha is not UNKNOWN
     assert rep.declared_version is not UNKNOWN
+
+
+# -------------------------------------------------------------- хост
+
+
+def test_extensions_dir_can_be_pointed_elsewhere(tmp_path, monkeypatch):
+    """`MEMSHELF_EXTENSIONS_DIR` — для фикстур и `refresh.sh --check` (#158).
+
+    Без переменной каталог берётся из $HOME; с ней — ровно указанный,
+    и находятся только расширения, у которых уже есть интерпретатор.
+    """
+    from memshelf_mcp.core import freshness
+
+    exts = tmp_path / "exts"
+    ready = exts / "local.mcpb.x.memshelf" / ".venv" / "bin"
+    ready.mkdir(parents=True)
+    (ready / "python").write_text("", encoding="utf-8")
+    (exts / "local.mcpb.x.memshelf-never-started").mkdir()
+    (exts / "local.mcpb.other").mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path / "nohome"))
+    monkeypatch.setenv(freshness.EXTENSIONS_DIR_ENV, str(exts))
+    found = [(name, kind) for name, kind, _ in freshness.discover_consumers()]
+    assert found == [("local.mcpb.x.memshelf", "claude-extension")]

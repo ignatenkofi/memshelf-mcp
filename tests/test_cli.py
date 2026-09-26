@@ -1,5 +1,7 @@
 import json
+import os
 import subprocess
+import sys
 
 import pytest
 
@@ -298,3 +300,70 @@ def test_neither_present_is_an_error_that_names_both_ways(tmp_path, capsys, monk
 
     err = capsys.readouterr().err
     assert "--shelf" in err and "MEMSHELF_SHELF_PATH" in err
+
+
+# ── `memshelf … | head -1` must not end in a traceback ────────────────────
+#
+# A consumer that closes the pipe early (`head`, `grep -m1`, a viewer that
+# quit) used to be reported as our failure, and in a shape that depended on
+# the environment: with stdout block-buffered — a pipe, the default — the
+# output left the process only in the interpreter's shutdown flush, so the
+# reader's absence surfaced as «Exception ignored in: <_io.TextIOWrapper …>
+# BrokenPipeError» and exit code 120; with PYTHONUNBUFFERED=1, as agent
+# containers tend to set it, the first print raised inside the command and
+# the whole traceback followed. Both are exercised: the reader is closed
+# before the child starts, so neither depends on winning a race with `head`.
+
+
+def _run_cli_into_a_closed_pipe(argv, *, unbuffered):
+    env = dict(os.environ)
+    env.pop("PYTHONUNBUFFERED", None)
+    if unbuffered:
+        env["PYTHONUNBUFFERED"] = "1"
+    read_end, write_end = os.pipe()
+    os.close(read_end)  # the consumer is gone before the first byte is written
+    try:
+        return subprocess.run(
+            [sys.executable, "-m", "memshelf_mcp.cli", *argv],
+            stdout=write_end,
+            stderr=subprocess.PIPE,
+            env=env,
+            text=True,
+            check=False,
+        )
+    finally:
+        os.close(write_end)
+
+
+@pytest.mark.parametrize("unbuffered", [False, True], ids=["buffered", "unbuffered"])
+def test_cli_search_into_a_closed_pipe_exits_quietly(tmp_path, unbuffered):
+    root = _shelf(tmp_path)
+    # Shelve from a child as well: an in-process shelve registers this pytest
+    # as an instance on the shelf, and the search child would then report a
+    # second writer on stderr.
+    subprocess.run(
+        [sys.executable, "-m", "memshelf_mcp.cli", *_shelve_argv(root)],
+        check=True,
+        capture_output=True,
+    )
+
+    proc = _run_cli_into_a_closed_pipe(
+        ["search", "--shelf", str(root), "--query", "backoff"], unbuffered=unbuffered
+    )
+
+    assert "Traceback" not in proc.stderr
+    assert "BrokenPipeError" not in proc.stderr
+    assert proc.returncode == 1  # EPIPE: the exit code of a process that got SIGPIPE
+
+
+def test_cli_help_into_a_closed_pipe_exits_quietly():
+    """argparse leaves `main()` through SystemExit, so its output needs the same care.
+
+    Buffered only: unbuffered, argparse's own `_print_message` swallows the
+    write error and exits 0 — that path was never noisy.
+    """
+    proc = _run_cli_into_a_closed_pipe(["--help"], unbuffered=False)
+
+    assert "Traceback" not in proc.stderr
+    assert "BrokenPipeError" not in proc.stderr
+    assert proc.returncode == 1

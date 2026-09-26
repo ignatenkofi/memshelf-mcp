@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -947,6 +948,34 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        try:
+            code = _run(argv)
+        except SystemExit:
+            # argparse (`--help`, `--version`, usage errors) and the commands'
+            # own `raise SystemExit(msg)` leave this way with output possibly
+            # still buffered; flush it where the handler below can see it.
+            sys.stdout.flush()
+            raise
+        # Flushed here, inside the try: on a pipe stdout is block-buffered, so
+        # output shorter than the buffer would otherwise leave the process only
+        # in the interpreter's shutdown flush — where a reader that has gone
+        # surfaces as «Exception ignored in: <_io.TextIOWrapper …>
+        # BrokenPipeError» with exit code 120, out of any handler's reach.
+        sys.stdout.flush()
+    except BrokenPipeError:
+        # The consumer closed the pipe early (`memshelf search … | head -1`):
+        # not our failure to report. Python flushes the standard streams once
+        # more at shutdown; point fd 1 at devnull so that flush cannot fail a
+        # second time, and exit 1 the way a SIGPIPE'd process does — the
+        # Python docs' recipe («Note on SIGPIPE», signal module). Every other
+        # exception passes through untouched.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 1
+    return code
+
+
+def _run(argv: list[str] | None) -> int:
     args = build_parser().parse_args(argv)
     # Resolved here rather than as an argparse default: the variable is read per
     # call on the MCP side too, because a host may set it after the process

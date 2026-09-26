@@ -10,6 +10,19 @@ once code ships.
 
 ### Added
 
+- **`adapters/claude-desktop/refresh.sh` and `build.py --local-version`
+  (#158).** Reinstalling the Desktop extension after a merge into `src` was a
+  manual ritual whose outcome the version number could not show: every
+  bundle read `0.3.0`. `--local-version` appends `+g<sha>[.dirty]` to the
+  manifest, the staged `pyproject.toml` and the file name (PEP 440 local
+  segment, semver build metadata), leaving `__version__` alone so the served
+  code still hashes like its checkout. `refresh.sh` builds the uv bundle
+  that way and opens it; `refresh.sh --check`, after the restart, probes the
+  extension's interpreter for the directory it imports and compares its hash
+  with the checkout — exit 0 current, 1 stale, 2 not found or not started
+  yet (never folded into «fresh»). `MEMSHELF_EXTENSIONS_DIR` points
+  `discover_consumers()` at another extensions folder for fixtures.
+
 - **`shelve` waits for the bot's render and lands on it (#157).** After a push
   to a shelf with the `shelf-derived` bot, the clone used to end every shelve
   one bot commit behind — so the next `doctor` reported `stale-index` +
@@ -66,6 +79,27 @@ once code ships.
   the history; a boundary date already past the threshold stays the error it
   is. Shelves nested inside a repository (`repo/shelf/`) are now dated by git
   as well instead of by mtime, which a fresh checkout resets.
+- **`memshelf … | head -1` no longer ends in a `BrokenPipeError`.** A consumer
+  that closed the pipe early was reported as the CLI's own failure, in a shape
+  that depended on the environment: with stdout block-buffered (a pipe, the
+  default) the output left the process only in the interpreter's shutdown
+  flush, so the missing reader surfaced as «Exception ignored in:
+  <_io.TextIOWrapper …> BrokenPipeError» with exit code 120; with
+  `PYTHONUNBUFFERED=1` the first `print` raised inside the command and the
+  full traceback followed. `main()` now flushes stdout within its own reach,
+  catches `BrokenPipeError`, points fd 1 at `/dev/null` so the shutdown flush
+  cannot fail a second time, and exits 1 without a word — the Python docs'
+  «Note on SIGPIPE» recipe. Every command prints through `main()`, `--out`
+  paths included, and argparse's `--help`/`--version` exits are flushed on
+  their way out, so the one handler covers them all; every other exception
+  passes through unchanged. Regression tests: `search` on a one-episode shelf
+  into a pipe whose reader closed before the first byte, in both buffering
+  modes, and `--help` into the same pipe — they fail on the previous code
+  with exactly those two messages.
+- **`docs/ROADMAP.md` showed the PII/secret pattern packs as still open.**
+  They shipped in #16 (`core/policy.py`, `POLICY.patterns`); the line is now
+  struck through and points at what landed, like its neighbours.
+
 - **The bot template cited the wrong #157.** `shelf-derived.yml` named its
   push-with-recount `memshelf-mcp#157`; the issue it implements is
   main-memshelf#157, and memshelf-mcp#157 is now this change.
