@@ -70,6 +70,15 @@ once code ships.
 
 ### Fixed
 
+- **`doctor` no longer clears a stopped renderer from a shallow clone.** In a
+  `--depth N` clone `git log -- ledger.tsv` answers with the boundary commit,
+  so the ledger looked as fresh as the clone itself (measured on this repo's
+  `shelf/`: dated 25.09, really last touched 10.09) and `derived-stale` could
+  never fire from an ephemeral session. Under the threshold that clock is now
+  the third outcome, `unknown derived-age-unknown`, with the advice to deepen
+  the history; a boundary date already past the threshold stays the error it
+  is. Shelves nested inside a repository (`repo/shelf/`) are now dated by git
+  as well instead of by mtime, which a fresh checkout resets.
 - **`memshelf … | head -1` no longer ends in a `BrokenPipeError`.** A consumer
   that closed the pipe early was reported as the CLI's own failure, in a shape
   that depended on the environment: with stdout block-buffered (a pipe, the
