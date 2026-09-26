@@ -364,22 +364,70 @@ def _derived_layer_age_hours(root: Path, now: datetime) -> float | None:
     runs `rebuild` by hand has no bot and the same question ("is the accounting
     keeping up?") still applies to it.
     """
-    stamp: datetime | None = None
-    if (root / ".git").exists():
-        proc = subprocess.run(
-            ["git", "-C", str(root), "log", "-1", "--format=%cI", "--", "ledger.tsv"],
-            capture_output=True,
-            text=True,
-        )
-        line = proc.stdout.strip()
-        if proc.returncode == 0 and line:
-            stamp = _parse_git_timestamp(line)
+    last = _ledger_last_commit(root)
+    stamp = last[1] if last is not None else None
     if stamp is None:
         ledger = root / "ledger.tsv"
         if not ledger.is_file():
             return None
         stamp = datetime.fromtimestamp(ledger.stat().st_mtime, tz=timezone.utc)
     return (now - stamp).total_seconds() / 3600
+
+
+def _inside_git_work_tree(root: Path) -> bool:
+    """Is ``root`` under a git work tree — its own repository or an enclosing one.
+
+    A shelf kept inside a project (``memshelf-mcp/shelf/``, issue-kit, pii-mcp)
+    has no ``.git`` of its own, yet git dates its files just as well. Testing
+    for ``root/.git`` sent every such shelf to the mtime fallback, where a
+    fresh clone reads as rendered a minute ago.
+    """
+    proc = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
+
+
+def _ledger_last_commit(root: Path) -> tuple[str, datetime] | None:
+    """The commit git reports as the last to touch ``ledger.tsv``: (sha, committer date).
+
+    ``None`` without git, without history for the file, or with an unreadable
+    date. In a shallow clone the answer can be the boundary commit — see
+    ``_ledger_clock_cut_by_shallow_clone``.
+    """
+    if not _inside_git_work_tree(root):
+        return None
+    proc = subprocess.run(
+        ["git", "-C", str(root), "log", "-1", "--format=%H%x09%cI", "--", "ledger.tsv"],
+        capture_output=True,
+        text=True,
+    )
+    line = proc.stdout.strip()
+    if proc.returncode != 0 or "\t" not in line:
+        return None
+    sha, _, when = line.partition("\t")
+    stamp = _parse_git_timestamp(when)
+    if stamp is None:
+        return None
+    return sha, stamp
+
+
+def _ledger_clock_cut_by_shallow_clone(root: Path) -> bool:
+    """Does the ledger's git clock point at the cut of a shallow clone's history?
+
+    ``git log -- ledger.tsv`` in a ``--depth N`` clone stops at the boundary
+    commit and reports it as the one that touched the file, whatever the file's
+    real last change. Measured 2026-09-25 on this repository's own ``shelf/``:
+    a depth-1 clone dated ``ledger.tsv`` by its HEAD (25.09) while the last
+    commit to touch it was fifteen days older (10.09). Read as an age that is
+    a *lower bound*: the true render is at least that old, possibly much older
+    — so a value under the stale threshold proves nothing, and saying «fresh»
+    there is the same false verdict main-memshelf#154 catalogues.
+    """
+    last = _ledger_last_commit(root)
+    return last is not None and last[0] in _shallow_boundary(root)
 
 
 def _shallow_boundary(root: Path) -> frozenset[str]:
@@ -656,11 +704,32 @@ def _check_derived_freshness(
         # detached checkout has already been told so by `upstream-unknown`.
         # The ledger's own age is the only clock either of them has.
         ledger_age = _derived_layer_age_hours(root, now)
-        if ledger_age is None or ledger_age < stale_after_hours:
+        if ledger_age is None:
             return []
-        return [
-            _stopped_renderer(uncounted, ledger_age, "the derived layer has not been rewritten")
-        ]
+        if ledger_age >= stale_after_hours:
+            return [
+                _stopped_renderer(uncounted, ledger_age, "the derived layer has not been rewritten")
+            ]
+        if _ledger_clock_cut_by_shallow_clone(root):
+            # Under the threshold, but the clock is the clone's own age, not
+            # the ledger's: the render may be far older. The third outcome
+            # (#125), not «ok» — ephemeral sessions clone with --depth 1, and
+            # here their doctor would never see a stopped renderer.
+            return [
+                Finding(
+                    "unknown",
+                    "derived-age-unknown",
+                    "ledger.tsv",
+                    f"{len(uncounted)} episode(s) have no ledger row, and this shallow clone "
+                    f"cannot say for how long: the last commit it holds for ledger.tsv is "
+                    f"the cut of its history ({ledger_age:.0f}h ago), so the real last "
+                    f"render is at least that old and possibly far older — a stopped "
+                    f"renderer reads as a fresh one from here: {_episode_list(uncounted)}",
+                    "deepen the history (`git fetch --deepen=200`, or a full clone) and "
+                    "rerun doctor, or judge the renderer by its own job run",
+                )
+            ]
+        return []
 
     at_most, at_least = _renderer_wait_bounds(root, uncounted, upstream, now)
     if at_most is not None and at_most < stale_after_hours:

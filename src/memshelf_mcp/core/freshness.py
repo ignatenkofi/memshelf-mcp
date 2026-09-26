@@ -64,6 +64,12 @@ UNKNOWN = _Unknown()
 
 SKIP_DIRS = {"__pycache__", ".git", ".mypy_cache", ".ruff_cache", ".pytest_cache"}
 
+#: Где Claude Desktop распаковывает установленные расширения (macOS). Переменная
+#: нужна фикстурам и `adapters/claude-desktop/refresh.sh --check` на машине,
+#: где каталог лежит не там; в обычной работе её не трогают.
+EXTENSIONS_DIR_ENV = "MEMSHELF_EXTENSIONS_DIR"
+EXTENSIONS_DIR_DEFAULT = "Library/Application Support/Claude/Claude Extensions"
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -272,7 +278,7 @@ def discover_consumers() -> list[tuple[str, str, Path]]:
         pipx = home / ".local/pipx/venvs/memshelf-mcp/bin/python"
     if pipx.exists():
         found.append(("pipx memshelf-mcp", "pipx", pipx))
-    exts = home / "Library/Application Support/Claude/Claude Extensions"
+    exts = Path(os.environ.get(EXTENSIONS_DIR_ENV) or home / EXTENSIONS_DIR_DEFAULT)
     if exts.is_dir():
         for d in sorted(exts.glob("*memshelf*")):
             py = d / ".venv/bin/python"

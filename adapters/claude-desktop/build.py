@@ -158,6 +158,36 @@ def package_version() -> str:
     return match.group(1)
 
 
+def git_local_segment(repo: Path = REPO) -> str:
+    """``+g<sha7>``, plus ``.dirty`` when the shipped sources have uncommitted changes.
+
+    A PEP 440 local segment and semver build metadata at the same time, so the
+    one string is legal both in the staged ``pyproject.toml`` and in
+    ``manifest.json`` — and it is what Claude Desktop shows as the extension's
+    version. Without it two bundles built from different commits both read
+    ``0.3.0`` and the stale one is invisible (#125, #158).
+
+    ``__version__`` inside the package is deliberately left alone: the served
+    code must hash identically to the checkout it was built from, or
+    ``served-code-differs`` would fire on a bundle that is in fact current.
+    """
+
+    def git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args], cwd=repo, capture_output=True, text=True, check=False
+        )
+        if result.returncode != 0:
+            raise SystemExit(
+                f"--local-version needs a git checkout: git {' '.join(args)} failed "
+                f"({result.stderr.strip() or result.returncode})"
+            )
+        return result.stdout.strip()
+
+    sha = git("rev-parse", "--short=7", "HEAD")
+    dirty = bool(git("status", "--porcelain", "--", "src", "adapters/claude-desktop"))
+    return f"+g{sha}" + (".dirty" if dirty else "")
+
+
 def tool_roster() -> list[dict[str, str]]:
     """Read the tools out of ``server.py`` without importing it.
 
@@ -486,11 +516,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--cache", default=str(REPO / ".build-cache"))
     parser.add_argument("--keep-stage", action="store_true", help="leave the staging tree behind")
+    parser.add_argument(
+        "--local-version",
+        action="store_true",
+        help=(
+            "append +g<sha>[.dirty] to the bundle version (manifest, pyproject, file name) "
+            "so Claude Desktop shows which commit it serves; for bundles built outside a "
+            "release (#158)"
+        ),
+    )
     args = parser.parse_args(argv)
 
     out = Path(args.out).resolve()
     cache = Path(args.cache).resolve()
     version = package_version()
+    if args.local_version:
+        version += git_local_segment()
     target = TARGETS[args.target]
     variants = ["uv", "standalone"] if args.variant == "both" else [args.variant]
     built: list[Path] = []
