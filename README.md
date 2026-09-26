@@ -248,6 +248,20 @@ has no history, only a current correct value. The one file it unions is
 episodes. Conflicting *episodes* are content, not mechanics: `resolve`
 reports them and steps aside.
 
+**A tool answer says when the code behind it is stale.** The same code ships
+five ways, the version number does not move between releases, and twice a
+merged fix was not acting because the copy answering the calls was behind
+`main` (#125, #158) — found hours later, sideways, as what looked like a tool
+bug. `doctor` reports that gap as `served-code-differs`; since a doctor finding
+is read only by whoever runs doctor, the MCP server now says it in the response
+itself: when the served package's hash differs from the `memshelf-mcp` checkout
+next to the shelf (or `$MEMSHELF_CHECKOUT`), every envelope — success or error
+— opens with a `warning` carrying that code, both short hashes and where each
+lives. Identical code adds nothing. No checkout to compare with adds nothing
+per call either, but the `initialize` instructions say the freshness is unknown
+and how to make it known. `MEMSHELF_FRESHNESS_WARNING=0` switches the per-call
+warning off where the difference is intended.
+
 The design rationale behind each rule lives in
 [`docs/DECISIONS.md`](docs/DECISIONS.md) and
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

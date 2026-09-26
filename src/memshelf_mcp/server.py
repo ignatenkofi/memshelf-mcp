@@ -7,6 +7,11 @@ point in ``tools.py``, and serializes the result. Tools: ``memshelf_init``
 (accounting), ``memshelf_advise`` (context advisor), ``memshelf_resolve``
 (multi-writer conflicts), and ``memshelf_doctor`` (integrity). See
 ``docs/ARCHITECTURE.md`` → MCP tool surface.
+
+Every envelope — success or error — passes through ``_respond`` /
+``_error_response``, where the served-code verdict (``served.py``, #125,
+#158) is prepended as the first key when the code answering the call is not
+the code in the checkout next to the shelf.
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 
-from memshelf_mcp import __version__, instances
+from memshelf_mcp import __version__, instances, served
 from memshelf_mcp.tools import (
     AdviseInput,
     DoctorInput,
@@ -76,9 +81,35 @@ def _serialize(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
 
 
-def _error_response(exc: Exception, tool: str) -> str:
+def _shelf_of(params: Any) -> str | None:
+    """The shelf a validated input addresses, or None for a tool without one."""
+    shelf = getattr(params, "shelf_path", None)
+    return shelf if isinstance(shelf, str) else None
+
+
+def _shelf_in(arguments: dict[str, Any]) -> str | None:
+    """Best-effort shelf from *raw* arguments — for a call validation refused."""
+    inner = arguments.get(_ARGUMENT_ENVELOPE, arguments)
+    shelf = inner.get("shelf_path") if isinstance(inner, dict) else None
+    return shelf if isinstance(shelf, str) else None
+
+
+def _respond(payload: Any, params: Any = None) -> str:
+    """Serialize a tool's answer, opening it with the served-code warning if due.
+
+    The one place every successful envelope is composed, so the verdict of
+    ``served.annotate`` (#125, #158) is added once, first, and nowhere else.
+    """
+    return _serialize(served.annotate(payload, _shelf_of(params)))
+
+
+def _error_response(exc: Exception, tool: str, shelf_path: str | None = None) -> str:
     logger.warning("%s: %s", tool, exc)
-    return _serialize({"status": "error", "error": str(exc), "type": type(exc).__name__})
+    payload = {"status": "error", "error": str(exc), "type": type(exc).__name__}
+    # An error is where a stale copy hides best — the incident behind the shelf
+    # thread was a tool "bug" that was the served code lagging (#158). So the
+    # verdict rides on the error envelope too.
+    return _serialize(served.annotate(payload, shelf_path))
 
 
 def _accept_flat_arguments(tool: Any, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -142,6 +173,17 @@ class _ToolBoundary(MCPServer):
     server does not have, not a failure of one it does.
     """
 
+    def set_instructions(self, text: str | None) -> None:
+        """Set what the `initialize` response carries as ``instructions``.
+
+        ``MCPServer.instructions`` is read-only and fixed at construction, but
+        the served-code line depends on the shelf the host configured, which
+        is only known when the process starts serving — so it is set from
+        ``main`` on the low-level server, which reads the attribute when it
+        builds the handshake.
+        """
+        self._lowlevel_server.instructions = text
+
     async def call_tool(
         self,
         name: str,
@@ -158,7 +200,7 @@ class _ToolBoundary(MCPServer):
             # worth reporting, so the envelope names `ValidationError` instead of
             # the SDK's transport-shaped wrapper.
             reported = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
-            text = _error_response(reported, name)
+            text = _error_response(reported, name, _shelf_in(arguments))
             # Every tool is typed as returning ``str``, so mcp 2.x publishes an
             # ``outputSchema`` of ``{"result": <string>}`` for it — and the client
             # SDK enforces that schema on *every* result, this hand-built one
@@ -197,9 +239,9 @@ def memshelf_shelve(params: ShelveInput) -> str:
     written here — they are rendered by `memshelf_rebuild` or the shelf's bot.
     Details: docs/tools.md."""
     try:
-        return _serialize(run_shelve(params))
+        return _respond(run_shelve(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_shelve")
+        return _error_response(exc, "memshelf_shelve", _shelf_of(params))
 
 
 @mcp.tool(
@@ -211,9 +253,9 @@ def memshelf_lint_digest(params: LintDigestInput) -> str:
     the same validator `memshelf_shelve` runs, writing nothing. `strict` turns
     warnings into failures."""
     try:
-        return _serialize(run_lint_digest(params))
+        return _respond(run_lint_digest(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_lint_digest")
+        return _error_response(exc, "memshelf_lint_digest", _shelf_of(params))
 
 
 @mcp.tool(
@@ -224,9 +266,9 @@ def memshelf_recall(params: RecallInput) -> str:
     """Fetch a shelved episode by id, or one `## Section` of it, as a data
     envelope. Prefer the section when it answers the question."""
     try:
-        return _serialize(run_recall(params))
+        return _respond(run_recall(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_recall")
+        return _error_response(exc, "memshelf_recall", _shelf_of(params))
 
 
 @mcp.tool(
@@ -237,9 +279,9 @@ def memshelf_index(params: IndexInput) -> str:
     """Return the shelf INDEX — the small recall entry point. Read it before
     answering anything about past work, then recall only what you need."""
     try:
-        return _serialize(run_index(params))
+        return _respond(run_index(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_index")
+        return _error_response(exc, "memshelf_index", _shelf_of(params))
 
 
 @mcp.tool(
@@ -250,9 +292,9 @@ def memshelf_search(params: SearchInput) -> str:
     """Grep the shelf for episodes matching every query token; returns
     addresses and snippets. Use when the episode id is unknown."""
     try:
-        return _serialize(run_search(params))
+        return _respond(run_search(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_search")
+        return _error_response(exc, "memshelf_search", _shelf_of(params))
 
 
 @mcp.tool(
@@ -263,9 +305,9 @@ def memshelf_stats(params: StatsInput) -> str:
     """Report the shelf's token economy: standing cost vs shelved mass, claimed
     compression, realized savings from logged recalls."""
     try:
-        return _serialize(run_stats(params))
+        return _respond(run_stats(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_stats")
+        return _error_response(exc, "memshelf_stats", _shelf_of(params))
 
 
 @mcp.tool(
@@ -277,9 +319,9 @@ def memshelf_advise(params: AdviseInput) -> str:
     — breakdown plus ranked proposals; writes nothing. Pass your window's
     occupants (label, size, live or not); with none it reports the shelf alone."""
     try:
-        return _serialize(run_advise(params))
+        return _respond(run_advise(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_advise")
+        return _error_response(exc, "memshelf_advise", _shelf_of(params))
 
 
 @mcp.tool(
@@ -296,9 +338,9 @@ def memshelf_init(params: InitInput) -> str:
     """Create (or top up) a memory shelf: layout, categories, INDEX preamble,
     POLICY.md, shelf.yml. Idempotent; never overwrites existing files."""
     try:
-        return _serialize(run_init(params))
+        return _respond(run_init(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_init")
+        return _error_response(exc, "memshelf_init", _shelf_of(params))
 
 
 @mcp.tool(
@@ -316,9 +358,9 @@ def memshelf_rebuild(params: RebuildInput) -> str:
     stats.svg) from the episodes; `check=true` only reports drift. Hand-run it
     only on a shelf whose bot is not rendering."""
     try:
-        return _serialize(run_rebuild(params))
+        return _respond(run_rebuild(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_rebuild")
+        return _error_response(exc, "memshelf_rebuild", _shelf_of(params))
 
 
 @mcp.tool(
@@ -335,9 +377,9 @@ def memshelf_rollup(params: RollupInput) -> str:
     """Archive a period's episodes behind one digest-of-digests you write,
     shrinking INDEX; nothing is deleted. Not the answer to `index-bloat`."""
     try:
-        return _serialize(run_rollup(params))
+        return _respond(run_rollup(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_rollup")
+        return _error_response(exc, "memshelf_rollup", _shelf_of(params))
 
 
 @mcp.tool(
@@ -354,9 +396,9 @@ def memshelf_purge(params: PurgeInput) -> str:
     """Drop episodes past `retain_until`, then reindex. Dry run unless
     `apply=true`; removes working-tree files only, git history keeps them."""
     try:
-        return _serialize(run_purge(params))
+        return _respond(run_purge(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_purge")
+        return _error_response(exc, "memshelf_purge", _shelf_of(params))
 
 
 @mcp.tool(
@@ -374,9 +416,9 @@ def memshelf_resolve(params: ResolveInput) -> str:
     rows, rebuild INDEX, run doctor. Episode conflicts are reported, never
     auto-merged; safe outside a conflict too."""
     try:
-        return _serialize(run_resolve(params))
+        return _respond(run_resolve(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_resolve")
+        return _error_response(exc, "memshelf_resolve", _shelf_of(params))
 
 
 @mcp.tool(
@@ -394,9 +436,9 @@ def memshelf_sync(params: SyncInput) -> str:
     else — for a clone behind the bot's render or another session's shelve.
     Refuses on a dirty tree or a diverged branch, with the fix."""
     try:
-        return _serialize(run_sync(params))
+        return _respond(run_sync(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_sync")
+        return _error_response(exc, "memshelf_sync", _shelf_of(params))
 
 
 @mcp.tool(
@@ -413,9 +455,9 @@ def memshelf_doctor(params: DoctorInput) -> str:
     leaked secrets, ledger consistency, INDEX budget. Read-only; fixes
     nothing. `check_remote` adds the network probe for a public remote."""
     try:
-        return _serialize(run_doctor(params))
+        return _respond(run_doctor(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_doctor")
+        return _error_response(exc, "memshelf_doctor", _shelf_of(params))
 
 
 @mcp.tool(
@@ -433,9 +475,9 @@ def memshelf_import(params: ImportInput) -> str:
     `discover` lists conversations by content markers, `extract` writes one
     cleaned conversation to a working file for segmenting and shelving."""
     try:
-        return _serialize(run_import(params))
+        return _respond(run_import(params), params)
     except Exception as exc:
-        return _error_response(exc, "memshelf_import")
+        return _error_response(exc, "memshelf_import", _shelf_of(params))
 
 
 # A server that no client ever greets is the orphan of #115: the host spawned
@@ -535,6 +577,13 @@ def main(argv: list[str] | None = None) -> None:
     # incident its stderr was /dev/null — so only registration happens here;
     # the warning rides on the call path, where the live instance is.
     instances.register(default_shelf_path())
+    # The handshake carries one line on served-code freshness for the shelf
+    # known at startup (#125, #158): the same verdict every envelope gets, plus
+    # the two outcomes a per-call warning deliberately stays silent on —
+    # «unknown» (no checkout to compare with; how to make one known) and
+    # «off» (the opt-out). Set here, not at import: the host sets the
+    # environment, and the tests flip it between cases.
+    mcp.set_instructions(served.instructions(default_shelf_path()))
     anyio.run(serve_stdio, handshake_timeout())
 
 
