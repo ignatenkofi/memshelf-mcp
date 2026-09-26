@@ -6,6 +6,8 @@ achieves.
 
 ## M0 — Pattern validation, no code — **complete (2026-07-13 → 2026-07-22)**
 
+Epic: #164 (closed).
+
 Exit criteria met: recall test 5/5, ledger + recall-cost numbers written down
 ([`demo.md`](demo.md)), and the annoyance log became the M1 backlog verbatim.
 Case B closed 2026-07-22 (33 episodes, zero loss; verdict episode on the shelf).
@@ -29,6 +31,8 @@ fresh session via INDEX navigation; ledger numbers written down; the
 annoyance log filled. That log *is* the M1 backlog.
 
 ## M1 — `memshelf-mcp` thin server
+
+Epic: #165. Status 2026-09-27: every scope item shipped (0.1.0, 2026-07-25, plugin with it); the exit clause — two weeks of dogfood on two shelves with no manual repair of the derived layer — has no recorded verdict in this repo (CHANGELOG 0.2.0 records one manual fix, #56). Declaring M1 closed is the owner's call; until then M1 stays the current period.
 
 Only what M0 proved annoying, expected:
 
@@ -56,6 +60,8 @@ Only what M0 proved annoying, expected:
 shelve→compact→recall cycle survives without manual repair; `doctor` clean.
 
 ## M2 — Policy, hygiene & the context advisor
+
+Epic: #166.
 
 - ~~Token-budget monitor that *proposes* shelving (never forces).~~ —
   **done** (#14): the advisor takes the budget and reports headroom; the
@@ -117,6 +123,8 @@ accepted (not overridden) most of the time in dogfood use.
 > rather than by a threshold that growth alone would breach.
 
 ## M3 — Retrieval upgrades, reuse layer & second surface
+
+Epic: #167.
 
 - ~~Embeddings sidecar behind the same `search` signature (docshelf's
   documented extension point).~~ — **done** (#17): `memshelf semantic build`
