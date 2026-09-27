@@ -30,9 +30,9 @@ recall-rule snippet live in `adapters/claude-code/`.
 fresh session via INDEX navigation; ledger numbers written down; the
 annoyance log filled. That log *is* the M1 backlog.
 
-## M1 — `memshelf-mcp` thin server
+## M1 — `memshelf-mcp` thin server — **complete (closed 2026-09-27)**
 
-Epic: #165. Status 2026-09-27: every scope item shipped (0.1.0, 2026-07-25, plugin with it); the exit clause — two weeks of dogfood on two shelves with no manual repair of the derived layer — has no recorded verdict in this repo (CHANGELOG 0.2.0 records one manual fix, #56). Declaring M1 closed is the owner's call; until then M1 stays the current period.
+Epic: #165 (closed). Closed by the owner on 2026-09-27: every scope item shipped (0.1.0, 2026-07-25, plugin with it), and the exit clause holds on the record. In the 14 days to 2026-09-27 all 37 derived-layer renders on main-memshelf were made by the shelf bot and none by hand, `doctor` on its `main` is clean, and five project shelves ran shelve → doctor → rebuild on 2026-09-26. The one manual fix in CHANGELOG 0.2.0 (#56, 2026-07-27) predates that window.
 
 Only what M0 proved annoying, expected:
 
@@ -61,7 +61,7 @@ shelve→compact→recall cycle survives without manual repair; `doctor` clean.
 
 ## M2 — Policy, hygiene & the context advisor
 
-Epic: #166.
+Epic: #166 — the current period since 2026-09-27.
 
 - ~~Token-budget monitor that *proposes* shelving (never forces).~~ —
   **done** (#14): the advisor takes the budget and reports headroom; the
