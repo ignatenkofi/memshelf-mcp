@@ -4,6 +4,7 @@ Agent memory shelf (memshelf). Recall rule: check this index before answering an
 
 ## Sessions
 
+- **memshelf-mcp: ночная смена 26→27.09 — эпики вех #164–#167, ROADMAP к факту (PR #168), #158 к закрытию владельцем** — Эпики вех #164–#167 по ROADMAP, draft-PR #168 привёл ROADMAP к факту, #158 закрывает владелец; doctor: PyPI vs клон. — `2026-09-26-night-shift-roadmap-epics-docs-to-fact.md`
 - **memshelf-mcp: ночная смена по всем открытым issue (#17, #18, #87, #115, #142)** — Пять issue закрыты пятью PR; сайдкар model2vec + RRF поднял hit@5 с 0.03 до 0.53; конфликты — merge, не rebase. — `2026-09-10-memshelf-issue-sweep-17-18-87-115-142.md`
 
 ---
