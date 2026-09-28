@@ -122,6 +122,29 @@ accepted (not overridden) most of the time in dogfood use.
 > triggered by INDEX's share of the context window (`INDEX_CONTEXT_SHARE`)
 > rather than by a threshold that growth alone would breach.
 
+> **Measured 2026-09-28** (memshelf-166, part of this epic; two of three exit
+> criteria, method and numbers in `docs/demo.md`). **(a)** INDEX budget on the
+> dogfood shelf at 174 live entries (273 rows in `ledger.tsv`, 101 archived):
+> `memshelf doctor` reports INDEX at ~13,486 tokens against a budget of 14,120
+> (`200 + 80×174`) — under budget, no `index-bloat`; ~76.4 tokens/entry against
+> the 80 allowance, down from ~81.1 tokens/entry at 113 entries (measurement
+> recorded above, 2026-08-21). Per-line price did not rise as entries grew
+> +54% — flat both by construction and on this measurement. **(b)** Recall:
+> M0's original 5-question set targets Case A episodes now two rollup
+> generations deep (absorbed into `2026-07-27-rollup`, itself absorbed into
+> `2026-08-09-rollup`) and carrying no keyword into the live INDEX's rollup
+> entries — 0/5 resolve via plain INDEX-then-fetch navigation today. That is
+> a rollup-depth effect (rollup working as designed since #145), not a
+> measured accuracy regression: the source material was deliberately
+> archived, so replaying the identical questions is no longer a like-for-like
+> test. A substitute pair of known-answer questions against currently-live
+> episodes, same INDEX-first-then-targeted-fetch rule, resolved 2/2 — one
+> unambiguous INDEX match each out of 174 entries. No nested test agent was
+> available in the executing session; both checks were self-answered with the
+> M0.md answer key already known — disclosed as contamination in `docs/demo.md`.
+> **(c)** unchanged: the advisor-proposals-accepted-in-dogfood measurement is
+> the owner's to make and stays open.
+
 ## M3 — Retrieval upgrades, reuse layer & second surface
 
 Epic: #167.
