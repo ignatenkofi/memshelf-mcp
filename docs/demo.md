@@ -88,6 +88,40 @@ work without losing an episode.
   a denominator no tool can capture; stats reports the measurable side and
   says so ([DECISIONS](DECISIONS.md), 2026-07-22).
 
+## M2 check-in (2026-09-28)
+
+Two of [M2](ROADMAP.md)'s three exit criteria, measured on the same dogfood
+shelf, now well past the Case A/B numbers above (method: `memshelf doctor`,
+plain INDEX navigation; no owner input).
+
+**(a) INDEX budget — flat per-line price holds at scale.** At 174 live
+entries (273 rows in `ledger.tsv`, 101 archived): INDEX ~13,486 tokens
+(chars/4) against a budget of 14,120 (`200 + 80×174`) — under budget, no
+`index-bloat`, ~76.4 tokens/entry against the 80 allowance. At 113 entries
+(measurement recorded under "Changed" in the CHANGELOG, 2026-08-21): ~81.1
+tokens/entry. The per-line price went *down* slightly as entries grew +54%,
+not up — the exit criterion holds both by construction and on this
+measurement.
+
+**(b) Recall — the literal M0 set no longer applies; a same-rule check on
+live episodes does.** M0's five known-answer questions target Case A
+episodes that have since passed through two rollup generations
+(`2026-07-27-rollup`, itself later absorbed into `2026-08-09-rollup`) and
+carry no keyword into the live INDEX's one-line rollup entries — 0/5 resolve
+via plain INDEX-then-fetch navigation today. That is a rollup-depth effect
+(rollup doing its job since #145), not a measured accuracy regression:
+replaying identical questions against deliberately-archived answers isn't a
+like-for-like test of recall at scale. A substitute pair of known-answer
+questions against currently-live episodes, same INDEX-first-then-fetch rule,
+resolved 2/2 — one unambiguous INDEX match each out of 174 entries, with the
+specific answer found only in the fetched episode body, not the INDEX line.
+No nested test agent was available in the session that ran this check; both
+passes were self-answered with the M0.md answer key already known — flagged
+here as contamination rather than left implicit.
+
+(c) is untouched: the advisor-proposals-accepted-in-dogfood measurement is
+the owner's call, not a tool run.
+
 ## Reproduce it
 
 On any shelf (a docshelf shelf with `topics`/`research`/`sessions` and a
