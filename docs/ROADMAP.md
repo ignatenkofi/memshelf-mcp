@@ -145,6 +145,15 @@ accepted (not overridden) most of the time in dogfood use.
 > **(c)** unchanged: the advisor-proposals-accepted-in-dogfood measurement is
 > the owner's to make and stays open.
 
+> **Decided 2026-09-28**, in response to (b) above (#172, owner comment):
+> a rollup now carries the absorbed episodes' keywords into its own
+> `keywords` frontmatter, its digest, and its `description` — the field the
+> INDEX line actually renders — inherited transitively across generations
+> (`core/keywords.py`; full rationale in `docs/DECISIONS.md`). This closes
+> the mechanism gap (b) found, not the measurement itself: re-running the
+> M0 question set against the dogfood shelf's *existing* rollups needs a
+> backfill this change deliberately does not perform (see the PR).
+
 ## M3 — Retrieval upgrades, reuse layer & second surface
 
 Epic: #167.

@@ -158,6 +158,13 @@ class Frontmatter:
     #: Retention (#15): after this date `memshelf purge` drops the episode.
     #: Absent means "keep" — retention is opt-in per episode, never a default.
     retain_until: str | None = None
+    #: Rollup-only (#172): the keywords of what this episode absorbed, so the
+    #: *next* rollup can inherit them without re-deriving from this episode's
+    #: own (generic, "N episodes folded in") digest. Empty on every ordinary
+    #: episode — this is not a general-purpose tagging field, and emitting an
+    #: empty `keywords: []` on every `shelve` would be noise `to_yaml` does not
+    #: add elsewhere (`tags` is the exception, kept for backward compatibility).
+    keywords: tuple[str, ...] = ()
 
     def to_yaml(self) -> str:
         lines = [f"id: {self.id}", f"kind: {self.kind}"]
@@ -174,6 +181,8 @@ class Frontmatter:
         if self.description:
             lines.append(f"description: {yaml_scalar(flatten(self.description))}")
         lines.append(f"tags: [{', '.join(self.tags)}]")
+        if self.keywords:
+            lines.append(f"keywords: [{', '.join(self.keywords)}]")
         lines.append(f"approx_tokens: {self.approx_tokens}")
         if self.approx_tokens_source:
             lines.append(f"approx_tokens_source: {self.approx_tokens_source}")
