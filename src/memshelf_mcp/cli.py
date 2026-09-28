@@ -580,7 +580,8 @@ def build_parser() -> argparse.ArgumentParser:
     sh.add_argument("--tag", action="append", default=[], help="A tag; repeatable.")
     sh.add_argument(
         "--span",
-        help="When the work happened, YYYY-MM-DD or A..B (defaults to --date/today).",
+        help="When the work happened, YYYY-MM-DD or A..B (defaults to --date; on "
+        "--amend without --date, to the existing episode's own span; #170).",
     )
     sh.add_argument("--session")
     sh.add_argument(
@@ -603,7 +604,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--retain-until",
         help="ISO date after which `memshelf purge` drops this episode (opt-in).",
     )
-    sh.add_argument("--date", help="YYYY-MM-DD (defaults to today).")
+    sh.add_argument(
+        "--date",
+        help="YYYY-MM-DD; always wins. Omitted: --amend keeps the existing episode's "
+        "own date, a new dated slug takes it from its YYYY-MM-DD- prefix, and only "
+        "an undated slug falls back to today (#170).",
+    )
     sh.add_argument("--no-commit", action="store_true", help="Skip the auto-commit.")
     sh.add_argument(
         "--no-sync",

@@ -115,7 +115,9 @@ class ShelveInput(ShelfScopedInput):
     tags: list[str] = Field(default_factory=list)
     span: str | None = Field(
         default=None,
-        description="When the work happened, YYYY-MM-DD or A..B; defaults to date/today.",
+        description="When the work happened, YYYY-MM-DD or A..B; defaults to date. On "
+        "amend without an explicit date, defaults to the existing episode's own span "
+        "instead (#170).",
     )
     session: str | None = None
     approx_tokens: int | None = Field(
@@ -139,7 +141,12 @@ class ShelveInput(ShelfScopedInput):
         description="Retention (#15): ISO date after which `memshelf purge` drops this "
         "episode. Absent means keep — retention is opt-in per episode.",
     )
-    date: str | None = Field(default=None, description="YYYY-MM-DD; defaults to today.")
+    date: str | None = Field(
+        default=None,
+        description="YYYY-MM-DD; always wins. Omitted: amend keeps the existing "
+        "episode's own date, a new dated slug takes it from its YYYY-MM-DD- prefix, "
+        "and only an undated slug falls back to today (#170).",
+    )
     autocommit: bool = True
     sync: bool = Field(
         default=True,
