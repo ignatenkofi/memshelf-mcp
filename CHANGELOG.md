@@ -156,6 +156,22 @@ once code ships.
   fast-forward keeps git's words without the word. Regression tests: the
   issue's steps (bare origin, `--depth 1` clone, `push -u` of a new branch)
   for the clean, behind, genuinely diverged and race-on-push cases.
+- **`shelve --date` defaulted to today even on `--amend` and when the slug
+  already carried a date (#170).** Omitting `--date` always fell back to
+  `date.today()`: amending an episode the next morning silently moved its
+  `date` (and, through it, the ledger row `rebuild` renders from the
+  frontmatter) to the amend day, and a brand-new, already dated slug shelved
+  after midnight got tomorrow's date instead of its own `YYYY-MM-DD-` prefix.
+  `--amend` without an explicit `--date` now inherits `date` — and `span`,
+  which used to collapse a multi-day import span to one day the same way —
+  from the episode already on the shelf, in `archive/` as well as `docs/`
+  (the #117 amend-in-archive path); a brand-new episode takes its date from
+  the slug's own date prefix instead of the machine clock; an explicit
+  `--date` still wins over both. `--date`/`--span` help (CLI and the MCP
+  tool) now say so. Regression tests: amending the morning after on a faked
+  clock, amending an archived episode the same way, a multi-day imported
+  span surviving a plain amend, and a new dated slug shelved under a faked
+  next-day clock — all four fail on the code before this change.
 
 ## [0.3.0] — 2026-09-10
 

@@ -264,9 +264,14 @@ def test_span_defaults_to_the_episode_date(tmp_path):
     assert "span: 2026-07-27" in text
 
 
-def test_span_defaults_to_today_without_a_date(tmp_path):
-    from datetime import date as _date
-
+def test_span_defaults_to_the_slug_date_without_a_date(tmp_path):
+    """#170: a new episode's date (and span, which defaults to it) comes from
+    the slug's own ``YYYY-MM-DD-`` prefix, not the wall clock — a session that
+    is shelved after midnight must not get tomorrow's date just because the
+    machine's clock already turned over. This replaces the previous version of
+    this test, which pinned the pre-#170 defect (``span`` == ``date.today()``)
+    and would have failed the instant it ran on a day other than the slug's.
+    """
     shelve(
         _init_shelf(tmp_path),
         slug="2026-07-27-no-span-no-date",
@@ -277,7 +282,69 @@ def test_span_defaults_to_today_without_a_date(tmp_path):
     text = (tmp_path / "docs" / "topics" / "2026-07-27-no-span-no-date.md").read_text(
         encoding="utf-8"
     )
-    assert f"span: {_date.today().isoformat()}" in text
+    assert "date: 2026-07-27" in text
+    assert "span: 2026-07-27" in text
+
+
+def test_new_episode_date_comes_from_the_slug_not_the_clock(tmp_path, monkeypatch):
+    """#170: a session that is shelved after midnight must not get tomorrow's
+    date just because the machine's clock already turned over — the slug's
+    own ``YYYY-MM-DD-`` prefix is the date for a new episode, not
+    ``date.today()``. The fake clock below is deliberately a day ahead of the
+    slug so the assertion cannot pass by the test happening to run on the
+    right day.
+    """
+    from datetime import date as _date
+
+    import memshelf_mcp.core.shelve as shelve_module
+
+    class _AlreadyTomorrow(_date):
+        @classmethod
+        def today(cls):
+            return _date(2026, 7, 28)
+
+    monkeypatch.setattr(shelve_module, "_date", _AlreadyTomorrow)
+
+    shelve(
+        _init_shelf(tmp_path),
+        slug="2026-07-27-late-night-session",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+    )
+    text = (tmp_path / "docs" / "topics" / "2026-07-27-late-night-session.md").read_text(
+        encoding="utf-8"
+    )
+    assert "date: 2026-07-27" in text
+    assert "span: 2026-07-27" in text
+    assert "2026-07-28" not in text
+
+
+def test_explicit_date_wins_over_amend_inheritance(tmp_path):
+    """#170 gates inheritance on 'no explicit --date' — passing --date on an
+    amend must still override whatever the shelf already has, exactly like a
+    fresh shelve."""
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-09-26-night-shift",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        date="2026-09-26",
+    )
+    shelve(
+        root,
+        slug="2026-09-26-night-shift",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+        date="2026-09-27",
+        amend=True,
+    )
+    text = (tmp_path / "docs" / "topics" / "2026-09-26-night-shift.md").read_text(encoding="utf-8")
+    assert "date: 2026-09-27" in text
+    assert "span: 2026-09-27" in text
 
 
 def test_explicit_span_wins_over_the_default(tmp_path):
@@ -969,6 +1036,117 @@ def test_amend_reaches_an_archived_episode(tmp_path):
         check=True,
     ).stdout.split()
     assert committed == ["archive/docs/topics/2026-07-06-hw-review-tail.md"]
+
+
+def test_amend_without_date_keeps_the_existing_date(tmp_path, monkeypatch):
+    """#170: `--amend` without an explicit `--date` must not silently move the
+    episode's date (and, downstream, its ledger row) to today — this is the
+    exact bug the issue reports: an episode shelved on 2026-09-26 that got
+    amended the next morning came back dated 2026-09-27.
+    """
+    from datetime import date as _date
+
+    import memshelf_mcp.core.shelve as shelve_module
+
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-09-26-night-shift",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        date="2026-09-26",
+    )
+
+    class _NextMorning(_date):
+        @classmethod
+        def today(cls):
+            return _date(2026, 9, 27)
+
+    monkeypatch.setattr(shelve_module, "_date", _NextMorning)
+
+    shelve(
+        root,
+        slug="2026-09-26-night-shift",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+        amend=True,
+    )
+    text = (tmp_path / "docs" / "topics" / "2026-09-26-night-shift.md").read_text(encoding="utf-8")
+    assert "date: 2026-09-26" in text
+    assert "span: 2026-09-26" in text
+    assert "2026-09-27" not in text
+
+
+def test_amend_without_date_keeps_the_existing_multi_day_span(tmp_path):
+    """#170: span inherits from the existing episode too, not just date — an
+    amend that supplies neither must not collapse an imported multi-day span
+    down to a single day just because it re-touches the digest."""
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-07-24-multi-day-import",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        date="2026-07-27",
+        span="2026-07-24..2026-07-27",
+        mode="import",
+    )
+    shelve(
+        root,
+        slug="2026-07-24-multi-day-import",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+        mode="import",
+        amend=True,
+    )
+    text = (tmp_path / "docs" / "topics" / "2026-07-24-multi-day-import.md").read_text(
+        encoding="utf-8"
+    )
+    assert "date: 2026-07-27" in text
+    assert "span: 2026-07-24..2026-07-27" in text
+
+
+def test_amend_of_an_archived_episode_without_date_keeps_its_date(tmp_path, monkeypatch):
+    """#170 names archive/ explicitly: an episode a rollup already moved out of
+    docs/ must keep its date on amend the same way a live one does (the #117
+    amend-in-archive path)."""
+    from datetime import date as _date
+
+    import memshelf_mcp.core.shelve as shelve_module
+
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-07-06-hw-review-tail",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        date="2026-07-06",
+    )
+    archived = _archive_the_episode(root, "2026-07-06-hw-review-tail")
+
+    class _MuchLater(_date):
+        @classmethod
+        def today(cls):
+            return _date(2026, 9, 27)
+
+    monkeypatch.setattr(shelve_module, "_date", _MuchLater)
+
+    shelve(
+        root,
+        slug="2026-07-06-hw-review-tail",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen; cookie-session rejected."},
+        amend=True,
+    )
+    text = archived.read_text(encoding="utf-8")
+    assert "date: 2026-07-06" in text
+    assert "span: 2026-07-06" in text
 
 
 def test_amended_archive_episode_keeps_one_ledger_row(tmp_path):

@@ -35,6 +35,7 @@ from memshelf_mcp.core.episode import (
     clamp_description,
     compose_episode,
 )
+from memshelf_mcp.core.frontmatter import parse_frontmatter
 from memshelf_mcp.core.gitsync import (
     DEFAULT_RENDER_WAIT_S,
     SyncReport,
@@ -526,11 +527,36 @@ def shelve(
             f"got {approx_tokens_source!r}"
         )
 
+    # The shelve date (#170). An explicit `--date` always wins. Absent that,
+    # `--amend` inherits the date already on the shelf instead of the wall
+    # clock — rewriting an episode must not silently move its ledger row to
+    # today, whether it lives in `docs/` or (#117) behind a rollup in
+    # `archive/`. A brand-new episode instead takes its date from the slug's
+    # own `YYYY-MM-DD-` prefix (the contract above already requires one for a
+    # new name) rather than the machine's clock, so a session that crosses
+    # midnight keeps id and date on the same day; only a legacy, undated slug
+    # (grandfathered into `--amend` above) falls back to today().
+    existing_fields: dict[str, str] = {}
+    if amend and date is None:
+        existing_episode = found_at if found_at is not None else archived_at
+        assert existing_episode is not None  # the amend guard above already required one
+        existing_fields, _ = parse_frontmatter(existing_episode.read_text(encoding="utf-8"))
+
+    if date is not None:
+        shelved_on = date
+    elif amend:
+        shelved_on = existing_fields.get("date") or _date.today().isoformat()
+    else:
+        slug_date = slug[:10] if _DATED_SLUG.match(slug) else None
+        shelved_on = slug_date or _date.today().isoformat()
+
     # SPEC 5.2 makes `span` REQUIRED; a live episode is almost always
     # single-day, so default it to the episode date rather than reject (#56).
-    # An explicit span (multi-day, or import backfill) always wins.
-    shelved_on = date or _date.today().isoformat()
-    span = span or shelved_on
+    # An explicit span (multi-day, or import backfill) always wins; next, an
+    # amend without an explicit `--date` keeps the existing episode's own
+    # span too (#170) — otherwise a multi-day import span would quietly
+    # collapse to one day on the next amend that only touches the digest.
+    span = span or existing_fields.get("span") or shelved_on
 
     # One cap, applied to both branches. It used to sit inside
     # `_first_sentence`, which runs only when the caller supplies no
