@@ -1,0 +1,6 @@
+{
+  "2026-09-28-shelve-date-fix-and-m2-measurements.md": {
+    "title": "memshelf-mcp: shelve --date fix (#170) and M2 exit-criterion measurements (#166)",
+    "description": "Ночная смена (night-2026-09-27-b) закрыла issue #170 и продвинула #166 (M2) в memshelf-mcp."
+  }
+}
