@@ -81,6 +81,23 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
    then this frontmatter). See ARCHITECTURE → Layer 2 (shelf-spec v0 § 5.1).
 
 3. **Redaction & PII pass — before anything touches disk.**
+
+   **Primary, when pii-mcp is attached (its MCP tools) or `pii-mcp` is on
+   PATH:** `pii_scan` the composed episode (the `<temp .md>` from step 2); on
+   findings, `pii_redact` it — `strategies={surname: alias, nickname: alias}`,
+   `alias_scope=<the episode id>` so a label like «студент-А» stays stable
+   for that scope (secrets already default to the `kind` strategy) —
+   dry-run first (the default), read the diff, then re-run with
+   `apply=true`. Right before step 5, `pii_verify` the result: its `verdict`
+   is the write gate, so proceed only on `clean`. **`config-error` (exit 2 —
+   usually no pattern packs loaded, or `PII_PATTERN_DIR` unset) is not
+   "clean"** — say so in your reply, then fall through to the manual pass
+   below for this episode. No MCP tools attached but the binary is on PATH:
+   the same three calls as the CLI, `pii-mcp scan|redact|verify <temp .md>`.
+
+   Manual pass — still the second line of defense after a clean verify (the
+   engine catches shapes and vocabulary, not meaning), and the whole check
+   when pii-mcp is neither attached nor on PATH:
    - Replace credential-shaped strings (tokens, keys, `.env` assignments,
      bearer headers) with `«redacted:<kind>»`.
    - Apply the shelf's PII policy. Example (sqst shelves): no student names,
