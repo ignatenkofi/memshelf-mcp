@@ -40,8 +40,14 @@ from dataclasses import dataclass, field
 from datetime import date as _date
 from pathlib import Path
 
-from memshelf_mcp.core.episode import CATEGORY_BY_KIND, Frontmatter, compose_episode
+from memshelf_mcp.core.episode import (
+    CATEGORY_BY_KIND,
+    Frontmatter,
+    clamp_description,
+    compose_episode,
+)
 from memshelf_mcp.core.frontmatter import parse_frontmatter
+from memshelf_mcp.core.keywords import digest_with_keywords, render_keyword_list, rollup_keywords
 
 __all__ = [
     "ARCHIVE_DIRNAME",
@@ -75,6 +81,12 @@ class RollupReport:
     # other field: the episode is written, the count is right. Without this the
     # caller has no way to learn that the thing it points readers at is stale.
     warnings: list[str] = field(default_factory=list)
+    #: The keywords carried forward from what this rollup absorbed (#172) —
+    #: same list written into the episode's own `keywords` frontmatter,
+    #: folded into its digest and its `description`. Surfaced here too so a
+    #: caller (or a test) can check what was derived without re-parsing the
+    #: file this call just wrote.
+    keywords: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -85,6 +97,7 @@ class RollupReport:
             "index_tokens_before": self.index_tokens_before,
             "index_tokens_after": self.index_tokens_after,
             "warnings": self.warnings,
+            "keywords": self.keywords,
         }
 
 
@@ -234,11 +247,26 @@ def rollup(
     _ensure_archive_shelf(root)
 
     rolled: list[tuple[str, str]] = []
+    # (fields, body) per absorbed episode, read once here and reused for
+    # `rollup_keywords` below — the same read `_move_to_archive` would
+    # otherwise force a caller to redo after the file has already moved.
+    keyword_sources: list[tuple[dict[str, str], str]] = []
     for path in selected:
-        fields, _ = parse_frontmatter(path.read_text("utf-8"))
+        fields, raw_body = parse_frontmatter(path.read_text("utf-8"))
         rolled.append((fields.get("id", path.stem), fields.get("display_title", "")))
+        keyword_sources.append((fields, raw_body))
     for path in selected:
         report.archived.append(_move_to_archive(root, path))
+
+    # #172: what was absorbed must stay findable by topic, not only by id —
+    # keywords go into the digest (below), the description (which is what the
+    # INDEX line actually renders — see module docstring), and the episode's
+    # own `keywords` frontmatter, which is what lets the *next* rollup inherit
+    # them (see `keywords.rollup_keywords`'s transitivity branch).
+    keywords = rollup_keywords(keyword_sources)
+    report.keywords = keywords
+    digest, digest_warnings = digest_with_keywords(digest, keywords)
+    report.warnings.extend(digest_warnings)
 
     # The rollup names what it replaced: an INDEX line that hides 40 episodes
     # has to say which 40, or the archive becomes unreachable in practice.
@@ -264,6 +292,22 @@ def rollup(
     )
     body.setdefault("Decisions", "См. дайджест: свод решений свёрнутого периода.")
 
+    # #172: the same keywords in the line INDEX actually renders. docshelf's
+    # entry description comes from frontmatter `description` (via
+    # `rebuild.render_meta` → `.meta.json`), never from the digest — so a
+    # digest-only fix would leave INDEX exactly as blind as #172 found it.
+    # `clamp_description` is the same 120-char/write-and-render cap every
+    # other episode's description goes through (`episode.clamp_description`);
+    # calling it here rather than only at render time follows its own
+    # docstring ("called on both paths that put a description in front of a
+    # reader") and is what keeps this within doctor's index-bloat allowance.
+    description = f"Роллап: {len(rolled)} эп."
+    if keywords:
+        description += f" Ключевые слова: {render_keyword_list(keywords)}"
+    description, desc_warning = clamp_description(description)
+    if desc_warning:
+        report.warnings.append(desc_warning)
+
     stamp = date or _date.today().isoformat()
     frontmatter = Frontmatter(
         id=slug,
@@ -279,8 +323,13 @@ def rollup(
         mode="live",
         date=stamp,
         display_title=display_title,
-        description=f"Роллап: {len(rolled)} эпизодов свёрнуты в архив.",
+        description=description,
         notes=f"rollup of {len(rolled)} episodes",
+        # The keyword store for the *next* rollup's transitivity (#172) — see
+        # `keywords.rollup_keywords`. Written even when `digest_with_keywords`
+        # above had to drop some from the digest's own 120-word budget: this
+        # field is the lossless copy nothing else has to fit alongside.
+        keywords=tuple(keywords),
     )
     address = f"docs/topics/{slug}.md"
     (root / address).write_text(compose_episode(frontmatter, digest, body), encoding="utf-8")

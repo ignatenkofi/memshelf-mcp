@@ -6,6 +6,7 @@ INDEX line goes away. A rollup that quietly lost an episode — or quietly
 improved the shelf's own numbers — would be worse than the bloat it fixes.
 """
 
+import re
 import subprocess
 
 import pytest
@@ -15,10 +16,20 @@ pytest.importorskip("docshelf_mcp")
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
 from memshelf_mcp.core.archive import ArchiveError, purge, rollup  # noqa: E402
+from memshelf_mcp.core.digest import validate_digest  # noqa: E402
 from memshelf_mcp.core.doctor import check_shelf  # noqa: E402
+from memshelf_mcp.core.episode import MAX_DESCRIPTION_CHARS  # noqa: E402
+from memshelf_mcp.core.frontmatter import parse_frontmatter  # noqa: E402
 from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.recall import recall, search  # noqa: E402
 from memshelf_mcp.core.shelve import shelve  # noqa: E402
+
+
+def _digest_text(markdown: str) -> str:
+    """The '## Digest' section text out of a composed episode file."""
+    match = re.search(r"## Digest\n(.*?)(?:\n## |\Z)", markdown, re.S)
+    return match.group(1).strip() if match else ""
+
 
 DIGEST = (
     "The auth refactor moved token checks into middleware; the decided approach "
@@ -172,6 +183,179 @@ def test_rebuild_stays_idempotent_after_a_rollup(tmp_path):
     root = _shelf_with_three(tmp_path)
     _do_rollup(root, until="2026-06-30")
     assert rebuild(root, check=True).ok is True
+
+
+# --- #172: the rollup carries the absorbed episodes' keywords forward -------
+#
+# Owner decision on PR #172 (M2 dogfood measurement (b), 2026-09-28): an
+# episode two rollup generations deep resolved 0/5 on plain "INDEX → point
+# fetch" navigation, because the rollup's INDEX line said only "N episodes
+# folded in" — no trace of *what*. These tests exercise the fix end to end:
+# keywords in the digest, keywords in the actual rendered INDEX line
+# (`description`, not `digest` — see `keywords.py`'s module docstring for why
+# that distinction matters), and — the part #172 was actually missing —
+# inheritance across a second rollup generation.
+
+
+def _shelve_topic(root, slug, *, title, digest, date):
+    shelve(
+        root,
+        slug=slug,
+        kind="topic",
+        digest=digest,
+        sections={"Decisions": "Recorded."},
+        display_title=title,
+        approx_tokens=100,
+        date=date,
+    )
+
+
+def _keyword_fixture(root):
+    _init(root)
+    _shelve_topic(
+        root,
+        "2026-01-05-keychain",
+        title="Keychain",
+        digest="Keychain secrets rotated.",
+        date="2026-01-05",
+    )
+    _shelve_topic(
+        root,
+        "2026-01-06-vlan",
+        title="VLAN",
+        digest="VLAN contract pinned.",
+        date="2026-01-06",
+    )
+    rebuild(root)
+    return root
+
+
+def test_rollup_carries_absorbed_keywords_into_digest_and_index_line(tmp_path):
+    root = _keyword_fixture(tmp_path / "shelf")
+
+    report = rollup(
+        root,
+        slug="2026-Q1-rollup",
+        digest="Первый квартал свёрнут.",
+        until="2026-01-31",
+        display_title="Роллап Q1",
+        date="2026-02-01",
+    )
+
+    assert "keychain" in report.keywords
+    assert "vlan" in report.keywords
+
+    episode_text = (root / "docs" / "topics" / "2026-Q1-rollup.md").read_text(encoding="utf-8")
+    digest_text = _digest_text(episode_text)
+    assert "keychain" in digest_text
+    assert "vlan" in digest_text
+
+    # The property #172 actually asked for: navigating INDEX alone — not
+    # opening the episode — has to be able to tell what this line hides.
+    index = (root / "INDEX.md").read_text(encoding="utf-8")
+    (line,) = [line for line in index.splitlines() if "Роллап Q1" in line]
+    assert "keychain" in line
+    assert "vlan" in line
+
+
+def test_rollup_digest_and_description_pass_their_own_contracts(tmp_path):
+    root = _keyword_fixture(tmp_path / "shelf")
+
+    rollup(
+        root,
+        slug="2026-Q1-rollup",
+        digest="Первый квартал свёрнут.",
+        until="2026-01-31",
+        display_title="Роллап Q1",
+        date="2026-02-01",
+    )
+
+    episode_text = (root / "docs" / "topics" / "2026-Q1-rollup.md").read_text(encoding="utf-8")
+    fields, _ = parse_frontmatter(episode_text)
+
+    # Not just "small enough" — actually carrying what #172 asked for. A
+    # description that stayed the old fixed boilerplate would pass the two
+    # budget checks below just as trivially as this one does.
+    assert "keychain" in fields["description"]
+    assert "vlan" in fields["description"]
+
+    result = validate_digest(_digest_text(episode_text))
+    assert result.ok, result.report()
+    assert len(fields["description"]) <= MAX_DESCRIPTION_CHARS
+
+    # And the shelf as a whole stays clean — doctor runs the same
+    # `validate_digest` over every episode, this rollup included.
+    report = check_shelf(root).as_dict()
+    assert report["errors"] == 0, report["findings"]
+
+
+def test_rollup_of_a_rollup_inherits_the_first_generations_keywords(tmp_path):
+    """The exact defect #172 reported: two generations deep, the first
+    generation's keywords must not vanish."""
+    root = _keyword_fixture(tmp_path / "shelf")
+
+    first = rollup(
+        root,
+        slug="2026-Q1-rollup",
+        digest="Первый квартал свёрнут.",
+        until="2026-01-31",
+        display_title="Роллап Q1",
+        date="2026-02-01",
+    )
+    assert first.keywords, "fixture regression: generation 1 produced no keywords"
+
+    _shelve_topic(
+        root,
+        "2026-04-01-webhook",
+        title="Webhook",
+        digest="Webhook retried with backoff.",
+        date="2026-04-01",
+    )
+    rebuild(root)
+
+    second = rollup(
+        root,
+        slug="2026-Q2-rollup",
+        digest="Второй квартал свёрнут.",
+        episode_ids=["2026-Q1-rollup", "2026-04-01-webhook"],
+        display_title="Роллап Q2",
+        date="2026-05-01",
+    )
+
+    assert set(first.keywords) & set(second.keywords), (
+        f"no keyword survived generation 1 -> 2: {first.keywords} vs {second.keywords}"
+    )
+    assert "webhook" in second.keywords  # the newly-absorbed episode still counts too
+
+    text = (root / "docs" / "topics" / "2026-Q2-rollup.md").read_text(encoding="utf-8")
+    assert any(term in text for term in first.keywords)
+
+
+def test_rollup_keyword_derivation_is_deterministic(tmp_path):
+    root_a = _keyword_fixture(tmp_path / "a")
+    root_b = _keyword_fixture(tmp_path / "b")
+
+    report_a = rollup(
+        root_a,
+        slug="2026-Q1-rollup",
+        digest="Первый квартал свёрнут.",
+        until="2026-01-31",
+        display_title="Роллап Q1",
+        date="2026-02-01",
+    )
+    report_b = rollup(
+        root_b,
+        slug="2026-Q1-rollup",
+        digest="Первый квартал свёрнут.",
+        until="2026-01-31",
+        display_title="Роллап Q1",
+        date="2026-02-01",
+    )
+
+    assert report_a.keywords == report_b.keywords
+    text_a = (root_a / "docs" / "topics" / "2026-Q1-rollup.md").read_text(encoding="utf-8")
+    text_b = (root_b / "docs" / "topics" / "2026-Q1-rollup.md").read_text(encoding="utf-8")
+    assert text_a == text_b
 
 
 # --- retention --------------------------------------------------------------
