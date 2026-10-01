@@ -173,3 +173,5 @@ No hooks there: paste the block from
 [`CLAUDE-md-snippet.md`](CLAUDE-md-snippet.md) into the project's custom
 instructions and attach the shelf's `INDEX.md`. Shelving is manual
 (user-confirmed) on that surface.
+The flow end to end, for Desktop with the extension and for claude.ai:
+[`docs/chat-projects.md`](../../docs/chat-projects.md).
