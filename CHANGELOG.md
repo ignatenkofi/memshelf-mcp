@@ -125,6 +125,18 @@ once code ships.
 
 ### Fixed
 
+- **`shelve`'s `next` no longer tells a `git-local` shelf to push.** A shelf
+  with git and no remote — the `init` default — was told "episode committed
+  locally, not pushed — push it (see sync.hint)". It has nothing to push to,
+  its `sync.hint` is always empty, and the CLAUDE.md snippet and the shelve
+  skill say the opposite. `next` now names that shelf's step: rebuild, then
+  commit the derived files separately. A bot workflow file alone renders
+  nothing without a remote. On a shelf with a remote, `next` points at
+  `sync.hint` only when the response carries one: no sync, a detached HEAD
+  or an unborn branch leave it empty. Seen in #176.
+- **`fork --no-index` no longer announces the INDEX it leaves out.** The
+  opening line said "the shelf INDEX, then the episodes" with or without the
+  INDEX block. It now names only the blocks that follow. Seen in #176.
 - **`doctor` no longer clears a stopped renderer from a shallow clone.** In a
   `--depth N` clone `git log -- ledger.tsv` answers with the boundary commit,
   so the ledger looked as fresh as the clone itself (measured on this repo's
@@ -217,6 +229,12 @@ once code ships.
   refuses (#108) until they are committed in a terminal. Every `memshelf` and
   `git` command on the page ran verbatim on scratch shelves; the Desktop and
   claude.ai UI steps did not, so the M3 exit criterion stays open.
+- **Every page is in the document tables; ROADMAP marks the walkthrough
+  done.** `docs/index.md` now lists `tools.md`, and the README lists
+  `chat-projects.md`. ROADMAP marks the chat-project scope line done (#176,
+  part of #167; the exit criterion and ARCHITECTURE open question 6 stay
+  open), and ARCHITECTURE points to the page. `chat-projects.md` warns that up
+  to v0.3.0 the `next` field on a `git-local` shelf still says to push.
 
 ## [0.3.0] — 2026-09-10
 

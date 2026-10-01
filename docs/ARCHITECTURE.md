@@ -203,7 +203,8 @@ v1 surfaces, in priority order:
 
 Chat projects (Claude Desktop / web) are a v1-documented but manual surface:
 the project prompt instructs the model to offer shelving at natural
-checkpoints; the user confirms. Same tools, no hooks.
+checkpoints; the user confirms. Same tools, no hooks. The walkthrough is
+[`chat-projects.md`](chat-projects.md).
 
 Session start is the recall bootstrap: a `SessionStart` hook (or the project
 prompt) injects the current `INDEX.md` — the entire standing memory cost.

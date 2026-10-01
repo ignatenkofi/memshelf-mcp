@@ -121,6 +121,7 @@ and field notes: [portability.md](portability.md).
 | Doc | What it covers |
 |---|---|
 | [MANIFEST.md](MANIFEST.md) | Problem, the bet, hero scenarios, principles, non-goals |
+| [tools.md](tools.md) | Tool reference: the long-form description of every `memshelf_*` tool (the MCP schema carries only the short one) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Episode format, digest contract, storage modes, MCP tool surface, privacy, failure modes |
 | [LANDSCAPE.md](LANDSCAPE.md) | Prior-art survey (2026-07), platform built-ins, positioning, risks |
 | [ROADMAP.md](ROADMAP.md) | Milestones M0–M3 with exit criteria |

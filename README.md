@@ -298,6 +298,7 @@ week-report infographic from the dogfood shelf.
 | [`docs/M0.md`](docs/M0.md) | M0 experiment protocol and results: cases, token ledger, recall test |
 | [`docs/demo.md`](docs/demo.md) | Measured numbers from the dogfood shelf: compression, recall test, doctor findings |
 | [`docs/portability.md`](docs/portability.md) | One memory, multiple AIs: the cross-vendor experiment |
+| [`docs/chat-projects.md`](docs/chat-projects.md) | Claude Desktop and claude.ai projects without hooks: setup, recall, shelve, keeping the index current |
 | [`docs/examples/`](docs/examples/) | A worked episode file and a memory-shelf INDEX |
 | [`adapters/claude-code/`](adapters/claude-code/) | Claude Code plugin: `/shelve` skill + SessionStart/SessionEnd/PreCompact hooks |
 | [`adapters/claude-desktop/`](adapters/claude-desktop/) | Claude Desktop `.mcpb` extension: builder, bundle checker, default-shelf setting |

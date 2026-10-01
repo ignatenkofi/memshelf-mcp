@@ -165,7 +165,13 @@ Epic: #167.
   index is usable and is unchanged otherwise; `MEMSHELF_SEMANTIC=off` is the
   kill-switch; `memshelf search-bench` measures. Optional extra
   `memshelf-mcp[semantic]`; no new MCP tool (DECISIONS 2026-09-10).
-- Chat-project surface documented end-to-end (Desktop/web, manual triggers).
+- ~~Chat-project surface documented end-to-end (Desktop/web, manual
+  triggers).~~ — **done** (#176): `docs/chat-projects.md` walks Claude Desktop
+  with the extension and claude.ai without tools — setup, recall, shelve,
+  keeping the index current — and names the remote-shelf trap (a rebuild from
+  the chat makes the next shelve refuse until the derived files are committed
+  in a terminal, #108). The exit criterion below (a non-author run) and
+  ARCHITECTURE open question 6 stay open.
 - Cross-shelf meta-INDEX experiment (federation open question).
 - ~~**Archive-as-raw-material** (MANIFEST hero scenario 3): tag/graph views
   over episodes (frontmatter tags + cross-episode links in Decisions),

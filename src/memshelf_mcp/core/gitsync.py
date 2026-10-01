@@ -141,6 +141,13 @@ def hint_command(root: Path, remote: str, branch: str) -> str:
     return f"git -C {at} pull --rebase {remote} {branch} && git -C {at} push {remote} {branch}"
 
 
+def has_remote(root: Path) -> bool:
+    """Whether the shelf's repository names any remote at all — the line
+    between ``git-local`` (the ``init`` default: the commit is the end of the
+    line, nothing to push to) and a clone that can push."""
+    return bool(_git(root, "remote").stdout.split())
+
+
 def _sync_target(root: Path) -> tuple[tuple[str, str] | None, str | None]:
     """``((remote, branch), None)`` to sync against, or ``(None, why)``.
 
