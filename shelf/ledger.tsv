@@ -3,3 +3,4 @@ date	episode_id	mode	approx_tokens_in	digest_tokens	notes
 2026-09-26	2026-09-26-night-shift-roadmap-epics-docs-to-fact	live	30000	195	approx_tokens — оценка доли смены, относящейся к memshelf-mcp (сабагент полки); не замер токенизатором.
 2026-09-28	2026-09-28-shelve-date-fix-and-m2-measurements	live	0	201	
 2026-10-01	2026-10-01-night-shift-chat-projects-docs-pyjwt-sca	live	50000	175	approx_tokens — оценка доли смены, относящейся к этому репо; не замер токенизатором.
+2026-10-01	2026-10-01-night-shift-git-local-next-hint	live	40000	172	approx_tokens — оценка доли смены по этому репо, не замер токенизатором.

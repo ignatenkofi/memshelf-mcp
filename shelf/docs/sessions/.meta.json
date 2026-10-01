@@ -10,5 +10,9 @@
   "2026-10-01-night-shift-chat-projects-docs-pyjwt-sca.md": {
     "title": "memshelf-mcp: ночная смена 30.09→01.10 — доки chat-project surface (#176), красный SCA от pyjwt и фикс лока (#177)",
     "description": "#176 доковый, SCA красный от pyjwt 2.13.0 в uv.lock main; #177 поднял лок (pyjwt 2.15.1, mcp 2.2.0); оба смержены."
+  },
+  "2026-10-01-night-shift-git-local-next-hint.md": {
+    "title": "memshelf-mcp: ночная смена 01→02.10 — подсказка next на git-local полке и заголовок fork --no-index (#167)",
+    "description": "Draft-PR #179: next больше не велит пушить полку без remote; заголовок fork --no-index; ROADMAP и ссылки доков."
   }
 }
