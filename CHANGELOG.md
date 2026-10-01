@@ -206,6 +206,18 @@ once code ships.
   span surviving a plain amend, and a new dated slug shelved under a faked
   next-day clock — all four fail on the code before this change.
 
+### Documentation
+
+- **Chat projects, end to end (`docs/chat-projects.md`, part of #167).** One
+  page for the surface without hooks — Claude Desktop with the extension and
+  claude.ai without tools: setup once per project, then open with the index,
+  recall, shelve, keep the index current. It names a trap the adapter docs
+  did not: on a shelf whose clone tracks a remote, a `memshelf_rebuild` from
+  the chat leaves the derived files modified, and the next `memshelf_shelve`
+  refuses (#108) until they are committed in a terminal. Every `memshelf` and
+  `git` command on the page ran verbatim on scratch shelves; the Desktop and
+  claude.ai UI steps did not, so the M3 exit criterion stays open.
+
 ## [0.3.0] — 2026-09-10
 
 Cut because **every installed consumer still serves the August code.** The

@@ -128,6 +128,7 @@ and field notes: [portability.md](portability.md).
 | [M0.md](M0.md) | The zero-code experiment: cases, token ledger, recall test |
 | [demo.md](demo.md) | Measured numbers from the dogfood shelf |
 | [portability.md](portability.md) | The cross-vendor experiment |
+| [chat-projects.md](chat-projects.md) | Claude Desktop and claude.ai projects without hooks: setup, recall, shelve, keeping the index current |
 | [examples](https://github.com/ignatenkofi/memshelf-mcp/tree/main/docs/examples) | A worked episode file and a memory-shelf INDEX |
 
 ---
