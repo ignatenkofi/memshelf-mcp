@@ -193,6 +193,16 @@ the renderer has to be judged where it can be observed, on its own job's run.
 On a shelf with no upstream there is no renderer to be fair to, and the
 ledger's own age stays the clock.
 
+The ref the renderer is judged by is the **render branch**, not whatever the
+checkout happens to track (#180). The bot renders one branch — the remote's
+default one, read as `origin/HEAD` when the clone has it, else `origin/main`,
+else `origin/master` — so a clone standing on a PR branch is not told
+`derived-stale` for an episode that sits on `origin/<pr-branch>` only. That
+episode waits for a merge, not for the renderer, and `doctor` says so with the
+warning `upstream-not-rendered`; one that did reach the render branch is judged
+there even from the PR branch, and a local commit on either stays
+`episode-unpushed`.
+
 There was a third way to hold `stale-index` forever, and it is fixed rather
 than documented: docshelf split any episode past 50 KiB into section files
 beside it, `shelve` committed the episode alone, and from then on this working

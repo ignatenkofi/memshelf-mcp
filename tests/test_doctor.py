@@ -919,8 +919,8 @@ DIGEST_FOR_ROLLUP = (
 # --- #154 option 3: the renderer is judged only on what it could see --------
 
 
-def _push_at(root, when: str, *, set_upstream: bool = False):
-    """Push to `origin` as if it happened at `when`, then fetch.
+def _push_at(root, when: str, *, set_upstream: bool = False, branch: str = "main"):
+    """Push `branch` to `origin` as if it happened at `when`, then fetch.
 
     Reflog entries carry the committer date of whoever moved the ref, so
     `GIT_COMMITTER_DATE` is what back-dates an arrival on the upstream ref —
@@ -933,9 +933,9 @@ def _push_at(root, when: str, *, set_upstream: bool = False):
     push = ["git", "-C", str(root), "push", "-q"]
     if set_upstream:
         push.append("-u")
-    subprocess.run([*push, "origin", "main"], check=True, env={**os.environ, **env})
+    subprocess.run([*push, "origin", branch], check=True, env={**os.environ, **env})
     subprocess.run(
-        ["git", "-C", str(root), "fetch", "-q", "origin", "main"],
+        ["git", "-C", str(root), "fetch", "-q", "origin", branch],
         check=True,
         env={**os.environ, **env},
     )
@@ -1127,6 +1127,127 @@ def test_a_clone_that_never_watched_the_arrival_says_so_instead_of_guessing(tmp_
     assert finding.level == "unknown"
     assert report.as_dict()["unknowns"] >= 1
     assert "2026-08-21-unpushed" in finding.detail
+
+
+# --- memshelf-mcp#180: a PR branch is not the render branch ---------------
+
+
+def _on_pr_branch(root, branch: str, when: str):
+    """Move the shelf's HEAD onto a PR branch and push it with `-u`, back-dated.
+
+    The clone then tracks `origin/<branch>` — the shape of a cloud session
+    working on a shelf PR, where the 2026-10-02 false `derived-stale` was
+    measured (main-memshelf#230)."""
+    subprocess.run(["git", "-C", str(root), "checkout", "-qb", branch], check=True)
+    _push_at(root, when, set_upstream=True, branch=branch)
+
+
+def test_an_episode_on_a_pr_branch_waits_for_a_merge_not_for_the_renderer(tmp_path):
+    """memshelf-mcp#180, the fifth false verdict: the episode is on the
+    upstream, the upstream is a PR branch, and the bot renders only `main`.
+    A day on `origin/feature/pr` says nothing about the renderer — it never
+    saw the branch — so the answer is a warning that names both branches,
+    not an error that blames the bot."""
+    _origin, root = _shelf_with_origin_and_old_ledger(
+        tmp_path, episode_committed_at="2026-08-20T19:00:00+00:00"
+    )
+    _on_pr_branch(root, "feature/pr", "2026-08-20T19:30:00+00:00")
+
+    report = check_shelf(root, now=datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc))
+
+    codes = _codes(report)
+    assert "derived-stale" not in codes, report.as_dict()
+    assert "episode-unpushed" not in codes
+    assert "upstream-unknown" not in codes
+    finding = next(f for f in report.findings if f.code == "upstream-not-rendered")
+    assert finding.level == "warning"
+    assert "origin/feature/pr" in finding.detail
+    assert "origin/main" in finding.detail
+    assert "2026-08-21-unpushed" in finding.detail
+    assert "merge" in finding.fix and "#58" in finding.fix
+    assert report.as_dict()["errors"] == 0
+
+
+def test_an_episode_that_reached_the_render_branch_is_judged_there_from_a_pr_branch(tmp_path):
+    """The other half of #180: the clone's upstream is a PR branch, but the
+    episode has ALSO sat on `origin/main` for a day. The renderer had it, so
+    the PR-branch upstream is no excuse — the verdict is the same error the
+    `main` checkout would give, keyed on the render branch."""
+    _origin, root = _shelf_with_origin_and_old_ledger(
+        tmp_path, episode_committed_at="2026-08-20T19:00:00+00:00"
+    )
+    _push_at(root, "2026-08-20T19:30:00+00:00")
+    _on_pr_branch(root, "feature/pr", "2026-08-20T19:40:00+00:00")
+
+    report = check_shelf(root, now=datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc))
+
+    assert "derived-stale" in _codes(report), report.as_dict()
+    assert "upstream-not-rendered" not in _codes(report)
+    finding = next(f for f in report.findings if f.code == "derived-stale")
+    assert finding.level == "error"
+    assert "origin/main carry the oldest of them" in finding.detail
+
+
+def test_a_local_commit_on_a_pr_branch_is_still_unpushed(tmp_path):
+    """A PR branch that exists on origin without the episode's commit is the
+    #154 case, not the #180 one: nobody — neither the bot nor the PR — has
+    the episode, and `episode-unpushed` keeps naming the upstream it is
+    missing from."""
+    _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
+    subprocess.run(["git", "-C", str(root), "checkout", "-qb", "feature/pr"], check=True)
+    # The branch reaches origin without its tip: HEAD~1 is the shelf before
+    # the episode was shelved.
+    subprocess.run(
+        ["git", "-C", str(root), "push", "-q", "origin", "HEAD~1:refs/heads/feature/pr"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin", "feature/pr"], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "branch", "-q", "--set-upstream-to=origin/feature/pr"],
+        check=True,
+    )
+
+    report = check_shelf(root, now=datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc))
+
+    codes = _codes(report)
+    assert "derived-stale" not in codes, report.as_dict()
+    assert "upstream-not-rendered" not in codes
+    finding = next(f for f in report.findings if f.code == "episode-unpushed")
+    assert "origin/feature/pr" in finding.detail
+
+
+def test_render_branch_is_the_remote_head_then_main_then_master_then_unknown(tmp_path):
+    """`_render_branch` reads the remote's default branch without the network:
+    `origin/HEAD` when the clone has one, else the two conventional names by
+    ref presence — an agent session's clone of main-memshelf has
+    `refs/remotes/origin/main` and no `origin/HEAD` at all (measured
+    2026-10-02) — and `None` when it cannot name one, so the caller falls
+    back to `@{u}` rather than guessing."""
+    from memshelf_mcp.core.doctor import _render_branch
+
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "develop", str(origin)], check=True)
+    root = _init(tmp_path / "shelf")
+    subprocess.run(["git", "-C", str(root), "checkout", "-qb", "develop"], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "init shelf"], check=True)
+    subprocess.run(["git", "-C", str(root), "remote", "add", "origin", str(origin)], check=True)
+
+    assert _render_branch(root, "origin") is None, "no remote ref fetched yet"
+
+    _push_at(root, "2026-08-10T09:00:00+00:00", set_upstream=True, branch="develop")
+    assert _render_branch(root, "origin") is None, "develop is not a conventional name"
+
+    _push_at(root, "2026-08-10T09:00:00+00:00", branch="develop:master")
+    subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin"], check=True)
+    assert _render_branch(root, "origin") == "origin/master"
+
+    _push_at(root, "2026-08-10T09:00:00+00:00", branch="develop:main")
+    subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin"], check=True)
+    assert _render_branch(root, "origin") == "origin/main", "main wins over master"
+
+    subprocess.run(["git", "-C", str(root), "remote", "set-head", "origin", "develop"], check=True)
+    assert _render_branch(root, "origin") == "origin/develop", "origin/HEAD wins over both"
 
 
 def test_a_detached_checkout_says_the_renderer_cannot_be_judged(tmp_path):

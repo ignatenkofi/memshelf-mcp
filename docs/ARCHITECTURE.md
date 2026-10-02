@@ -291,6 +291,11 @@ outcome, `renderer-wait-unknown` at the `unknown` level (#125): a fresh clone
 records no reflog for the branch it sets up, so in CI and in ephemeral agent
 sessions the arrival is simply not observable, and a commit date pressed into
 that role reports a nine-hour wait for work pushed five minutes ago.
+The ref all of this is read against is the render branch — the remote's
+default branch (`origin/HEAD`, else `origin/main`, else `origin/master`), the
+one branch the bot renders — and not the checkout's own upstream (#180): on a
+PR branch the upstream carries the episode and the renderer never sees it, so
+that case is the warning `upstream-not-rendered`, not the error.
 
 That reclassification changes how a conflict in those files is resolved.
 Before #58 they were append-only, so a union lost nothing. After it they are a

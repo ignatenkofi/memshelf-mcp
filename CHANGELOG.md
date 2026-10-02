@@ -125,6 +125,30 @@ once code ships.
 
 ### Fixed
 
+- **`doctor` no longer reports a stopped renderer from a PR branch (#180).**
+  The renderer was judged by `@{u}`, but the bot of a shelf renders one
+  branch — main-memshelf's `shelf-derived.yml` is `on: push: branches:
+  [main]`. On a clone tracking `origin/<pr-branch>` the episode was «on the
+  upstream», so after `--derived-stale-hours` the error `derived-stale` («the
+  renderer is not lagging, it is stopped») fired at a bot that never renders
+  that branch; measured 2026-10-02 on main-memshelf#230, where the bot then
+  rendered the merge 33 seconds after it landed. The fifth shape of the false
+  verdict main-memshelf#154 counts, and the literal reading of the shelf's
+  CLAUDE.md fork would have sent the session into a manual `rebuild` on the
+  PR branch — the #58 conflict class after the merge.
+  `doctor` now judges the renderer against the **render branch**: the
+  remote's default branch as the clone knows it (`refs/remotes/origin/HEAD`),
+  else `origin/main`, else `origin/master` by ref presence — an agent
+  session's clone has `origin/main` and no `origin/HEAD` at all — else the
+  upstream itself (the old behaviour, right exactly when the upstream is the
+  render branch). Episodes on the upstream but not on the render branch are
+  a third bucket next to «visible» and «unpushed»: the new warning
+  `upstream-not-rendered` names both branches and says they wait for a merge,
+  not for the renderer; episodes that did reach the render branch are judged
+  there even from a PR-branch checkout, and a local commit on a PR branch is
+  still `episode-unpushed`. Tests cover all four cases and the lookup order.
+  Follow-up on the shelf side: the fork in main-memshelf's CLAUDE.md and
+  step 7a of its `shelve` skill name the branch.
 - **`shelve`'s `next` no longer tells a `git-local` shelf to push.** A shelf
   with git and no remote — the `init` default — was told "episode committed
   locally, not pushed — push it (see sync.hint)". It has nothing to push to,

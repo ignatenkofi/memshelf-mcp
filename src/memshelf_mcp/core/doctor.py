@@ -759,26 +759,97 @@ def _check_derived_freshness(
     ]
 
 
-def _split_by_upstream(root: Path, uncounted: list[str]) -> tuple[list[str], list[str], str | None]:
+def _render_branch(root: Path, remote: str) -> str | None:
+    """The remote branch the render bot actually watches (memshelf-mcp#180).
+
+    The bot of a shelf renders one branch — main-memshelf's
+    ``shelf-derived.yml`` is ``on: push: branches: [main]`` — and that branch
+    is the remote's default one, not whatever ``@{u}`` happens to be. Read
+    without the network, in this order:
+
+    * ``refs/remotes/<remote>/HEAD`` — set by ``git clone``; the remote's
+      default branch as this clone last learned it.
+    * ``<remote>/main``, then ``<remote>/master`` — a checkout that added the
+      remote by hand (``git remote add`` + push), or an agent session's
+      clone, has no ``origin/HEAD`` at all: measured 2026-10-02 on the
+      main-memshelf clone of a cloud session — ``symbolic-ref`` fails while
+      ``refs/remotes/origin/main`` is there. A fixed name is a guess, so the
+      conventional two only; anything else is «unknown».
+
+    ``None`` means the render branch cannot be named from here; the caller
+    then falls back to judging by ``@{u}`` — the pre-#180 behaviour, which
+    is right whenever the upstream IS the render branch and wrong only in
+    the case this function exists to catch.
+    """
+    head = subprocess.run(
+        ["git", "-C", str(root), "symbolic-ref", "-q", f"refs/remotes/{remote}/HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    target = head.stdout.strip()
+    prefix = "refs/remotes/"
+    if head.returncode == 0 and target.startswith(prefix):
+        return target[len(prefix) :]
+    for name in ("main", "master"):
+        probe = subprocess.run(
+            ["git", "-C", str(root), "show-ref", "--verify", "-q", f"refs/remotes/{remote}/{name}"],
+            capture_output=True,
+            text=True,
+        )
+        if probe.returncode == 0:
+            return f"{remote}/{name}"
+    return None
+
+
+def _on_ref(root: Path, ref: str, rel: str) -> bool:
+    seen = subprocess.run(
+        ["git", "-C", str(root), "cat-file", "-e", f"{ref}:{rel}"],
+        capture_output=True,
+        text=True,
+    )
+    return seen.returncode == 0
+
+
+def _split_by_upstream(
+    root: Path, uncounted: list[str]
+) -> tuple[list[str], list[str], list[str], str | None, str | None]:
     """Which uncounted episodes the renderer could even know about (#154 opt. 3).
 
-    The bot renders what it can see — ``origin/<branch>``. An episode that
-    lives only in this checkout (a local commit not yet pushed) is invisible
-    to it *by construction*, so its missing ledger row says nothing about the
+    The bot renders what it can see — the render branch, ``origin/main`` on a
+    shelf with the stock workflow. An episode that lives only in this
+    checkout (a local commit not yet pushed) is invisible to it *by
+    construction*, so its missing ledger row says nothing about the
     renderer's health. main-memshelf#154 counts three consecutive false shelf
     verdicts, all with one shape: the measurement was taken on state the bot
     could not see; the third one (2026-08-21) was ``doctor`` itself calling
     ``derived-stale`` on an unpushed commit.
 
-    Returns ``(visible, local_only, upstream)``. The upstream ref is read as
-    this clone last fetched it — deliberately no fetch here: doctor reads, it
-    does not go to the network — so right after a push the split is only as
-    fresh as the last fetch, and the finding's advice says to fetch. Without
-    an upstream (git-local shelf, plain dir) everything is «visible»: there is
-    no renderer to be fair to, and the old behavior is the right one.
+    The fifth shape (memshelf-mcp#180, 2026-10-02): a clone on a PR branch
+    whose upstream is ``origin/<pr-branch>``. The episode IS on the upstream,
+    the old split called it «visible», and the renderer — which never renders
+    that branch — was reported stopped after ``--derived-stale-hours``. So
+    the renderer is now judged against the render branch (``_render_branch``),
+    and what sits on the upstream but not there is a third bucket: pushed,
+    awaiting merge, no statement about the bot.
+
+    Returns ``(visible, awaiting, local_only, upstream, render)``:
+
+    * ``visible`` — on the render branch: the renderer has had these, judge it;
+    * ``awaiting`` — on the upstream only: wait for the merge, not for the bot;
+    * ``local_only`` — on neither: not pushed yet;
+    * ``upstream`` — ``@{u}`` as this clone last fetched it, ``None`` without one;
+    * ``render`` — the branch the renderer is judged by; equals ``upstream``
+      when the render branch cannot be named or is the upstream itself.
+
+    The refs are read as this clone last fetched them — deliberately no
+    fetch here: doctor reads, it does not go to the network — so right after
+    a push the split is only as fresh as the last fetch, and the finding's
+    advice says to fetch. Without an upstream (git-local shelf, plain dir)
+    everything is «visible»: there is no renderer to be fair to, and the old
+    behavior is the right one.
     """
     if not uncounted or not (root / ".git").exists():
-        return uncounted, [], None
+        return uncounted, [], [], None, None
     proc = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
         capture_output=True,
@@ -786,17 +857,49 @@ def _split_by_upstream(root: Path, uncounted: list[str]) -> tuple[list[str], lis
     )
     upstream = proc.stdout.strip()
     if proc.returncode != 0 or not upstream:
-        return uncounted, [], None
+        return uncounted, [], [], None, None
+    remote = upstream.split("/", 1)[0]
+    render = _render_branch(root, remote) or upstream
     visible: list[str] = []
+    awaiting: list[str] = []
     local_only: list[str] = []
     for rel in uncounted:
-        seen = subprocess.run(
-            ["git", "-C", str(root), "cat-file", "-e", f"{upstream}:{rel}"],
-            capture_output=True,
-            text=True,
+        if _on_ref(root, render, rel):
+            visible.append(rel)
+        elif render != upstream and _on_ref(root, upstream, rel):
+            awaiting.append(rel)
+        else:
+            local_only.append(rel)
+    return visible, awaiting, local_only, upstream, render
+
+
+def _check_awaiting_merge(awaiting: list[str], upstream: str, render: str) -> list[Finding]:
+    """Episodes pushed to a branch the renderer never renders (memshelf-mcp#180).
+
+    Warning, not error: a PR branch is the normal place for a shelved episode
+    to sit between push and merge, and the bot of main-memshelf renders only
+    ``main`` (``shelf-derived.yml``: ``on: push: branches: [main]``). Measured
+    2026-10-02 on ``feature/amazing-hamilton-56pa3m`` (main-memshelf#230):
+    ``derived-stale`` after 10h on the PR branch, then the bot rendered the
+    merge 33 seconds after it landed. The literal reading of the shelf's
+    CLAUDE.md fork would have sent that session into a manual ``rebuild`` on
+    the PR branch — the #58 conflict class after the merge.
+    """
+    if not awaiting:
+        return []
+    return [
+        Finding(
+            "warning",
+            "upstream-not-rendered",
+            "ledger.tsv",
+            f"{len(awaiting)} episode(s) are on {upstream} but not on {render}, the branch "
+            f"the render bot watches — they wait for a merge, not for the renderer, and "
+            f"their missing ledger rows say nothing about its health: "
+            f"{_episode_list(awaiting)}",
+            f"merge the branch into {render.split('/', 1)[-1]} and let the bot render it "
+            f"there; do not rebuild derived files by hand on the branch (#58)",
         )
-        (visible if seen.returncode == 0 else local_only).append(rel)
-    return visible, local_only, upstream
+    ]
 
 
 def _check_upstream_unknown(
@@ -1299,11 +1402,14 @@ def check_shelf(
             )
 
     # #154 — the renderer is judged only on what it could see: episodes not on
-    # the upstream ref are named separately, not blamed on the bot.
-    visible, local_only, upstream = _split_by_upstream(root, uncounted)
+    # the render branch are named separately, not blamed on the bot — unpushed
+    # ones and, since #180, ones pushed to a branch the bot never renders.
+    visible, awaiting, local_only, upstream, render = _split_by_upstream(root, uncounted)
     findings.extend(
-        _check_derived_freshness(root, visible, now or _utc_now(), stale_after_hours, upstream)
+        _check_derived_freshness(root, visible, now or _utc_now(), stale_after_hours, render)
     )
+    if upstream is not None and render is not None:
+        findings.extend(_check_awaiting_merge(awaiting, upstream, render))
     findings.extend(_check_unpushed_episodes(local_only, upstream))
     findings.extend(_check_upstream_unknown(root, uncounted, upstream))
     findings.extend(_check_local_splits(root))
