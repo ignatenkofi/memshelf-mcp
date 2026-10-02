@@ -10,6 +10,23 @@ once code ships.
 
 ### Added
 
+- **`stats` читает provenance (#113, R-shelf-01 аудита).** Эпизод с
+  `approx_tokens_source: unmeasured` — это 0-заглушка, а не измеренная
+  нулевая масса: он выходит из `compression_ratio` с обеих сторон (его
+  дайджест — цена без известной массы), считается в новых полях
+  `unmeasured_episodes` / `unmeasured_digest_tokens` и называется в баннере
+  (`· N unmeasured`). `standing_cost` его дайджест сохраняет — он платится
+  каждую сессию. Легаси-эпизод без поля — оценка, не «без замера». Реестр
+  остаётся шестиколоночным: поле читается из frontmatter эпизодов в `docs/`
+  и `archive/docs/`.
+- README: таблица инструментов называет `freshness` и `sync`; тест
+  `test_readme_table_names_every_cli_subcommand` держит её полной.
+
+### Changed
+
+- `_human()` живёт в одном экземпляре (`core/stats.py`, с `abs()` для
+  знаковых дельт advisor'а); `core/advisor.py` импортирует его.
+
 - **Роллап несёт ключевые слова поглощённого — в digest и в саму строку
   INDEX (#172, #166; продолжение замера (b) от 2026-09-28, `docs/demo.md`).**
   Раньше `description` роллапа была фиксированной строкой-счётчиком («N

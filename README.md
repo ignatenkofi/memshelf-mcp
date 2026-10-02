@@ -125,6 +125,8 @@ One verb per job; the same names over MCP (`memshelf_*`) and in the CLI
 | `purge` | Drop episodes past `retain_until`, then reindex — dry run by default |
 | `resolve` | Settle multi-writer conflicts: regenerate derived, union the recall log |
 | `doctor` | Diagnose: episode schema, digest contract at rest, secret shapes, index bloat |
+| `freshness` | CLI only — which installed consumer (pipx, Desktop extension) answers calls, and what is merged but unreleased (#125) |
+| `sync` | CLI only — fetch and fast-forward the shelf clone to its remote (#157) |
 | `prune-splits` | CLI only — remove H2 split directories git never got (migration for #109) |
 | `tags` | CLI only — episodes grouped by frontmatter tag (#18) |
 | `graph` | CLI only — who mentions whom: cross-episode id references as JSON or Mermaid (#18) |

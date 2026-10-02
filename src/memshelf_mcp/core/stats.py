@@ -24,6 +24,8 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from memshelf_mcp.core.frontmatter import parse_frontmatter
+
 CHARS_PER_TOKEN = 4
 
 #: Upper bound applied to one episode's claimed mass before anything is summed.
@@ -59,6 +61,15 @@ class Stats:
     episodes_recalled: int  # distinct episodes actually fetched back
     fetched_tokens: int  # Σ tokens pulled by those recalls
     realized_savings: int  # Σ (episode's freed mass − fetched) over recalls
+    #: Episodes whose frontmatter says ``approx_tokens_source: unmeasured``
+    #: (#113): their ledger mass is a placeholder 0, not a measurement, so they
+    #: sit outside ``compression_ratio`` on both sides — and are counted here
+    #: so the omission is visible rather than silent. Default 0 keeps every
+    #: pre-field caller of ``Stats(...)`` working.
+    unmeasured_episodes: int = 0
+    #: Σ digest tokens of those episodes: still part of ``standing_cost`` (the
+    #: digest is really paid every session) but not of the ratio's denominator.
+    unmeasured_digest_tokens: int = 0
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -123,6 +134,8 @@ def banner(stats: Stats) -> str:
         f"memshelf: {stats.episodes} episodes · standing {_human(stats.standing_cost)} tok "
         f"· holds ~{_human(stats.shelved_mass)} est. ({stats.compression_ratio}:1)"
     )
+    if stats.unmeasured_episodes:
+        line += f" · {stats.unmeasured_episodes} unmeasured"
     if stats.capped_episodes:
         line += (
             f" · {stats.capped_episodes} episode(s) clipped to a "
@@ -134,14 +147,44 @@ def banner(stats: Stats) -> str:
 
 
 def _human(n: int) -> str:
-    if n >= 1_000_000:
+    """``1M`` / ``2.4M`` / ``12K`` / ``999``. The one copy; advisor imports it.
+
+    ``abs()`` so the advisor's signed deltas format like everything else — the
+    two modules used to carry a copy each, differing only in that.
+    """
+    if abs(n) >= 1_000_000:
         # Strip on the number, not after the suffix: ``"1.00M".rstrip("0")``
         # ends on "M" and strips nothing, so the trailing-zero trim was dead
         # code and every megatoken figure read "1.00M".
         return f"{n / 1_000_000:.2f}".rstrip("0").rstrip(".") + "M"
-    if n >= 1_000:
+    if abs(n) >= 1_000:
         return f"{round(n / 1_000)}K"
     return str(n)
+
+
+def unmeasured_episode_ids(shelf_root: str | Path) -> set[str]:
+    """Ids of episodes whose frontmatter says ``approx_tokens_source: unmeasured``.
+
+    The ledger keeps its six columns (shelf-spec v0 § 4.4), so provenance is
+    read where it lives — the episode's frontmatter — over ``docs/`` and the
+    rollup sub-shelf ``archive/docs/`` (an archived episode is still in the
+    ledger). A legacy episode without the field is *not* unmeasured: absence
+    means "written before the field existed", and its number is treated as
+    the estimate it always was.
+    """
+    root = Path(shelf_root).expanduser().resolve()
+    ids: set[str] = set()
+    for docs in (root / "docs", root / "archive" / "docs"):
+        if not docs.is_dir():
+            continue
+        for path in docs.glob("*/*.md"):
+            try:
+                fields, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                continue
+            if fields.get("approx_tokens_source") == "unmeasured":
+                ids.add(fields.get("id") or path.stem)
+    return ids
 
 
 def episode_mass(
@@ -180,10 +223,20 @@ def compute_stats(shelf_root: str | Path, *, context_window: int | None = None) 
             continue
         latest[cols[1]] = (mass, digest)
 
-    work_volume = sum(m for m, _ in latest.values())
-    shelved_mass = sum(min(m, window) for m, _ in latest.values())
-    capped_episodes = sum(1 for m, _ in latest.values() if m > window)
+    # Provenance (#113): an unmeasured episode's 0 is a placeholder. It must
+    # not pose as a measured mass of zero, and its digest is a cost of no
+    # known mass — so it leaves the ratio on both sides and is counted
+    # instead. ``standing_cost`` keeps it: that cost is paid regardless.
+    unmeasured = unmeasured_episode_ids(root) & latest.keys()
+    measured = {eid: md for eid, md in latest.items() if eid not in unmeasured}
+
+    work_volume = sum(m for m, _ in measured.values())
+    shelved_mass = sum(min(m, window) for m, _ in measured.values())
+    capped_episodes = sum(1 for m, _ in measured.values() if m > window)
     digest_tokens = sum(d for _, d in latest.values())
+    unmeasured_digest_tokens = sum(d for _, d in latest.values()) - sum(
+        d for _, d in measured.values()
+    )
 
     index_path = root / "INDEX.md"
     index_tokens = (
@@ -192,7 +245,8 @@ def compute_stats(shelf_root: str | Path, *, context_window: int | None = None) 
         else 0
     )
     standing_cost = index_tokens + digest_tokens
-    compression = round(shelved_mass / standing_cost, 1) if standing_cost else 0.0
+    ratio_cost = standing_cost - unmeasured_digest_tokens
+    compression = round(shelved_mass / ratio_cost, 1) if ratio_cost else 0.0
 
     # Realized economy: each logged recall fetched `fetched` tokens where the
     # baseline — carrying / re-deriving that episode — was its freed mass, i.e.
@@ -227,4 +281,6 @@ def compute_stats(shelf_root: str | Path, *, context_window: int | None = None) 
         episodes_recalled=len(recalled_ids),
         fetched_tokens=fetched_tokens,
         realized_savings=realized,
+        unmeasured_episodes=len(unmeasured),
+        unmeasured_digest_tokens=unmeasured_digest_tokens,
     )
