@@ -25,7 +25,7 @@ from memshelf_mcp.core.archive import purge as purge_shelf
 from memshelf_mcp.core.archive import rollup as rollup_shelf
 from memshelf_mcp.core.digest import validate_digest
 from memshelf_mcp.core.doctor import DERIVED_STALE_AFTER_HOURS, check_shelf
-from memshelf_mcp.core.gitsync import SyncReport, preflight
+from memshelf_mcp.core.gitsync import SyncReport, has_remote, preflight
 from memshelf_mcp.core.importer import discover as import_discover
 from memshelf_mcp.core.importer import extract as import_extract
 from memshelf_mcp.core.init import init_shelf
@@ -329,7 +329,8 @@ def _derived_next_step(root: Path, result) -> str:
     without one the answer is *rebuild in a separate commit*. Bot detection is
     the pattern's documented location — ``.github/workflows/shelf-derived.yml``
     — so a shelf with a differently-named bot gets the soft wording, not a
-    wrong command.
+    wrong command. A ``git-local`` shelf (git, no remote) has neither a push
+    nor a bot run, so there the answer is the rebuild, workflow file or not.
     """
     bot = (root / ".github" / "workflows" / "shelf-derived.yml").is_file()
     if result.sync is not None and result.sync.published_branch:
@@ -364,13 +365,25 @@ def _derived_next_step(root: Path, result) -> str:
             "(skip that if another bot renders this shelf)"
         )
     if result.committed:
+        if not has_remote(root):
+            # git-local: no remote, so no push and no bot run — a workflow file
+            # alone renders nothing. The old wording sent the caller to push
+            # and to a sync.hint this shelf never gets (seen in #176).
+            return (
+                "episode committed — a git-local shelf has no remote, so there is "
+                "nothing to push; run `memshelf rebuild` and commit the derived "
+                "files separately"
+            )
         tail = (
             "the shelf bot renders derived files after the push"
             if bot
             else "then run `memshelf rebuild` in a separate commit "
             "(skip the rebuild if a bot renders this shelf)"
         )
-        return f"episode committed locally, not pushed — push it (see sync.hint); {tail}"
+        # Point at sync.hint only when the response carries one: no sync, a
+        # detached HEAD or an unborn branch leave it empty.
+        see = " (see sync.hint)" if result.sync is not None and result.sync.hint else ""
+        return f"episode committed locally, not pushed — push it{see}; {tail}"
     return (
         "episode written, not committed (autocommit off) — commit it, and "
         "render derived files with `memshelf rebuild` or the shelf bot"

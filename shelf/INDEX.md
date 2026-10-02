@@ -8,6 +8,7 @@ Agent memory shelf (memshelf). Recall rule: check this index before answering an
 
 ## Sessions
 
+- **memshelf-mcp: ночная смена 01→02.10 — подсказка next на git-local полке и заголовок fork --no-index (#167)** — Draft-PR #179: next больше не велит пушить полку без remote; заголовок fork --no-index; ROADMAP и ссылки доков. — `2026-10-01-night-shift-git-local-next-hint.md`
 - **memshelf-mcp: ночная смена 26→27.09 — эпики вех #164–#167, ROADMAP к факту (PR #168), #158 к закрытию владельцем** — Эпики вех #164–#167 по ROADMAP, draft-PR #168 привёл ROADMAP к факту, #158 закрывает владелец; doctor: PyPI vs клон. — `2026-09-26-night-shift-roadmap-epics-docs-to-fact.md`
 - **memshelf-mcp: ночная смена 30.09→01.10 — доки chat-project surface (#176), красный SCA от pyjwt и фикс лока (#177)** — #176 доковый, SCA красный от pyjwt 2.13.0 в uv.lock main; #177 поднял лок (pyjwt 2.15.1, mcp 2.2.0); оба смержены. — `2026-10-01-night-shift-chat-projects-docs-pyjwt-sca.md`
 - **memshelf-mcp: ночная смена по всем открытым issue (#17, #18, #87, #115, #142)** — Пять issue закрыты пятью PR; сайдкар model2vec + RRF поднял hit@5 с 0.03 до 0.53; конфликты — merge, не rebase. — `2026-09-10-memshelf-issue-sweep-17-18-87-115-142.md`

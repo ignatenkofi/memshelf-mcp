@@ -157,6 +157,10 @@ reports `stale-index` meanwhile. Who renders depends on the shelf:
 | remote, no bot | push the episode, `memshelf_rebuild`, then commit and push the derived files in a terminal |
 | remote, [shelf bot](https://github.com/ignatenkofi/memshelf-mcp/blob/main/adapters/shelf-repo/README.md) | push the episode; the bot renders on `main`. Do not rebuild by hand — a hand-committed render collides with the bot's (#58) |
 
+Up to v0.3.0 the `next` field on a `git-local` shelf still says to push and
+points at a `sync.hint` that is empty there. There is nothing to push; the
+table row is the step.
+
 On Path B the rebuild is the CLI verb, `memshelf rebuild --shelf
 ~/shelves/pricing`. The commit in a terminal:
 

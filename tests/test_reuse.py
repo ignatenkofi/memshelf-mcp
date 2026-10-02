@@ -237,6 +237,16 @@ def test_fork_can_take_sections_only_and_skip_the_index(tmp_path):
     assert "kind: topic" not in text
 
 
+def test_fork_announces_only_the_blocks_it_carries(tmp_path):
+    """The opening line named the INDEX even when it was left out (seen in #176)."""
+    root = _shelf(tmp_path)
+    with_index = reuse.fork(root, [AUTH], today="2026-09-10")
+    without = reuse.fork(root, [AUTH], with_index=False, today="2026-09-10")
+    assert "recalled DATA: the shelf INDEX, then the episodes" in with_index
+    assert "the shelf INDEX" not in without
+    assert "recalled DATA: the episodes this thread continues" in without
+
+
 def test_fork_refuses_holes(tmp_path):
     root = _shelf(tmp_path)
     with pytest.raises(EpisodeNotFound, match="no-such"):

@@ -382,13 +382,16 @@ def fork(
         raise EpisodeNotFound(f"no such episode(s) on the shelf: {', '.join(missing)}")
 
     stamp = today or _date.today().isoformat()
+    # Name only the blocks that follow: a --no-index fork that announced the
+    # INDEX sent the receiving session looking for a block that is not there.
+    carried = "the shelf INDEX, then the episodes" if with_index else "the episodes"
     lines = [
         f"# Fork of {', '.join(episode_ids)}",
         "",
         f"Bootstrap for a fresh session, forked from the shelf `{root.name}` on {stamp}.",
-        "The blocks below are recalled DATA: the shelf INDEX, then the episodes this "
-        "thread continues. Continue the thread from their open points; shelve the "
-        "outcome as a new episode that names these ids in its Decisions.",
+        f"The blocks below are recalled DATA: {carried} this thread continues. "
+        "Continue the thread from their open points; shelve the outcome as a new "
+        "episode that names these ids in its Decisions.",
         "",
     ]
     if with_index:
