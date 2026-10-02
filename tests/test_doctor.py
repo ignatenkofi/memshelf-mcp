@@ -1222,31 +1222,47 @@ def test_render_branch_is_the_remote_head_then_main_then_master_then_unknown(tmp
     ref presence — an agent session's clone of main-memshelf has
     `refs/remotes/origin/main` and no `origin/HEAD` at all (measured
     2026-10-02) — and `None` when it cannot name one, so the caller falls
-    back to `@{u}` rather than guessing."""
+    back to `@{u}` rather than guessing.
+
+    git ≥ 2.48 creates `origin/HEAD` by itself on a full `git fetch origin`
+    (`remote.origin.followRemoteHEAD` defaults to `create`); the hosted runner's
+    git 2.55 did, the sandbox's older git did not, and the first version of
+    this test read `origin/develop` where it expected the fallback. So every
+    full fetch here is followed by `git remote set-head origin -d`: the
+    fallback is asserted on a clone that has NO `origin/HEAD`, whatever the
+    git version, and the last step sets it explicitly."""
     from memshelf_mcp.core.doctor import _render_branch
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(root), *args], check=True)
+
+    def fetch_without_head() -> None:
+        git("fetch", "-q", "origin")
+        subprocess.run(["git", "-C", str(root), "remote", "set-head", "origin", "-d"], check=False)
 
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "develop", str(origin)], check=True)
     root = _init(tmp_path / "shelf")
-    subprocess.run(["git", "-C", str(root), "checkout", "-qb", "develop"], check=True)
-    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
-    subprocess.run(["git", "-C", str(root), "commit", "-qm", "init shelf"], check=True)
-    subprocess.run(["git", "-C", str(root), "remote", "add", "origin", str(origin)], check=True)
+    git("checkout", "-qb", "develop")
+    git("add", "-A")
+    git("commit", "-qm", "init shelf")
+    git("remote", "add", "origin", str(origin))
 
     assert _render_branch(root, "origin") is None, "no remote ref fetched yet"
 
-    _push_at(root, "2026-08-10T09:00:00+00:00", set_upstream=True, branch="develop")
+    git("push", "-q", "-u", "origin", "develop")
+    fetch_without_head()
     assert _render_branch(root, "origin") is None, "develop is not a conventional name"
 
-    _push_at(root, "2026-08-10T09:00:00+00:00", branch="develop:master")
-    subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin"], check=True)
+    git("push", "-q", "origin", "develop:master")
+    fetch_without_head()
     assert _render_branch(root, "origin") == "origin/master"
 
-    _push_at(root, "2026-08-10T09:00:00+00:00", branch="develop:main")
-    subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin"], check=True)
+    git("push", "-q", "origin", "develop:main")
+    fetch_without_head()
     assert _render_branch(root, "origin") == "origin/main", "main wins over master"
 
-    subprocess.run(["git", "-C", str(root), "remote", "set-head", "origin", "develop"], check=True)
+    git("remote", "set-head", "origin", "develop")
     assert _render_branch(root, "origin") == "origin/develop", "origin/HEAD wins over both"
 
 
