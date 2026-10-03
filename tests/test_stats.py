@@ -3,7 +3,7 @@ import subprocess
 import pytest
 
 from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
-from memshelf_mcp.core.stats import compute_stats
+from memshelf_mcp.core.stats import banner, compute_stats
 
 _HEADER = "date\tepisode_id\tmode\tapprox_tokens_in\tdigest_tokens\tnotes\n"
 
@@ -227,6 +227,65 @@ def test_stats_tool_explains_the_clip(tmp_path, monkeypatch):
     assert "capped_note" not in clean
 
 
+_FM = "---\nid: {id}\nkind: topic\napprox_tokens: {mass}\napprox_tokens_source: {src}\n---\n## Digest\n\nd\n"
+
+
+def _write_episode(root, episode_id, mass, source, *, archived=False):
+    base = root / ("archive/docs/topics" if archived else "docs/topics")
+    base.mkdir(parents=True, exist_ok=True)
+    (base / f"{episode_id}.md").write_text(
+        _FM.format(id=episode_id, mass=mass, src=source), encoding="utf-8"
+    )
+
+
+def test_unmeasured_episode_sits_outside_the_ratio_and_is_counted(tmp_path):
+    """#113 provenance: ``unmeasured`` is a placeholder 0, not a mass of zero.
+
+    Three episodes — estimate, measured, unmeasured. The ratio is over the two
+    with a number on both sides: the unmeasured digest leaves the denominator
+    too, while ``standing_cost`` keeps it (that cost is paid every session).
+    """
+    _write_shelf(
+        tmp_path,
+        "2026-07-22\tep-est\tlive\t10000\t200\t\n"
+        "2026-07-22\tep-mes\tlive\t30000\t100\t\n"
+        "2026-07-22\tep-unm\tlive\t0\t300\t\n",
+        index="x" * 800,  # 200 index tokens
+    )
+    _write_episode(tmp_path, "ep-est", 10000, "estimate")
+    _write_episode(tmp_path, "ep-mes", 30000, "measured")
+    _write_episode(tmp_path, "ep-unm", 0, "unmeasured")
+    s = compute_stats(tmp_path)
+    assert s.episodes == 3
+    assert s.unmeasured_episodes == 1
+    assert s.unmeasured_digest_tokens == 300
+    assert s.standing_cost == 200 + 200 + 100 + 300  # the digest is still paid
+    assert s.shelved_mass == 40000
+    assert s.compression_ratio == 40000 / (200 + 200 + 100)  # 80.0 — over two
+    assert "1 unmeasured" in banner(s)
+
+
+def test_legacy_episode_without_the_field_is_not_unmeasured(tmp_path):
+    _write_shelf(tmp_path, "2026-07-22\tep-old\tlive\t10000\t200\t\n")
+    (tmp_path / "docs/topics").mkdir(parents=True)
+    (tmp_path / "docs/topics/ep-old.md").write_text(
+        "---\nid: ep-old\nkind: topic\napprox_tokens: 10000\n---\n## Digest\n\nd\n",
+        encoding="utf-8",
+    )
+    s = compute_stats(tmp_path)
+    assert s.unmeasured_episodes == 0
+    assert s.shelved_mass == 10000
+    assert "unmeasured" not in banner(s)
+
+
+def test_archived_unmeasured_episode_is_still_counted(tmp_path):
+    _write_shelf(tmp_path, "2026-07-22\tep-arc\tlive\t0\t50\t\n")
+    _write_episode(tmp_path, "ep-arc", 0, "unmeasured", archived=True)
+    s = compute_stats(tmp_path)
+    assert s.unmeasured_episodes == 1
+    assert s.compression_ratio == 0.0  # nothing measured — no ratio, not a division error
+
+
 def test_human_trims_trailing_zeros_in_megatokens():
     """``"1.00M".rstrip("0")`` ends on "M" and strips nothing — the trim was dead."""
     from memshelf_mcp.core.advisor import _human as advisor_human
@@ -237,6 +296,7 @@ def test_human_trims_trailing_zeros_in_megatokens():
     assert _human(26_310_000) == "26.31M"
     assert _human(1_000) == "1K"
     assert _human(999) == "999"
-    # the same formatter lives in advisor.py; it had the same dead trim
-    assert advisor_human(1_000_000) == "1M"
-    assert advisor_human(2_400_000) == "2.4M"
+    # advisor.py used to carry a copy with the same dead trim; it is the same
+    # function now, and signed deltas format like everything else
+    assert advisor_human is _human
+    assert _human(-2_400_000) == "-2.4M"

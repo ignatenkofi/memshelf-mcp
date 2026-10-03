@@ -367,3 +367,21 @@ def test_cli_help_into_a_closed_pipe_exits_quietly():
     assert "Traceback" not in proc.stderr
     assert "BrokenPipeError" not in proc.stderr
     assert proc.returncode == 1
+
+
+def test_readme_table_names_every_cli_subcommand():
+    """README's tool table is the only list of verbs a reader sees; a subparser
+    missing from it is a feature nobody finds (``sync`` and ``freshness`` were
+    absent for weeks). MCP spellings use ``_``, the CLI ``-``: either counts.
+    """
+    import re
+    from pathlib import Path
+
+    from memshelf_mcp.cli import build_parser
+
+    sub = next(a for a in build_parser()._actions if a.dest == "command")
+    names = set(sub.choices)
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    table = re.findall(r"^\| `([a-z_-]+)` \|", readme, flags=re.M)
+    listed = {n.replace("_", "-") for n in table}
+    assert names <= listed, sorted(names - listed)

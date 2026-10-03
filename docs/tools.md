@@ -134,6 +134,15 @@ to match your client instead of the 200K default. That default errs small on
 purpose: understating a saving is the safer error for a number whose whole job
 is to claim one.
 
+Provenance is read, not just stored (#113). An episode whose frontmatter says
+`approx_tokens_source: unmeasured` carries a placeholder 0, not a mass of
+zero: it leaves `compression_ratio` on both sides (its digest is a cost of no
+known mass) and is counted in `unmeasured_episodes` / `unmeasured_digest_tokens`
+and named in the banner (`· N unmeasured`). `standing_cost` keeps that digest —
+it is paid every session regardless. A legacy episode without the field is an
+estimate, not unmeasured. The ledger stays six columns (shelf-spec v0 § 4.4);
+the field is read from the episodes under `docs/` and `archive/docs/`.
+
 ## `memshelf_advise`
 
 Report what your context is made of and what you could put down (#14).

@@ -46,7 +46,7 @@ from memshelf_mcp.core.doctor import (
     index_entries,
 )
 from memshelf_mcp.core.rebuild import collect_episodes
-from memshelf_mcp.core.stats import CHARS_PER_TOKEN
+from memshelf_mcp.core.stats import CHARS_PER_TOKEN, _human
 
 __all__ = [
     "DEFAULT_BUDGET_TOKENS",
@@ -196,17 +196,6 @@ class Advice:
             "notes": self.notes,
             "summary": self.summary,
         }
-
-
-def _human(n: int) -> str:
-    if abs(n) >= 1_000_000:
-        # Strip on the number, not after the suffix: ``"1.00M".rstrip("0")``
-        # ends on "M" and strips nothing, so the trailing-zero trim was dead
-        # code and every megatoken figure read "1.00M".
-        return f"{n / 1_000_000:.2f}".rstrip("0").rstrip(".") + "M"
-    if abs(n) >= 1_000:
-        return f"{round(n / 1_000)}K"
-    return str(n)
 
 
 def _index_tokens(root: Path) -> int:

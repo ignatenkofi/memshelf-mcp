@@ -125,6 +125,8 @@ One verb per job; the same names over MCP (`memshelf_*`) and in the CLI
 | `purge` | Drop episodes past `retain_until`, then reindex — dry run by default |
 | `resolve` | Settle multi-writer conflicts: regenerate derived, union the recall log |
 | `doctor` | Diagnose: episode schema, digest contract at rest, secret shapes, index bloat |
+| `freshness` | CLI only — which installed consumer (pipx, Desktop extension) answers calls, and what is merged but unreleased (#125) |
+| `sync` | CLI only — fetch and fast-forward the shelf clone to its remote (#157) |
 | `prune-splits` | CLI only — remove H2 split directories git never got (migration for #109) |
 | `tags` | CLI only — episodes grouped by frontmatter tag (#18) |
 | `graph` | CLI only — who mentions whom: cross-episode id references as JSON or Mermaid (#18) |
@@ -192,6 +194,16 @@ from there, «stopped» and «handed the work a minute ago» look the same, and
 the renderer has to be judged where it can be observed, on its own job's run.
 On a shelf with no upstream there is no renderer to be fair to, and the
 ledger's own age stays the clock.
+
+The ref the renderer is judged by is the **render branch**, not whatever the
+checkout happens to track (#180). The bot renders one branch — the remote's
+default one, read as `origin/HEAD` when the clone has it, else `origin/main`,
+else `origin/master` — so a clone standing on a PR branch is not told
+`derived-stale` for an episode that sits on `origin/<pr-branch>` only. That
+episode waits for a merge, not for the renderer, and `doctor` says so with the
+warning `upstream-not-rendered`; one that did reach the render branch is judged
+there even from the PR branch, and a local commit on either stays
+`episode-unpushed`.
 
 There was a third way to hold `stale-index` forever, and it is fixed rather
 than documented: docshelf split any episode past 50 KiB into section files
