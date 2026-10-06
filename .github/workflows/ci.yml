@@ -71,3 +71,45 @@ jobs:
         run: python3 adapters/claude-desktop/build.py --variant standalone --target linux-x86_64 --out dist
       - name: Start it and talk MCP to it
         run: python3 adapters/claude-desktop/try_bundle.py dist/*-linux-x86_64.mcpb
+
+  pii-self-verify:
+    # The tool redacts other people's episodes (shelf/POLICY.md, the redaction
+    # pass in `shelve`) and must obey the no-real-PII policy itself: verify
+    # the repository's own tree with pii-mcp. The baseline accepts the
+    # synthetic findings by fingerprint — git identities the tests configure,
+    # the author field, the bot identity in the shelf-repo adapter — and
+    # anything else fails the job. Same shape as the "Self-verify" step in
+    # pii-mcp's own ci.yml.
+    #
+    # pii-mcp is a private repository and this one is public, so the install
+    # needs a read token: repository secret PII_MCP_READ_TOKEN (fine-grained,
+    # Contents: read on ignatenkofi/pii-mcp). Without it the job fails loudly
+    # instead of reading green — the same rule as the import line in `test`.
+    # Fork PRs carry no secrets, so the job does not run for them at all.
+    name: pii self-verify (the tree obeys its own no-PII policy)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install pii-mcp (pinned commit)
+        env:
+          PII_MCP_READ_TOKEN: ${{ secrets.PII_MCP_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PII_MCP_READ_TOKEN}" ]; then
+            echo "::error::PII_MCP_READ_TOKEN is not set — pii-mcp is a private repository and the self-verify cannot install it. Add a fine-grained token (Contents: read on ignatenkofi/pii-mcp) as a repository secret."
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${PII_MCP_READ_TOKEN}@github.com/".insteadOf "https://github.com/"
+          python -m pip install --upgrade pip
+          # A commit, not tip main (class #125: a guard that calls the head of
+          # someone else's main changes meaning from run to run). Bump it in a
+          # PR of its own, whose run shows the new rules against this tree.
+          pip install --quiet "pii-mcp @ git+https://github.com/ignatenkofi/pii-mcp@45c31612e4bf000a0ab6ea22bea3999753fc2a1b"
+      - name: Self-verify (the tool's policy, applied to this tree)
+        # Built-in categories only — no pattern packs here, so the
+        # named-category warning on stderr is expected.
+        run: pii-mcp verify . --baseline tests/pii-baseline.json --format json
