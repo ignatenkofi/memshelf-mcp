@@ -1,0 +1,137 @@
+{
+  "version": 2,
+  "entries": [
+    {
+      "fingerprint": "084ef93b955445ac6e8445e743ad7990a83355d6418cf44a3954b75b89d8d7d1",
+      "note": "adapters/claude-code/.claude-plugin/plugin.json: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "e6dc0fbb0efac69622a111c0481f43bc655223264defed89cb6228cac816f8af",
+      "note": "adapters/claude-desktop/build.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "b5790d477f7a1ebe31b6d33250c6100cd7bbc83627e50adb90a4280b1bee76f7",
+      "note": "adapters/shelf-repo/workflows/shelf-derived.yml: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "30521b6145c6c696177765edb323a59fafe586c23af9c06e3afc94bd4a0ab606",
+      "note": "pyproject.toml: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "879c7a263b292db650f1b341d415876fddd5a41c60ebc5c53d33b78899238cef",
+      "note": "tests/test_advisor.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "6396ad338f43dcd5ebab47e57296d0d29c297e15de73e2a4658986e002996cf6",
+      "note": "tests/test_archive.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "1fc6d171d853186b8aceb5d2ecd28a62b27fe3900d0f907b980c8d666cfa25a1",
+      "note": "tests/test_chart.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "28bee7e2534444c4d50ee3e19f4d762676398cf986ace9ca6dd9a0265b257f45",
+      "note": "tests/test_cli.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "38f9c6ec77f021ad13dc0ba20da11dc1cfd395e14532c74420bdb1796160514c",
+      "note": "tests/test_cli.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "ea5b513691ab948fe57366bbde4c6e1a6553462ca1ea4138c8057706158c986b",
+      "note": "tests/test_doctor.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "3baa8fc53452372f9f2864a6d20150025e5387b1d0ea131a71056519f1b82056",
+      "note": "tests/test_doctor.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "6bd4ded5c2a3323803d6f4d61a725e023a768fcbec609993108d3f0387c1e286",
+      "note": "tests/test_gitsync.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "652bfe7f56202a8389e8c0ad02548e07a2ac1754c80e96177ca777337d74aef7",
+      "note": "tests/test_gitsync.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "6bd4ded5c2a3323803d6f4d61a725e023a768fcbec609993108d3f0387c1e286",
+      "note": "tests/test_gitsync.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "98c6f32bddf869db95e997c1efd5c23674d7c6e2fc6ccbc14e683c0edc581c04",
+      "note": "tests/test_gitsync.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "652bfe7f56202a8389e8c0ad02548e07a2ac1754c80e96177ca777337d74aef7",
+      "note": "tests/test_gitsync.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "797f54373d5d826fa2a7d9386841b419f9f5f52cb5a01f22e6572060fbe89e2a",
+      "note": "tests/test_hooks.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "7e851ca6973beabebafdb4ff20258732b60e879ffc031fb48027fef025b0d91c",
+      "note": "tests/test_hooks.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "085f15c8d035bddc5d9c6b600951905512fccfbb44eb6e0ee49b599bcdfab640",
+      "note": "tests/test_init.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "eaf0619d990cad2bd0e9d41795ebeb482fd83f81eeb821352e16e2840ff8105d",
+      "note": "tests/test_init.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "3dba19e2d4d37c0e4e790327dc8b7983ea839c34bbb287ced530d8e5ff5d80b0",
+      "note": "tests/test_init.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "ca7442c2e40947a7b9ee5592e415347d142743b8db8b64c476f9198d3a6f8283",
+      "note": "tests/test_rebuild.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "01c7008cd52a45d065432040627c2a98360c0d7208d921efb891584ea13324b8",
+      "note": "tests/test_recall.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "c45ce20b4f2675113fab3419923230d55c60ca431273f170e80a42806b133fc8",
+      "note": "tests/test_redact.py: token (builtin/token-bearer-006)"
+    },
+    {
+      "fingerprint": "a634b04f6220de784f9724d4f35d37aa8a8444fd9efb636b608e77aadd01e54f",
+      "note": "tests/test_remote.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "a1af18fe6a16e1c9945a795b821cd29ade971f98134291f5043b0649d9061897",
+      "note": "tests/test_remote.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "afccf0cd716dce7b862387f6cfb7231181972e409eeb1640ddb7c2908f8e8384",
+      "note": "tests/test_resolve.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "1962c11414a042def3f6d4352e4ae8dad950d5cccc05c24a9fea5e86cdfdc141",
+      "note": "tests/test_reuse.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "a379fe668701f0d661e5581621063af1927a666ce9ed90b8f2d03721720f1086",
+      "note": "tests/test_semantic.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "5590388b9b78a706ef91bf980e76d642f91d101c82d468b91293e8669111b3af",
+      "note": "tests/test_shelve.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "a158a3c22464c1b09fa540fd72a28f94d42a56c28fd3e0250e287b1858601a1e",
+      "note": "tests/test_shelve_report.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "61a0785416230e2b7eef7646638fec3fcc23e0fba3ad11d33e6c5c6bc72fbff2",
+      "note": "tests/test_splits.py: email (builtin/email-001)"
+    },
+    {
+      "fingerprint": "be42ae44c5b79cb40764bf3f19a93943be95b36ed928bcff73212927386046dd",
+      "note": "tests/test_stats.py: email (builtin/email-001)"
+    }
+  ]
+}

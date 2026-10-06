@@ -6,7 +6,11 @@ profile: memory
 docs_root: docs
 categories:
   - topics
-  - research
+  # `research` не объявлена, пока на полке нет ни одного эпизода этого вида:
+  # shelf-spec даёт info `empty-category` на объявленную категорию без
+  # документов, и пустой каталог этого не снимает. Первый эпизод
+  # `--kind research` — вернуть строку сюда и в `category_order`
+  # `.docshelf.json` (каталог без объявления — error `category-undeclared`).
   - sessions
 index:
   path: INDEX.md

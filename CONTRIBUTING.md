@@ -49,6 +49,14 @@ then the proposed solution.
    install `pytest` reads green having tested nothing. CI runs the same at
    both ends of the supported Python range, and also builds and starts the
    desktop bundle ([`adapters/claude-desktop/`](adapters/claude-desktop/)).
+
+   CI also runs `pii-mcp verify . --baseline tests/pii-baseline.json`
+   (job `pii-self-verify`): the tree obeys the same no-real-PII policy the
+   tool enforces on shelves. A new synthetic identity in a test or fixture
+   is a new baseline entry (fingerprint from the report, a note saying
+   where and why) — never a real one. `pii-mcp` is a private repository;
+   install it from a checkout (`pip install -e ../pii-mcp`) to run this
+   locally.
 5. Update `CHANGELOG.md` under `[Unreleased]` and, if you changed a design
    decision, `docs/DECISIONS.md`.
 6. Open the PR. Reference the issue it addresses, if any.

@@ -8,8 +8,19 @@ once code ships.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-06
+
 ### Added
 
+- **Самопроверка PII репозитория: `tests/pii-baseline.json` и джоба
+  `pii-self-verify` в `ci.yml`.** Инструмент, который гонит redaction по
+  чужим эпизодам, обязан сам соблюдать no-real-PII: `pii-mcp verify .` по
+  дереву с baseline принятых синтетических находок (git-identity, которые
+  настраивают тесты, поле author, идентичность бота в адаптере shelf-repo)
+  по отпечатку; всё остальное роняет джобу — по образцу шага «Self-verify»
+  в ci.yml самого pii-mcp. pii-mcp — приватный репозиторий: джобе нужен
+  секрет `PII_MCP_READ_TOKEN`, без него она падает с внятной ошибкой, а не
+  читается зелёной; PR из форков её не запускают.
 - **`stats` читает provenance (#113, R-shelf-01 аудита).** Эпизод с
   `approx_tokens_source: unmeasured` — это 0-заглушка, а не измеренная
   нулевая масса: он выходит из `compression_ratio` с обеих сторон (его
@@ -24,6 +35,19 @@ once code ships.
 
 ### Changed
 
+- **Шаблоны адаптера shelf-repo ставят memshelf-mcp по тегу релиза
+  (`@v0.3.0`), не tip `main`.** Класс дефекта #125: гард, который зовёт
+  голову чужого `main`, меняет смысл от прогона к прогону — смена поведения
+  `doctor`/`rebuild` приезжала в бота полки без PR. Потребители пинуют уже
+  давно (main-memshelf — `@v0.3.0`, pii-mcp — PyPI `==0.3.0`), отставали
+  сами шаблоны. Тег равен `__version__` и `server.json` (гейт
+  `release.yml`), так что обе формы — один код. Порядок подъёма пина —
+  README адаптера, «Как поднять пин».
+- Полка проекта (`shelf/shelf.yml`, `.docshelf.json`) не объявляет
+  категорию `research`, пока на ней нет ни одного такого эпизода:
+  `shelf-spec validate` давал info `empty-category`, и пустой каталог его
+  не снимает. Первый эпизод `--kind research` возвращает строку в обе
+  конфигурации (каталог без объявления — error `category-undeclared`).
 - `_human()` живёт в одном экземпляре (`core/stats.py`, с `abs()` для
   знаковых дельт advisor'а); `core/advisor.py` импортирует его.
 
@@ -1486,7 +1510,8 @@ success, and leaves an artifact it would itself call broken.
 - Token accounting (`ledger.tsv`) is built into the core loop.
 - Repository made public 2026-07-13; the dogfood shelf stays private.
 
-[Unreleased]: https://github.com/ignatenkofi/memshelf-mcp/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ignatenkofi/memshelf-mcp/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ignatenkofi/memshelf-mcp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ignatenkofi/memshelf-mcp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ignatenkofi/memshelf-mcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ignatenkofi/memshelf-mcp/releases/tag/v0.1.0
