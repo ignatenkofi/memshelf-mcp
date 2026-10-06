@@ -54,6 +54,15 @@ as an error carrying the exact fixes — nothing is written. Returns the episode
 address, redaction report, and any digest warnings. `amend=true` rewrites an
 existing episode in place under the same slug.
 
+`push` sends HEAD to the branch's upstream — and only to an upstream of the
+same name. `git checkout -B claude/x origin/main`, how agent sessions start,
+makes `origin/main` the upstream of `claude/x`; from such a branch the push is
+refused before anything is pushed or rebased, because the way from there to
+`main` is a PR. The episode stays committed locally, and the error gives the
+two ways out: `git -C <shelf> push -u origin HEAD` (publish the branch, then
+a PR) or `publish` (a new `shelve/<slug>` branch). Without `push`, `sync.hint`
+on such a branch is that same `push -u` command.
+
 After a `push` to a shelf with the render bot (`shelf-derived.yml`), shelve
 waits for the bot's commit and fast-forwards onto it (#157): without that the
 clone ends every shelve one bot commit behind, and the next doctor reports

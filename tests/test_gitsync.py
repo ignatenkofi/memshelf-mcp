@@ -814,3 +814,219 @@ def test_sync_refuses_a_dirty_tree_with_the_same_words_as_shelve(tmp_path):
 
     with pytest.raises(DirtyShelfError, match="tracked.txt"):
         run_sync(SyncInput(shelf_path=str(work)))
+
+
+# --- a session branch tracking another branch: push HEAD, or refuse --------
+#
+# `git checkout -B claude/x origin/main` is how agent sessions and night shifts
+# start, and it makes origin/main the upstream of claude/x. The push used to be
+# `git push origin main` — the *local* main, whatever it held: «Everything
+# up-to-date» reported as pushed, stale local commits sent to main, or a
+# rejection whose retry rebased the session branch. The way from a session
+# branch to main is a PR, so the push is refused before anything moves.
+
+
+def _session_branch(work, branch="claude/x"):
+    _must(work, "checkout", "-q", "-B", branch, "origin/main")
+    upstream = _must(work, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    assert upstream.stdout.strip() == "origin/main", "fixture assumes autoSetupMerge"
+    return branch
+
+
+def _commit_episode(work, name="episode.md"):
+    (work / "docs" / "topics" / name).write_text("episode\n", encoding="utf-8")
+    _must(work, "add", "-A")
+    _must(work, "commit", "-q", "-m", f"shelve: {name}")
+    return _must(work, "rev-parse", "HEAD").stdout.strip()
+
+
+def _origin_refs(origin):
+    return _must(origin, "for-each-ref", "--format=%(refname) %(objectname)").stdout.split("\n")
+
+
+def test_a_session_branch_tracking_main_is_refused_not_reported_pushed(tmp_path):
+    """Local main == origin/main: the old push said «Everything up-to-date»,
+    the report said pushed, and the episode never left the clone."""
+    origin, work = _shelf_with_origin(tmp_path)
+    branch = _session_branch(work)
+    head = _commit_episode(work)
+    refs_before = _origin_refs(origin)
+
+    report = SyncReport()
+    with pytest.raises(PushRejectedError) as exc:
+        push_with_retry(work, report)
+
+    assert report.push_requested and not report.pushed and report.final_sha is None
+    assert _origin_refs(origin) == refs_before  # nothing moved on origin
+    assert _must(work, "rev-parse", "HEAD").stdout.strip() == head  # the commit stays
+    message = str(exc.value)
+    assert f"'{branch}'" in message and "origin/main" in message
+    assert "not pushed" in message
+    assert f"git -C {work} push -u origin HEAD" in message
+    assert "--publish" in message
+
+
+def test_a_stale_local_main_is_not_pushed_from_a_session_branch(tmp_path):
+    """Local main ahead of origin/main: the old push sent *its* commits to
+    main and reported success; the episode stayed behind."""
+    origin, work = _shelf_with_origin(tmp_path)
+    (work / "stale.txt").write_text("old work on local main\n", encoding="utf-8")
+    _must(work, "add", "-A")
+    _must(work, "commit", "-q", "-m", "stale local main commit")
+    stale = _must(work, "rev-parse", "HEAD").stdout.strip()
+    before = _origin_head(origin)
+    _session_branch(work)
+    _commit_episode(work)
+
+    with pytest.raises(PushRejectedError, match="nothing pushed or rebased"):
+        push_with_retry(work, SyncReport())
+
+    assert _origin_head(origin) == before
+    assert _git(origin, "cat-file", "-e", stale).returncode != 0  # never reached origin
+
+
+def test_a_session_branch_is_never_rebased_by_the_push_retry(tmp_path):
+    """Local main behind origin/main: the old first push was rejected, the
+    retry rebased the session branch onto origin/main, and the second push
+    was rejected again — history rewritten for nothing."""
+    origin, work = _shelf_with_origin(tmp_path)
+    _session_branch(work)
+    head = _commit_episode(work)
+    bot = _advance_origin(tmp_path, origin)
+
+    report = SyncReport()
+    with pytest.raises(PushRejectedError, match="nothing pushed or rebased"):
+        push_with_retry(work, report)
+
+    assert _must(work, "rev-parse", "HEAD").stdout.strip() == head
+    assert report.push_retries == 0 and report.commits_pulled == 0
+    assert _origin_head(origin) == bot
+
+
+def test_a_branch_with_its_own_upstream_still_pushes(tmp_path):
+    """The control: a session branch published with `push -u` tracks itself,
+    and the episode lands there — main is untouched."""
+    origin, work = _shelf_with_origin(tmp_path)
+    _must(work, "checkout", "-qb", "claude/x")
+    _must(work, "push", "-q", "-u", "origin", "claude/x")
+    main_before = _origin_head(origin)
+    _commit_episode(work)
+
+    report = SyncReport()
+    push_with_retry(work, report)
+
+    assert report.pushed and (report.remote, report.branch) == ("origin", "claude/x")
+    assert report.final_sha == _must(origin, "rev-parse", "claude/x").stdout.strip()
+    assert _origin_head(origin) == main_before
+
+
+def test_the_push_names_the_commit_not_a_short_name(tmp_path):
+    """The refspec is HEAD:refs/heads/<branch>: a tag that shares the
+    branch's name made the bare `git push origin main` ambiguous."""
+    origin, work = _shelf_with_origin(tmp_path)
+    _must(work, "tag", "main")
+    _commit_episode(work)
+
+    report = SyncReport()
+    push_with_retry(work, report)
+
+    assert report.pushed and report.push_retries == 0
+    assert report.final_sha == _origin_head(origin)
+
+
+def test_a_detached_head_is_not_pushed_onto_the_target_branch(tmp_path):
+    """A report that already names a target does not make a detached HEAD a
+    branch: the old push sent the local main and called it done."""
+    origin, work = _shelf_with_origin(tmp_path)
+    _must(work, "checkout", "-q", "--detach")
+    _commit_episode(work)
+    before = _origin_head(origin)
+
+    report = SyncReport(remote="origin", branch="main")
+    with pytest.raises(PushRejectedError, match="HEAD is detached"):
+        push_with_retry(work, report)
+
+    assert not report.pushed and _origin_head(origin) == before
+
+
+def test_the_hint_on_a_session_branch_publishes_it_under_its_own_name(tmp_path):
+    """The catch-up handed back after a commit without push: from a session
+    branch it is `push -u origin HEAD` — and it works as printed."""
+    origin, work = _shelf_with_origin(tmp_path)
+    branch = _session_branch(work)
+    main_before = _origin_head(origin)
+
+    result = shelve(
+        work,
+        slug="2026-10-06-session-hint",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections=SECTIONS,
+        date="2026-10-06",
+    )
+
+    assert result.committed and not result.sync.pushed
+    assert result.sync.hint == f"git -C {work} push -u origin HEAD"
+    subprocess.run(result.sync.hint, shell=True, check=True, capture_output=True)
+    on_branch = _must(origin, "ls-tree", "-r", "--name-only", branch).stdout
+    assert "docs/topics/2026-10-06-session-hint.md" in on_branch
+    assert _origin_head(origin) == main_before
+
+
+def test_a_diverged_session_branch_is_told_to_publish_not_to_push_main(tmp_path):
+    origin, work = _shelf_with_origin(tmp_path)
+    _session_branch(work)
+    _commit_episode(work, name="earlier.md")
+    _advance_origin(tmp_path, origin)  # both sides moved
+
+    with pytest.raises(SyncDivergedError) as exc:
+        preflight(work)
+
+    message = str(exc.value)
+    assert "'claude/x' tracks origin/main" in message and "under its own name" in message
+    assert f"git -C {work} push -u origin HEAD" in message
+    assert "push origin main" not in message
+
+
+def test_shelve_push_from_a_session_branch_fails_loudly_and_never_waits(
+    tmp_path, capsys, monkeypatch
+):
+    """End to end through the CLI: exit 1, the reason and the fix on stderr,
+    the episode committed locally — and no wait for a render of nothing."""
+    from memshelf_mcp.cli import main
+    from memshelf_mcp.core import shelve as shelve_module
+
+    origin, work = _shelf_with_origin(tmp_path)
+    _session_branch(work)
+    refs_before = _origin_refs(origin)
+    monkeypatch.setattr(
+        shelve_module, "await_render", lambda *a, **k: pytest.fail("render awaited")
+    )
+
+    rc = main(
+        [
+            "shelve",
+            "--shelf",
+            str(work),
+            "--slug",
+            "2026-10-06-session-push",
+            "--kind",
+            "topic",
+            "--digest",
+            GOOD_DIGEST,
+            "--section",
+            f"Decisions={SECTIONS['Decisions']}",
+            "--date",
+            "2026-10-06",
+            "--push",
+            "--await-render",
+            "60",
+        ]
+    )
+
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "not pushed" in err and f"git -C {work} push -u origin HEAD" in err
+    assert _origin_refs(origin) == refs_before
+    subject = _must(work, "log", "-1", "--format=%s").stdout.strip()
+    assert subject == "shelve: 2026-10-06-session-push"

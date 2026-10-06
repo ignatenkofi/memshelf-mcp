@@ -621,7 +621,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--push",
         action="store_true",
         help="Push after the commit; on a rejection, rebase and retry exactly once "
-        "(#108). The report then names the post-push sha.",
+        "(#108). The report then names the post-push sha. Refused on a branch whose "
+        "upstream has another name (claude/x tracking origin/main): there, "
+        "git push -u origin HEAD or --publish.",
     )
     sh.add_argument(
         "--publish",

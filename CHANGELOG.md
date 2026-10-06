@@ -8,6 +8,32 @@ once code ships.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`shelve --push` pushes HEAD, and refuses on a branch whose upstream has
+  another name.** The push was `git push <remote> <upstream-branch>`, a bare
+  refspec, so git sent the *local* branch of that name rather than the commit
+  just made. `git checkout -B claude/x origin/main` — how agent sessions and
+  night shifts start — makes `origin/main` the upstream of `claude/x`.
+  Measured from there on 2026-10-06 against a bare origin, with 0.3.0 and
+  again on `main` before this fix: with local `main` equal to `origin/main`,
+  git answered «Everything up-to-date» and the report said `pushed` while the
+  episode never left the clone. With local `main` ahead, its stale commits
+  went to `main`. With it behind, the push was rejected, the retry rebased the
+  session branch, and the second push was rejected again. With no local `main`
+  at all, it failed on `src refspec main does not match any`. The push is now
+  `HEAD:refs/heads/<branch>`. On a branch named differently from its upstream
+  it is refused before anything is pushed or rebased, as git's own
+  `push.default=simple` would refuse it, because the way from a session branch
+  to `main` is a PR. The `PushRejectedError` (exit 1) names the branch and the
+  upstream, says the episode is committed locally and not pushed, and gives
+  `git -C <shelf> push -u <remote> HEAD` or `--publish`; `--await-render` is
+  never reached after a refusal. From such a branch, `sync.hint` and
+  preflight's diverged messages now print the same `push -u <remote> HEAD`
+  instead of `git push <remote> main`. A branch that tracks its own name
+  (`main` → `origin/main`, `claude/x` → `origin/claude/x`) pushes and retries
+  exactly as before.
+
 ## [0.4.0] — 2026-10-06
 
 ### Added
