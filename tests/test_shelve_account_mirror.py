@@ -23,8 +23,15 @@ CHECK = ADAPTERS / "claude-code" / "check-shelve-copies.sh"
 # the doctor pitfall now read `sync.render_pulled`. Until the owner saves that
 # text as the account skill, the live-copy comparison below is red on hosts
 # that materialise the old one — which is the alarm working, not a flake.
-ACCOUNT_SHA256 = "b3a0ad1c49f8900516305661d0cc60016bbf6375cc35e6564eb02713d78fbcc0"
-ACCOUNT_BYTES = 15293
+#
+# Both numbers describe the text with trailing newlines stripped (#182): the
+# account-skill store on claude.ai drops the newline at the end of the file
+# when it materialises the copy, so a mirror that ends like an ordinary
+# repository file — with `\n` — can never match the live copy byte for byte,
+# and a byte-for-byte alarm would stay red for good. The comparison therefore
+# runs on `_normalized()` on both sides; the mirror itself keeps its newline.
+ACCOUNT_SHA256 = "2deba0ad939c9d74abea564b612d0ab3f9b3269dfeee9752b4309edc492367fb"
+ACCOUNT_BYTES = 15291
 
 # Where the account copy is materialised. Claude Desktop uses the
 # `anthropic-skills` plugin bundle, two UUID levels deep; agent containers join
@@ -36,8 +43,13 @@ LIVE_GLOBS = (
 )
 
 
+def _normalized(path: Path) -> bytes:
+    """The file as the account-skill store keeps it: without trailing newlines."""
+    return path.read_bytes().rstrip(b"\n")
+
+
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(_normalized(path)).hexdigest()
 
 
 def _live_copies() -> list[Path]:
@@ -47,8 +59,15 @@ def _live_copies() -> list[Path]:
 
 def test_the_mirror_is_the_measured_account_copy():
     assert MIRROR.exists(), f"the source of record is gone: {MIRROR}"
-    assert MIRROR.stat().st_size == ACCOUNT_BYTES
+    assert len(_normalized(MIRROR)) == ACCOUNT_BYTES
     assert _sha256(MIRROR) == ACCOUNT_SHA256
+
+
+def test_the_mirror_ends_like_a_repository_file():
+    """The store strips the final newline; the mirror does not follow it there.
+    Editors, `.editorconfig` and linters all put the newline back, so a mirror
+    saved without one would drift on the next touch (#182, option 2 rejected)."""
+    assert MIRROR.read_bytes().endswith(b"\n")
 
 
 def test_the_mirror_is_not_installable():
