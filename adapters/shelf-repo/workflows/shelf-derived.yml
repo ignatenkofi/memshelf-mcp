@@ -35,8 +35,15 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Пин по тегу релиза, не tip main (класс дефекта #125: гард, который
+      # зовёт голову чужого main, меняет смысл от прогона к прогону — смена
+      # поведения doctor/rebuild приезжала в бота полки без PR). Тег равен
+      # `__version__` и `server.json` (гейт release.yml), так что `@vX.Y.Z` и
+      # PyPI `memshelf-mcp==X.Y.Z` — один и тот же код. Поднимать пин
+      # отдельным PR полки, в чьём прогоне новое поведение и видно
+      # (README адаптера, «Как поднять пин»).
       - name: Установить memshelf
-        run: pip install --quiet "memshelf-mcp @ git+https://github.com/ignatenkofi/memshelf-mcp"
+        run: pip install --quiet "memshelf-mcp @ git+https://github.com/ignatenkofi/memshelf-mcp@v0.3.0"
 
       - name: Пересобрать производные файлы из эпизодов
         run: memshelf rebuild --shelf .
