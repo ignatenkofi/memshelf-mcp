@@ -827,9 +827,11 @@ def test_sync_refuses_a_dirty_tree_with_the_same_words_as_shelve(tmp_path):
 
 
 def _session_branch(work, branch="claude/x"):
-    _must(work, "checkout", "-q", "-B", branch, "origin/main")
+    # --track spells out what branch.autoSetupMerge (default true) does, so the
+    # fixture holds under any local git config.
+    _must(work, "checkout", "-q", "--track", "-B", branch, "origin/main")
     upstream = _must(work, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-    assert upstream.stdout.strip() == "origin/main", "fixture assumes autoSetupMerge"
+    assert upstream.stdout.strip() == "origin/main"
     return branch
 
 
@@ -932,6 +934,51 @@ def test_the_push_names_the_commit_not_a_short_name(tmp_path):
 
     assert report.pushed and report.push_retries == 0
     assert report.final_sha == _origin_head(origin)
+
+
+def _no_upstream_and_a_same_named_tag(tmp_path):
+    """`main` pushed to origin but tracking nothing, and a tag also named
+    `main`: there `git rev-parse --abbrev-ref HEAD` says `heads/main`."""
+    origin, work = _shelf_with_origin(tmp_path)
+    _must(work, "branch", "--unset-upstream")
+    _must(work, "tag", "main")
+    assert _must(work, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "heads/main"
+    return origin, work
+
+
+def test_without_an_upstream_a_same_named_tag_still_pushes_to_the_branch(tmp_path):
+    """The fallback target took `heads/main` from `--abbrev-ref`, and the push
+    guard then read `main` as a branch tracking another name and refused."""
+    origin, work = _no_upstream_and_a_same_named_tag(tmp_path)
+
+    result = shelve(
+        work,
+        slug="2026-10-06-tag-no-upstream",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections=SECTIONS,
+        push=True,
+        await_render_s=0,
+    )
+
+    sync = result.sync
+    assert (sync.remote, sync.branch) == ("origin", "main")
+    assert sync.pushed and sync.final_sha == _origin_head(origin)
+    on_main = _must(origin, "ls-tree", "-r", "--name-only", "main").stdout
+    assert "docs/topics/2026-10-06-tag-no-upstream.md" in on_main
+
+
+def test_without_an_upstream_a_same_named_tag_still_syncs_before_writing(tmp_path):
+    """Same clone, origin one bot commit ahead: preflight used to look for a
+    remote `heads/main`, skip the sync and write onto the stale base."""
+    origin, work = _no_upstream_and_a_same_named_tag(tmp_path)
+    bot = _advance_origin(tmp_path, origin)
+
+    report = preflight(work)
+
+    assert report.skipped_reason is None and report.performed
+    assert report.commits_pulled == 1
+    assert _must(work, "rev-parse", "HEAD").stdout.strip() == bot
 
 
 def test_a_detached_head_is_not_pushed_onto_the_target_branch(tmp_path):

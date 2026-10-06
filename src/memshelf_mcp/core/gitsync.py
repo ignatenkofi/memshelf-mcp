@@ -74,8 +74,10 @@ class SyncDivergedError(RuntimeError):
 
 
 class PushRejectedError(RuntimeError):
-    """The push failed even after the one rebase-and-retry — git's own words
-    are carried verbatim, because the second refusal is where guessing stops."""
+    """The push did not happen: refused before it started (no remote, a
+    detached HEAD, a branch whose upstream has another name), or failed even
+    after the one rebase-and-retry — then git's own words are carried
+    verbatim, because the second refusal is where guessing stops."""
 
 
 @dataclass
@@ -214,9 +216,10 @@ def _sync_target(root: Path) -> tuple[tuple[str, str] | None, str | None]:
     remotes = [r for r in _git(root, "remote").stdout.split() if r]
     if not remotes:
         return None, "no remote configured (git-local shelf)"
-    head = _git(root, "rev-parse", "--abbrev-ref", "HEAD")
-    branch = head.stdout.strip()
-    if head.returncode != 0 or branch == "HEAD":
+    # The name from _head_branch, as the push guard reads it: `--abbrev-ref
+    # HEAD` says `heads/main` once a tag is also named `main`.
+    branch = _head_branch(root)
+    if branch is None or _git(root, "rev-parse", "--verify", "--quiet", "HEAD").returncode != 0:
         return None, "detached HEAD or unborn branch — nothing to sync onto"
     remote = "origin" if "origin" in remotes else remotes[0]
     return (remote, branch), None
@@ -422,8 +425,8 @@ def push_with_retry(root: Path, report: SyncReport) -> None:
             f"name. The episode is committed on {head!r}, not pushed. Publish the "
             "branch under its own name, then open a PR:\n  "
             + hint_command(root, report.remote, report.branch)
-            + "\nor shelve on such a branch with --publish (a new shelve/<slug> "
-            "branch) instead of --push."
+            + "\nNext time on such a branch, shelve with --publish (a new "
+            "shelve/<slug> branch) instead of --push."
         )
 
     refspec = f"HEAD:refs/heads/{report.branch}"

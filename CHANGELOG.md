@@ -27,12 +27,15 @@ once code ships.
   `push.default=simple` would refuse it, because the way from a session branch
   to `main` is a PR. The `PushRejectedError` (exit 1) names the branch and the
   upstream, says the episode is committed locally and not pushed, and gives
-  `git -C <shelf> push -u <remote> HEAD` or `--publish`; `--await-render` is
-  never reached after a refusal. From such a branch, `sync.hint` and
-  preflight's diverged messages now print the same `push -u <remote> HEAD`
-  instead of `git push <remote> main`. A branch that tracks its own name
-  (`main` → `origin/main`, `claude/x` → `origin/claude/x`) pushes and retries
-  exactly as before.
+  `git -C <shelf> push -u <remote> HEAD` (and `--publish` for the next shelve
+  from such a branch); `--await-render` is never reached after a refusal. From
+  such a branch, `sync.hint` and preflight's diverged messages now print the
+  same `push -u <remote> HEAD` instead of `git push <remote> main`. A branch
+  that tracks its own name (`main` → `origin/main`, `claude/x` →
+  `origin/claude/x`) pushes and retries exactly as before. A branch with no
+  upstream at all is now read by its full ref too: with a tag of the same name,
+  `--abbrev-ref HEAD` gave `heads/main`, and preflight skipped the sync
+  because the remote had no `heads/main`.
 
 ## [0.4.0] — 2026-10-06
 
