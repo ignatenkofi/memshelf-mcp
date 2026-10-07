@@ -31,6 +31,7 @@ from memshelf_mcp.core.shelve import (
     AmendTargetMissing,
     DigestContractError,
     EpisodeExists,
+    EpisodePathBlocked,
     SlugContractError,
 )
 from memshelf_mcp.core.stats import CONTEXT_WINDOW_ENV, DEFAULT_CONTEXT_WINDOW
@@ -143,6 +144,7 @@ def _cmd_shelve(args: argparse.Namespace) -> int:
         EpisodeError,
         AmendTargetMissing,
         EpisodeExists,
+        EpisodePathBlocked,
         DirtyShelfError,
         SyncDivergedError,
         PushRejectedError,

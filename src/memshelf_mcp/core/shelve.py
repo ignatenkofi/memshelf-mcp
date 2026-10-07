@@ -143,6 +143,20 @@ class EpisodeExists(FileExistsError):
     """
 
 
+class EpisodePathBlocked(FileExistsError):
+    """Raised when docshelf refuses the write because a path is in its way.
+
+    The case behind it is ``docs/<category>/<slug>/``, a directory named like
+    the episode that is not a split docshelf wrote. Since docshelf-mcp#115
+    (merged after 0.5.0) ``add_document`` refuses to write beside one with
+    ``SplitDirConflictError``, a :class:`FileExistsError`. It is raised before
+    anything is written and whatever ``overwrite`` says, so ``--amend`` does
+    not clear it. Uncaught, it ended ``shelve`` in a traceback whose advice
+    names docshelf's own kwargs (``title``, ``overwrite=True``). This one names
+    what the caller can do: move the directory aside (#186).
+    """
+
+
 @dataclass
 class ShelveResult:
     address: str  # episode path relative to the shelf root
@@ -689,6 +703,28 @@ def shelve(
                 "and the digest contract re-run; only the episode file is "
                 "rewritten, derived files come from `memshelf rebuild` or the "
                 f"shelf bot.\n{exc}"
+            ) from exc
+        except FileExistsError as exc:
+            # docshelf refused a path in the write's way: after 0.5.0, a
+            # directory named like the episode that it did not write as
+            # sections (SplitDirConflictError, docshelf-mcp#115). Caught by the
+            # base class, because 0.5.0 has no such name to import. docshelf
+            # refuses before it writes anything, and a refused shelve leaves
+            # the shelf as it found it, so a kind change moved above goes back.
+            if moved_from is not None:
+                episode_path.rename(root / moved_from)
+            in_the_way = episode_path.parent / doc_stem
+            what = (
+                f"{in_the_way.relative_to(root).as_posix()}/ is a directory that "
+                "docshelf did not write as split sections, and docshelf will not "
+                "add a document beside it"
+                if in_the_way.is_dir()
+                else "docshelf refused a path in the write's way"
+            )
+            raise EpisodePathBlocked(
+                f"episode {slug!r} was not written: {what}. Move it aside (a new "
+                "episode can take another slug instead) and shelve again; "
+                f"--amend (CLI) / amend=True does not clear this.\n{exc}"
             ) from exc
     finally:
         tmp.unlink(missing_ok=True)

@@ -50,6 +50,25 @@ once code ships.
   description says it prefers `memshelf shelve`. Copies of the skill kept in
   shelf repositories are separate files and do not change with this one;
   `adapters/claude-code/check-shelve-copies.sh --discover` lists them.
+- **`shelve` refuses a directory named like the episode instead of ending in
+  a traceback (#186, part 3).** docshelf-mcp#115, merged after 0.5.0, makes
+  `add_document` refuse to write beside `docs/<category>/<slug>/` when that
+  directory is not a split docshelf wrote. It raises `SplitDirConflictError`,
+  a `FileExistsError`, with `split=False` too and whatever `overwrite` says.
+  `shelve` caught only `DocumentExistsError`, so with that docshelf the CLI
+  ended in a traceback, and the MCP error gave docshelf's advice about its own
+  kwargs. `shelve` now catches `FileExistsError` there (0.5.0 has no
+  `SplitDirConflictError` to import) and raises `EpisodePathBlocked`. The
+  error says that the episode was not written, that the directory has to be
+  moved aside and that `--amend` does not clear it; the CLI prints it and
+  exits 1.
+  A kind-changing `--amend` has already moved the episode to its new
+  category at that point, so the refusal moves it back first. Measured
+  against docshelf `main` (`e7bd775`): before, rc 1 with a
+  `SplitDirConflictError` traceback; after, rc 1 with the refusal and no
+  traceback. CI installs docshelf 0.5.0, so the tests stand the guard in;
+  one test drives the real guard and is skipped until the installed docshelf
+  has it.
 - **`shelve --push` pushes HEAD, and refuses on a branch whose upstream has
   another name.** The push was `git push <remote> <upstream-branch>`, a bare
   refspec, so git sent the *local* branch of that name rather than the commit

@@ -15,6 +15,7 @@ from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.shelve import (  # noqa: E402
     AmendTargetMissing,
     DigestContractError,
+    EpisodePathBlocked,
     SlugContractError,
     shelve,
 )
@@ -1350,3 +1351,156 @@ def test_an_unknown_source_value_is_refused(tmp_path):
             approx_tokens_source="vibes",
             date="2026-09-01",
         )
+
+
+# ── #186 part 3: a directory in the episode's way is a refusal ────────────
+#
+# docshelf-mcp#115 (merged after 0.5.0) makes `add_document` refuse to write
+# beside a directory named like the document that is not a split it wrote:
+# `SplitDirConflictError`, a FileExistsError, raised with split=False too and
+# whatever `overwrite` says. `shelve` caught only DocumentExistsError, so the
+# refusal escaped as a traceback. CI installs docshelf 0.5.0, which has
+# neither the guard nor the name, so the tests below stand the guard in with
+# a FileExistsError subclass. The last one drives the real guard and runs only
+# where the installed docshelf has it.
+
+
+class _SplitDirConflict(FileExistsError):
+    """Stands in for docshelf's SplitDirConflictError, which 0.5.0 does not have."""
+
+
+def _guard_split_dirs_like_docshelf_main(monkeypatch):
+    """Give `Shelf.add_document` the #115 pre-flight: a directory named like the
+    document refuses the write before anything is written."""
+    original = Shelf.add_document
+
+    def add_document(self, source, *, category, title, **kwargs):
+        if (self.root / "docs" / category / title).is_dir():
+            raise _SplitDirConflict(
+                f"docs/{category}/{title} exists and is not a docshelf split directory"
+            )
+        return original(self, source, category=category, title=title, **kwargs)
+
+    monkeypatch.setattr(Shelf, "add_document", add_document)
+
+
+def _commit_count(root):
+    return subprocess.run(
+        ["git", "-C", str(root), "rev-list", "--all", "--count"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def test_a_split_dir_in_the_way_of_a_new_episode_is_a_refusal(tmp_path, monkeypatch):
+    root = _init_shelf(tmp_path)
+    topics = root / "docs" / "topics"
+    foreign = topics / "2026-10-07-probe"
+    foreign.mkdir()
+    (foreign / "diagram.png").write_bytes(b"not a section")
+    before = sorted(p.name for p in topics.iterdir())
+    _guard_split_dirs_like_docshelf_main(monkeypatch)
+
+    with pytest.raises(EpisodePathBlocked) as err:
+        shelve(
+            root,
+            slug="2026-10-07-probe",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "JWT chosen."},
+            date="2026-10-07",
+        )
+
+    message = " ".join(str(err.value).split())
+    assert "docs/topics/2026-10-07-probe/ is a directory" in message, message
+    assert "Move it aside" in message, message
+    assert "--amend (CLI) / amend=True does not clear this" in message, message
+    assert isinstance(err.value.__cause__, _SplitDirConflict)
+    # Nothing was written: no episode, no sidecar, no commit, the directory intact.
+    assert sorted(p.name for p in topics.iterdir()) == before
+    assert sorted(p.name for p in foreign.iterdir()) == ["diagram.png"]
+    assert _commit_count(root) == "0"
+
+
+def test_a_split_dir_refusal_of_a_kind_change_moves_the_episode_back(tmp_path, monkeypatch):
+    """A kind change moves the file before the write (#90), and the guard
+    refuses at the write; the refusal must not strand the episode in the new
+    category with its old text."""
+    root = _init_shelf(tmp_path)
+    was = _session_episode(root)
+    before = was.read_text(encoding="utf-8")
+    (root / "docs" / "topics" / "2026-08-13-recount").mkdir()
+    _guard_split_dirs_like_docshelf_main(monkeypatch)
+
+    with pytest.raises(EpisodePathBlocked):
+        shelve(
+            root,
+            slug="2026-08-13-recount",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "kind corrected"},
+            date="2026-08-13",
+            amend=True,
+        )
+
+    assert was.is_file(), "the refused kind change left the episode moved"
+    assert was.read_text(encoding="utf-8") == before
+    assert not (root / "docs" / "topics" / "2026-08-13-recount.md").exists()
+
+
+def test_cli_split_dir_refusal_exits_1_with_the_fix_not_a_traceback(tmp_path, monkeypatch, capsys):
+    from memshelf_mcp.cli import main
+
+    root = _init_shelf(tmp_path)
+    (root / "docs" / "topics" / "2026-10-07-probe").mkdir()
+    _guard_split_dirs_like_docshelf_main(monkeypatch)
+
+    code = main(
+        [
+            "shelve",
+            "--shelf",
+            str(root),
+            "--slug",
+            "2026-10-07-probe",
+            "--kind",
+            "topic",
+            "--digest",
+            GOOD_DIGEST,
+            "--section",
+            "Decisions=JWT chosen.",
+            "--date",
+            "2026-10-07",
+        ]
+    )
+
+    assert code == 1
+    err = " ".join(capsys.readouterr().err.split())
+    assert "docs/topics/2026-10-07-probe/ is a directory" in err, err
+    assert "Move it aside" in err, err
+
+
+def test_the_real_split_dir_guard_ends_in_the_same_refusal(tmp_path):
+    """The guard itself, not a stand-in. Skipped until the installed docshelf
+    has it (0.5.0 does not); it runs by itself once the floor moves past it."""
+    splitter = pytest.importorskip("docshelf_mcp.core.splitter")
+    if not hasattr(splitter, "SplitDirConflictError"):
+        pytest.skip("the installed docshelf has no SplitDirConflictError (0.5.0 and older)")
+    root = _init_shelf(tmp_path)
+    foreign = root / "docs" / "topics" / "2026-10-07-probe"
+    foreign.mkdir()
+    (foreign / "diagram.png").write_bytes(b"not a section")
+
+    with pytest.raises(EpisodePathBlocked) as err:
+        shelve(
+            root,
+            slug="2026-10-07-probe",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "JWT chosen."},
+            date="2026-10-07",
+        )
+
+    assert isinstance(err.value.__cause__, splitter.SplitDirConflictError)
+    assert not (root / "docs" / "topics" / "2026-10-07-probe.md").exists()
+    assert sorted(p.name for p in foreign.iterdir()) == ["diagram.png"]

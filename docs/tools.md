@@ -52,7 +52,11 @@ are rendered by `memshelf_rebuild` or the shelf's bot (#58), and the response
 says so (`shelf_totals.derived_stale`, `next`). A contract violation comes back
 as an error carrying the exact fixes — nothing is written. Returns the episode
 address, redaction report, and any digest warnings. `amend=true` rewrites an
-existing episode in place under the same slug.
+existing episode in place under the same slug. A directory named like the
+episode that docshelf did not write as split sections (`docs/<category>/<slug>/`)
+is an error too (#186): docshelf after 0.5.0 will not add a document beside it,
+`amend` does not clear that, and the error says to move the directory aside.
+Nothing is written in that case either.
 
 `push` sends HEAD to the branch's upstream — and only to an upstream of the
 same name. `git checkout -B claude/x origin/main`, how agent sessions start,
