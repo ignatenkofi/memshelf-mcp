@@ -26,6 +26,10 @@ once code ships.
   every PR and push. It also fails on a deprecated `$schema`, which
   `validate` only warns about (exit 0). `server.json` moves to the
   2025-12-11 schema.
+- **CI tests Python 3.14, and the classifiers say so (#199).** The test
+  matrix keeps testing the two ends of the declared range, now 3.10 and
+  3.14 (was 3.10 and 3.13), and `pyproject.toml` gains the
+  `Programming Language :: Python :: 3.14` classifier.
 
 ### Fixed
 
