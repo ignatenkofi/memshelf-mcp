@@ -35,12 +35,13 @@ once code ships.
 - **The security scan also runs weekly on main, and a failed weekly run
   opens an issue (#196).** `security.yml` ran only on PRs and pushes, so an
   advisory against a package already in `uv.lock` stayed silent until the
-  next one (pyjwt, 2026-09-29/30, first red on a PR two days later). It now
+  next one (pyjwt, 2026-09-29/30, first red on a PR on 2026-10-01). It now
   also runs on Mondays (`cron: "17 6 * * 1"`) and on `workflow_dispatch`. A
   `health` job runs after scheduled runs only. Its
   `devsecops-pipeline-public/actions/health-issue@v1` step, under
   `if: always()`, opens or comments on one issue when the scan fails, and the
-  next green scheduled run closes it. The pipeline's
+  next green scheduled run closes it. The workflow token is now
+  `contents: read`, and only `health` adds `issues: write`. The pipeline's
   `assert-schedule-liveness.py` lint passes on the file.
 - **The shelf-repo templates retry the memshelf install, and a test holds
   their pin (#195).** `shelf-derived.yml` and `shelf-pr-guard.yml` installed

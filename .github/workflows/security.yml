@@ -15,6 +15,12 @@ on:
   schedule:
     - cron: "17 6 * * 1"
   workflow_dispatch:
+# Токен по умолчанию — только чтение кода (#196). Единственная джоба
+# конвейера (pipeline-light.yml@v1) сама объявляет `contents: read`, а права
+# вложенной джобы вызывающий может только сузить, поэтому не `{}`: с ним
+# она не получила бы и чтения. `health` объявляет своё `issues: write`.
+permissions:
+  contents: read
 jobs:
   pipeline:
     uses: ignatenkofi/devsecops-pipeline-public/.github/workflows/pipeline-light.yml@v1
