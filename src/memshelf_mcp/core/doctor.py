@@ -27,6 +27,7 @@ from memshelf_mcp.core.episode import (
     required_sections,
 )
 from memshelf_mcp.core.frontmatter import parse_frontmatter
+from memshelf_mcp.core.gitsync import _head_branch
 from memshelf_mcp.core.policy import load_pattern_pack
 from memshelf_mcp.core.redact import scan, scan_patterns
 from memshelf_mcp.core.remote import PRIVATE, PUBLIC, configured_remotes, remote_visibility
@@ -310,6 +311,19 @@ def _digest_body_grounding(digest: str, body: str) -> float | None:
 
 def _ledger_ids(path: Path) -> set[str]:
     return {cols[1] for _, cols in _ledger_rows(path) if len(cols) >= 2}
+
+
+def _ledger_key(root: Path, rel: str) -> str | None:
+    """The id ``rebuild`` writes this episode's ledger row under, or None (#189).
+
+    ``collect_episodes`` keys every row by the frontmatter ``id`` and skips an
+    episode without one (missing or empty), so the id — not the filename — is
+    what a row is matched by; ``id-mismatch`` and ``frontmatter-missing-field``
+    report the disagreement itself. None means no render will ever give the
+    episode a row.
+    """
+    fields, _ = parse_frontmatter((root / rel).read_text(encoding="utf-8"))
+    return fields.get("id") or None
 
 
 # shelf-spec v0 § 4.4. Kept here rather than imported: doctor is offline and
@@ -921,8 +935,10 @@ def _check_upstream_unknown(
     if not uncounted or upstream is not None or not (root / ".git").exists():
         return []
     remotes = subprocess.run(["git", "-C", str(root), "remote"], capture_output=True, text=True)
-    if remotes.returncode != 0 or not remotes.stdout.strip():
+    names = remotes.stdout.split() if remotes.returncode == 0 else []
+    if not names:
         return []
+    remote = "origin" if "origin" in names else names[0]
     return [
         Finding(
             "warning",
@@ -931,10 +947,51 @@ def _check_upstream_unknown(
             "this checkout tracks no upstream branch (detached HEAD, or a branch with no "
             "remote counterpart), so what the renderer could see is unknown; the "
             "`derived-stale` verdict below falls back to the ledger's own age",
-            "check out a branch that tracks the remote (`git checkout -B main origin/main`) "
-            "and re-run, or read `derived-stale` as a statement about the ledger only",
+            _upstream_unknown_fix(root, remote),
         )
     ]
+
+
+def _upstream_unknown_fix(root: Path, remote: str) -> str:
+    """A way to an upstream that keeps the commit made here (memshelf-mcp#186).
+
+    doctor meets this state right after a shelve, so the episode's commit is
+    already on the checkout; no route below moves off it or takes a commit
+    off a branch. A session's route is its own branch, ``git push -u <remote>
+    HEAD`` and a draft PR (the render branch then judges it, #180). The
+    render branch itself, checked out with no upstream, gets one with ``git
+    branch -u``: a ``push -u`` from there is rejected as non-fast-forward
+    once the bot has committed to it, so ``pull --rebase`` comes before the
+    push. From a detached HEAD, landing on the render branch is a
+    fast-forward, ``git fetch . HEAD:<branch>``, which git refuses when the
+    local branch has commits HEAD lacks.
+    """
+    render = _render_branch(root, remote)
+    target = render[len(remote) + 1 :] if render else None
+    tail = "then re-run doctor, or read `derived-stale` as a statement about the ledger only"
+    head = _head_branch(root)
+    if head is not None and head == target:
+        return (
+            f"`{head}` is the render branch: give it its upstream with `git branch -u "
+            f"{remote}/{head}`, then `git pull --rebase {remote} {head}` before pushing "
+            f"(the bot commits to it); {tail}"
+        )
+    if head is not None:
+        pr = f", then open a draft PR into {target}" if target else ""
+        return f"push `{head}` with an upstream: `git push -u {remote} HEAD`{pr}; {tail}"
+    into = f" into {target}" if target else ""
+    land = (
+        f"; to land it on {target} itself, `git fetch . HEAD:{target} && git switch "
+        f"{target} && git branch -u {remote}/{target}` (a fast-forward: git refuses it "
+        f"when {target} has commits HEAD lacks)"
+        if target
+        else ""
+    )
+    return (
+        "HEAD is detached, so a commit made here is on no branch yet: from a session, "
+        f"`git switch -c <branch>`, `git push -u {remote} HEAD`, then a draft PR{into}"
+        f"{land}; {tail}"
+    )
 
 
 def _check_unpushed_episodes(local_only: list[str], upstream: str | None) -> list[Finding]:
@@ -1189,13 +1246,23 @@ def _check_episode(
         )
     else:
         for field_name in _REQUIRED_FRONTMATTER:
-            if field_name not in fields:
+            # An empty `id:` is as absent as a missing one: `rebuild` skips both,
+            # and without this the episode would leave doctor silent (#189).
+            present = bool(fields.get("id")) if field_name == "id" else field_name in fields
+            if not present:
+                detail = f"missing required field {field_name!r} (shelf-spec v0 § 5.2)"
+                if field_name == "id":
+                    detail += (
+                        "; the ledger row is keyed by the id and `rebuild` skips an "
+                        "episode without one, so this episode has no row and no render "
+                        "will give it one"
+                    )
                 out.append(
                     Finding(
                         "error",
                         "frontmatter-missing-field",
                         rel,
-                        f"missing required field {field_name!r} (shelf-spec v0 § 5.2)",
+                        detail,
                         f"add {field_name!r} to the frontmatter",
                     )
                 )
@@ -1232,8 +1299,9 @@ def _check_episode(
                 "error",
                 "id-mismatch",
                 rel,
-                f"frontmatter id {fields['id']!r} != filename {stem!r}",
-                "align the id with the filename",
+                f"frontmatter id {fields['id']!r} != filename {stem!r}; the ledger row "
+                f"is keyed by the id, so the episode is counted as {fields['id']!r}",
+                "align the id with the filename — the ledger row follows the id at the next render",
             )
         )
 
@@ -1375,10 +1443,18 @@ def check_shelf(
     for entry_rel in [e.relative_path for e in shelf.scan()] + archived_rel:
         episodes += 1
         rel = entry_rel
-        stem = Path(rel).stem
-        seen.add(stem)
         findings.extend(_check_episode(root, rel, pack.patterns))
-        if stem not in ledger_ids:
+        # #189 — matched by the key `rebuild` writes the row under, not by the
+        # filename: a renamed episode keeps its row under the old id, and its
+        # row is no orphan. An episode without an id falls back to the stem for
+        # the orphan check only — `rebuild` skips it, no render will ever give
+        # it a row, so it stays out of `no-ledger-row` and out of the renderer
+        # verdicts below; `frontmatter-missing-field` already names the cause.
+        key = _ledger_key(root, rel)
+        seen.add(key or Path(rel).stem)
+        if key is None:
+            continue
+        if key not in ledger_ids:
             uncounted.append(rel)
             findings.append(
                 Finding(

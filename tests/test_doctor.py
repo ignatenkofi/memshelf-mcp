@@ -1266,6 +1266,120 @@ def test_render_branch_is_the_remote_head_then_main_then_master_then_unknown(tmp
     assert _render_branch(root, "origin") == "origin/develop", "origin/HEAD wins over both"
 
 
+# --- #189: ledger rows are matched by the id `rebuild` writes them under ----
+#
+# Every fixture below is a pushed `main` that has carried the work for a day,
+# past a 6h threshold — the path a liveness watchdog runs. Without an upstream
+# the renderer verdicts take another branch, and a test there would be green
+# before the fix.
+
+_NOW_189 = datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc)
+_SHELVED_189 = "docs/topics/2026-08-21-unpushed.md"
+
+
+def _rendered_and_pushed(root, message: str):
+    """Render the derived layer, commit everything and push it, a day before `now`."""
+    rebuild(root)
+    _commit_everything_at(root, "2026-08-20T19:10:00+00:00", message)
+    _push_at(root, "2026-08-20T19:30:00+00:00")
+
+
+def _renamed_after_render(tmp_path):
+    """The #189 repro: the episode file is renamed and the derived layer is
+    re-rendered in the same commit, so the ledger lists it under its id."""
+    _origin, root = _shelf_with_origin_and_old_ledger(
+        tmp_path, episode_committed_at="2026-08-20T19:00:00+00:00"
+    )
+    subprocess.run(
+        ["git", "-C", str(root), "mv", _SHELVED_189, "docs/topics/2026-08-21-renamed.md"],
+        check=True,
+    )
+    _rendered_and_pushed(root, "rename episode, rebuild derived")
+    ledger = (root / "ledger.tsv").read_text(encoding="utf-8")
+    assert "\t2026-08-21-unpushed\t" in ledger, "fixture: the render ran, under the id"
+    return root
+
+
+def test_a_renamed_episode_is_an_id_mismatch_not_a_stopped_renderer(tmp_path):
+    """The row is there, under the id `rebuild` keys it by. Matched by the
+    filename it read as missing (`no-ledger-row`), its own row as an orphan,
+    and the renderer that wrote that row as stopped (`derived-stale`)."""
+    root = _renamed_after_render(tmp_path)
+
+    report = check_shelf(root, now=_NOW_189, stale_after_hours=6)
+
+    codes = _codes(report)
+    assert "id-mismatch" in codes, report.as_dict()
+    for wrong in ("no-ledger-row", "orphan-ledger-row", "derived-stale"):
+        assert wrong not in codes, report.as_dict()
+    mismatch = next(f for f in report.findings if f.code == "id-mismatch")
+    assert "keyed by the id" in mismatch.detail
+
+
+def test_a_renamed_episode_does_not_hide_one_that_really_has_no_row(tmp_path):
+    """The other half: an episode the renderer really skipped still gets both
+    findings, and the verdict names it — not the renamed one."""
+    root = _renamed_after_render(tmp_path)
+    _write_raw(
+        root,
+        "topics",
+        "2026-08-20-uncounted",
+        _fm("2026-08-20-uncounted") + "\n## Digest\nA decided change; nothing open.\n\n"
+        "## Decisions\nX over Y\n",
+    )
+    _commit_everything_at(root, "2026-08-20T19:40:00+00:00", "shelve: 2026-08-20-uncounted")
+    _push_at(root, "2026-08-20T19:45:00+00:00")
+
+    report = check_shelf(root, now=_NOW_189, stale_after_hours=6)
+
+    no_row = {f.path for f in report.findings if f.code == "no-ledger-row"}
+    assert no_row == {"docs/topics/2026-08-20-uncounted.md"}, report.as_dict()
+    stale = next(f for f in report.findings if f.code == "derived-stale")
+    assert "2026-08-20-uncounted" in stale.detail
+    assert "renamed" not in stale.detail
+
+
+@pytest.mark.parametrize("id_line", ["", "id:\n"], ids=["missing", "empty"])
+def test_an_episode_without_an_id_is_a_missing_field_not_a_stopped_renderer(tmp_path, id_line):
+    """`rebuild` skips an episode without an id, so no render will ever give
+    it a row: `derived-stale` must not wait for one. An empty `id:` is skipped
+    the same way and used to pass doctor with only `no-ledger-row`."""
+    _origin, root = _shelf_with_origin_and_old_ledger(
+        tmp_path, episode_committed_at="2026-08-20T19:00:00+00:00"
+    )
+    path = root / _SHELVED_189
+    text = path.read_text(encoding="utf-8")
+    assert "id: 2026-08-21-unpushed\n" in text
+    path.write_text(text.replace("id: 2026-08-21-unpushed\n", id_line, 1), encoding="utf-8")
+    _rendered_and_pushed(root, "drop the episode id, rebuild derived")
+
+    report = check_shelf(root, now=_NOW_189, stale_after_hours=6)
+
+    codes = _codes(report)
+    for wrong in ("no-ledger-row", "derived-stale"):
+        assert wrong not in codes, report.as_dict()
+    missing = next(f for f in report.findings if f.code == "frontmatter-missing-field")
+    assert missing.level == "error"
+    assert "'id'" in missing.detail and "skips an episode without one" in missing.detail
+
+
+def test_an_id_less_episode_keeps_its_old_row_by_filename(tmp_path):
+    """The stem is the fallback key for the orphan check: a row rendered while
+    the episode still had its id points at an existing file, and «remove the
+    stale row» would be the wrong fix — the missing id is the cause."""
+    root = _init(tmp_path)
+    _seed_one(root, slug="2026-07-22-ok")
+    path = root / "docs" / "topics" / "2026-07-22-ok.md"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("id: 2026-07-22-ok\n", "", 1), encoding="utf-8"
+    )
+
+    report = check_shelf(root)
+
+    assert "frontmatter-missing-field" in _codes(report)
+    assert "orphan-ledger-row" not in _codes(report), report.as_dict()
+
+
 def test_a_detached_checkout_says_the_renderer_cannot_be_judged(tmp_path):
     """main-memshelf#154: the silent fallback is the defect, not the fallback.
 
@@ -1282,6 +1396,153 @@ def test_a_detached_checkout_says_the_renderer_cannot_be_judged(tmp_path):
     finding = next(f for f in report.findings if f.code == "upstream-unknown")
     assert finding.level == "warning"
     assert "detached HEAD" in finding.detail
+
+
+# --- memshelf-mcp#186 part 2: the advised way out keeps the commit ----------
+#
+# doctor meets `upstream-unknown` right after a shelve, with the episode
+# committed on the checkout. The old fix, `git checkout -B main origin/main`,
+# moved off that commit («you are leaving 1 commit behind»). Each test below
+# runs the advised commands and checks the commit is still HEAD and the
+# warning is gone — an advice that reads right but does not work is the
+# defect this replaces.
+
+
+def _git_out(root, *args) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _upstream_unknown(root):
+    report = check_shelf(root, now=datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc))
+    found = [f for f in report.findings if f.code == "upstream-unknown"]
+    return (found[0] if found else None), report
+
+
+@pytest.mark.parametrize(
+    ("route", "advised", "commands", "after"),
+    [
+        (
+            "session",
+            ["`git switch -c <branch>`", "`git push -u origin HEAD`", "a draft PR into main"],
+            [["switch", "-q", "-c", "claude/probe"], ["push", "-q", "-u", "origin", "HEAD"]],
+            "upstream-not-rendered",
+        ),
+        (
+            "owner",
+            ["`git fetch . HEAD:main && git switch main && git branch -u origin/main`"],
+            [
+                ["fetch", "-q", ".", "HEAD:main"],
+                ["switch", "-q", "main"],
+                ["branch", "-q", "-u", "origin/main"],
+            ],
+            "episode-unpushed",
+        ),
+    ],
+)
+def test_the_way_off_a_detached_head_keeps_the_episode_commit(
+    tmp_path, route, advised, commands, after
+):
+    """The episode commit is on the detached HEAD only — local `main` is
+    level with `origin/main`, as in a session that checked out a commit."""
+    _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
+    subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach"], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "branch", "-q", "-f", "main", "origin/main"], check=True
+    )
+    episode = _git_out(root, "rev-parse", "HEAD")
+
+    finding, _ = _upstream_unknown(root)
+
+    assert finding is not None
+    assert "checkout -B" not in finding.fix
+    for text in advised:
+        assert text in finding.fix, finding.fix
+    for command in commands:
+        subprocess.run(["git", "-C", str(root), *command], check=True)
+    assert _git_out(root, "rev-parse", "HEAD") == episode, f"{route}: the commit was left behind"
+    finding, report = _upstream_unknown(root)
+    assert finding is None, report.as_dict()
+    assert after in _codes(report)
+
+
+def test_landing_a_detached_commit_on_main_refuses_rather_than_drop_its_commits(tmp_path):
+    """Local `main` carries a commit HEAD lacks: the advised fast-forward
+    fails loudly, and neither that commit nor the episode is lost."""
+    _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
+    subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach"], check=True)
+    extra = _git_out(
+        root, "commit-tree", "origin/main^{tree}", "-p", "origin/main", "-m", "local work"
+    )
+    subprocess.run(["git", "-C", str(root), "branch", "-q", "-f", "main", extra], check=True)
+    episode = _git_out(root, "rev-parse", "HEAD")
+
+    finding, _ = _upstream_unknown(root)
+    assert "`git fetch . HEAD:main && git switch main" in finding.fix
+    land = subprocess.run(
+        ["git", "-C", str(root), "fetch", ".", "HEAD:main"], capture_output=True, text=True
+    )
+
+    assert land.returncode != 0
+    assert "rejected" in land.stderr, land.stderr
+    assert _git_out(root, "rev-parse", "HEAD") == episode
+    assert _git_out(root, "rev-parse", "main") == extra
+
+
+def test_a_branch_without_an_upstream_is_told_to_push_it_with_one(tmp_path):
+    """A session branch with no upstream needs no checkout at all: `push -u`
+    publishes it, then a draft PR into the render branch."""
+    _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
+    subprocess.run(["git", "-C", str(root), "checkout", "-q", "-b", "night/probe"], check=True)
+    episode = _git_out(root, "rev-parse", "HEAD")
+
+    finding, _ = _upstream_unknown(root)
+
+    assert finding is not None
+    assert "push `night/probe` with an upstream: `git push -u origin HEAD`" in finding.fix
+    assert "a draft PR into main" in finding.fix
+    assert "checkout -B" not in finding.fix
+    subprocess.run(["git", "-C", str(root), "push", "-q", "-u", "origin", "HEAD"], check=True)
+    assert _git_out(root, "rev-parse", "HEAD") == episode
+    assert _upstream_unknown(root)[0] is None
+
+
+def test_the_render_branch_without_an_upstream_is_told_to_track_it(tmp_path):
+    """`main` with its upstream unset while the bot's render is already on
+    `origin/main`: `git push -u origin HEAD` is rejected (non-fast-forward).
+    The advice is `git branch -u`, then `pull --rebase` — which puts the
+    episode on top of the render."""
+    _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
+    subprocess.run(["git", "-C", str(root), "branch", "-q", "--unset-upstream"], check=True)
+    render = _git_out(
+        root, "commit-tree", "origin/main^{tree}", "-p", "origin/main", "-m", "regenerate derived"
+    )
+    subprocess.run(
+        ["git", "-C", str(root), "push", "-q", "origin", f"{render}:refs/heads/main"], check=True
+    )
+    subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin"], check=True)
+
+    finding, _ = _upstream_unknown(root)
+
+    assert finding is not None
+    assert "`git branch -u origin/main`" in finding.fix
+    assert "`git pull --rebase origin main` before pushing" in finding.fix
+    assert "git push -u" not in finding.fix
+    assert "draft PR" not in finding.fix
+    pushed = subprocess.run(
+        ["git", "-C", str(root), "push", "-u", "origin", "HEAD"], capture_output=True, text=True
+    )
+    assert pushed.returncode != 0 and "rejected" in pushed.stderr, pushed.stderr
+    subprocess.run(["git", "-C", str(root), "branch", "-q", "-u", "origin/main"], check=True)
+    finding, report = _upstream_unknown(root)
+    assert finding is None, report.as_dict()
+    assert "episode-unpushed" in _codes(report)
+    subprocess.run(["git", "-C", str(root), "pull", "-q", "--rebase", "origin", "main"], check=True)
+    assert _git_out(root, "rev-parse", "HEAD~1") == render
+    assert "docs/topics/2026-08-21-unpushed.md" in _git_out(
+        root, "ls-tree", "-r", "--name-only", "HEAD"
+    )
 
 
 def test_a_shelf_without_a_remote_is_not_told_about_upstreams(tmp_path):

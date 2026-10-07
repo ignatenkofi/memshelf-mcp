@@ -42,6 +42,66 @@ once code ships.
   upstream at all is now read by its full ref too: with a tag of the same name,
   `--abbrev-ref HEAD` gave `heads/main`, and preflight skipped the sync
   because the remote had no `heads/main`.
+- **`shelve`'s `next` names the PR on a branch the bot does not render
+  (#191).** After a push to a session or PR branch with its own upstream
+  (`origin/claude/…`), `next` said «pushed — the shelf bot renders derived
+  files on main; nothing else to do», while the episode can reach `main`
+  only through a merge. `next` now resolves the render branch the way
+  `doctor` does (`origin/HEAD`, else `origin/main`, else `origin/master`).
+  Off that branch it says where the episode is and that the next step is a
+  PR into the render branch; on a bot shelf it adds that derived files
+  arrive after the merge and that `memshelf rebuild` must not be run by hand.
+  Committed but not pushed on such a branch (`checkout -B claude/x
+  origin/main` included), it names `git push -u <remote> HEAD`, then the PR.
+  On a detached HEAD it said «push it» with no branch to push; it now names
+  `git switch -c shelve/<slug>`, `git push -u <remote> HEAD` and the PR, the
+  way out `doctor`'s `upstream-unknown` gives. Messages on the render branch
+  itself are unchanged.
+- **`doctor` matches ledger rows by the frontmatter `id`, the key `rebuild`
+  writes them under (#189).** It matched them by the filename stem, so a
+  renamed episode, rendered in the same commit, got `no-ledger-row`, its own
+  row became `orphan-ledger-row` («remove the stale row» — the next render
+  writes it back), and past the threshold `derived-stale` called a healthy
+  renderer stopped. Now the episode is matched by its `id`, and only
+  `id-mismatch` remains. An episode without an `id` (missing or empty) is
+  skipped by `rebuild`, so it is kept out of `no-ledger-row` and out of the
+  renderer verdicts; its stem still matches an old row, so that row is not
+  reported as an orphan. An empty `id:` used to pass with only
+  `no-ledger-row` and is now `frontmatter-missing-field`, like a missing one.
+  Both details now say the ledger row is keyed by the `id`.
+- **`upstream-unknown` advises a way out that keeps the episode commit
+  (#186, part 2).** doctor meets this warning right after a shelve, with the
+  episode already committed on the checkout. The fix said `git checkout -B
+  main origin/main`, which on a detached HEAD moves off that commit (git:
+  «you are leaving 1 commit behind»). The fix now depends on the checkout.
+  On a session branch with no upstream it is `git push -u <remote> HEAD`,
+  then a draft PR into the render branch. On the render branch itself it is
+  `git branch -u <remote>/<branch>`, then `git pull --rebase <remote>
+  <branch>` before the push: a `push -u` from there is rejected once the bot
+  has committed to it. On a detached HEAD it is a session branch (`git switch
+  -c <branch>`, `git push -u <remote> HEAD`, a draft PR), or, to land on the
+  render branch itself, `git fetch . HEAD:main && git switch main && git
+  branch -u origin/main` — a fast-forward, which git refuses when local
+  `main` has commits HEAD lacks.
+- **`rebuild --check` compares INDEX.md and stats.svg, and a derived file
+  that fails to render fails the run (#186, part 1).** `--check` skipped
+  both writers, so it answered `ok: true` over a tampered INDEX.md or
+  stats.svg. Outside `--check`, a failed INDEX write (INDEX.md turned into a
+  directory) was one more warning — `warnings[51]` on a shelf with ~50
+  description-clamp warnings — and the CLI exited 0. Now `--check` compares
+  INDEX.md through docshelf's `stale-index` and stats.svg with a chart drawn
+  in memory. When their input (`.meta.json`, `ledger.tsv`) drifted in the
+  same run, the comparison is skipped and the warnings say so. A derived
+  file that cannot be written or compared — including INDEX while docshelf
+  skips its comparison over uncommitted split directories — is named in the
+  new `errors` field: `ok` is false and the CLI exits 1. Each message also
+  stays in `warnings`. rollup, purge and resolve, which run the same rebuild,
+  forwarded only its warnings and exited 0 over a failed render; they now
+  carry its `errors` too, with `ok` false (`status: attention` for resolve)
+  and exit 1. Not compared: each split document's `SUBINDEX.md` (docshelf's
+  `stale-index` covers INDEX.md only), and INDEX on a shelf without `docs/`,
+  which was counted unchanged and is now a warning saying it was not
+  compared.
 
 ## [0.4.0] — 2026-10-06
 
