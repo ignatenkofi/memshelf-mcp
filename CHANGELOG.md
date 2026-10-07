@@ -92,7 +92,10 @@ once code ships.
   file that cannot be written or compared — including INDEX while docshelf
   skips its comparison over uncommitted split directories — is named in the
   new `errors` field: `ok` is false and the CLI exits 1. Each message also
-  stays in `warnings`, which rollup, purge and resolve forward.
+  stays in `warnings`. rollup, purge and resolve, which run the same rebuild,
+  forwarded only its warnings and exited 0 over a failed render; they now
+  carry its `errors` too, with `ok` false (`status: attention` for resolve)
+  and exit 1.
 
 ## [0.4.0] — 2026-10-06
 

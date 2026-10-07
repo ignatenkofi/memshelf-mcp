@@ -202,7 +202,9 @@ entries drops their budget along with them. The originals move to the
 `archive/` sub-shelf — nothing is deleted, recall by id keeps working, and
 every ledger row survives, because an archived episode still holds the mass it
 saved. The digest is **yours**: synthesizing a quarter of digests is the part a
-tool cannot do, so pass the same quality of digest `shelve` demands.
+tool cannot do, so pass the same quality of digest `shelve` demands. A derived
+file the rebuild after the move cannot render is named in `errors`: the rollup
+is written, but `ok` is false and the CLI exits 1.
 
 ## `memshelf_purge`
 
@@ -211,7 +213,9 @@ Drop episodes whose `retain_until` has passed, then reindex (#15).
 Dry-run by default: without `apply=true` it only lists what expired. Deletes
 the working-tree file — **git history still contains it**. Real erasure is a
 deliberate filter-repo pass over the whole repository, never a side effect of
-a tool call, and the result says so.
+a tool call, and the result says so. A derived file the rebuild after
+`apply=true` cannot render is named in `errors`: `ok` is false and the CLI
+exits 1.
 
 ## `memshelf_resolve`
 
@@ -220,7 +224,8 @@ branches): union `ledger.tsv` / `recall-log.tsv` rows and `.meta.json` keys
 from both sides, rebuild `INDEX.md` and `stats.svg` from `docs/`, then run
 doctor. Conflicting episode files are reported as unresolved, never
 auto-merged. Also safe outside a conflict — degrades to a derived-files
-rebuild.
+rebuild. A derived file the rebuild cannot render is named in `errors` and
+makes `status` `attention` (CLI exit 1).
 
 ## `memshelf_sync`
 

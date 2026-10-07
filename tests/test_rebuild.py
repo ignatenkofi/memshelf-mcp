@@ -538,3 +538,46 @@ def test_index_md_as_a_directory_fails_the_rebuild_and_the_cli(tmp_path, capsys)
     assert "INDEX.md" not in out["written"]
     assert "ledger.tsv" in out["written"]  # the rest is still rebuilt
     assert main(["rebuild", "--shelf", str(root), "--check"]) == 1
+
+
+ROLLUP_DIGEST = (
+    "Первый квартал свёрнут: разбор авторизации закрыт, выбранный подход остался "
+    "в силе, отвергнутые варианты перечислены в исходных эпизодах. Открытым "
+    "остаётся ротация общего секрета."
+)
+
+
+@pytest.mark.parametrize("command", ["resolve", "rollup", "purge"])
+def test_the_commands_that_run_rebuild_fail_with_it(tmp_path, capsys, command):
+    """resolve, rollup and purge run rebuild() and forwarded only its
+    warnings: with INDEX.md turned into a directory each reported success and
+    the CLI exited 0. They now carry rebuild's errors, and the CLI exits 1."""
+    from memshelf_mcp.cli import main
+
+    root = _init(tmp_path)
+    for slug in ("2026-01-05-old-a", "2026-01-06-old-b", "2026-07-20-new"):
+        _shelve(root, slug)
+    rebuild(root)
+    args = {
+        "resolve": [],
+        "rollup": ["--slug", "2026-q1-rollup", "--digest", ROLLUP_DIGEST, "--until", "2026-06-30"],
+        "purge": ["--apply", "--today", "2026-07-31"],
+    }[command]
+    if command == "purge":
+        old_a = root / "docs" / "topics" / "2026-01-05-old-a.md"
+        text = old_a.read_text(encoding="utf-8")
+        old_a.write_text(
+            text.replace("mode: live", "retain_until: 2026-02-01\nmode: live"), "utf-8"
+        )
+    (root / "INDEX.md").unlink()
+    (root / "INDEX.md").mkdir()
+
+    rc = main([command, "--shelf", str(root), *args])
+    out = json.loads(capsys.readouterr().out)
+
+    assert [e for e in out["errors"] if e.startswith("INDEX.md not rebuilt:")]
+    if command == "resolve":
+        assert out["status"] == "attention"
+    else:
+        assert out["ok"] is False
+    assert rc == 1

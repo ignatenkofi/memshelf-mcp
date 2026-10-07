@@ -376,7 +376,7 @@ def _cmd_rollup(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    return 0 if result["ok"] else 1
 
 
 def _cmd_purge(args: argparse.Namespace) -> int:
@@ -384,7 +384,7 @@ def _cmd_purge(args: argparse.Namespace) -> int:
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if result["expired"] and not result["applied"]:
         print("dry run — re-run with --apply to delete", file=sys.stderr)
-    return 0
+    return 0 if result["ok"] else 1
 
 
 def _cmd_prune_splits(args: argparse.Namespace) -> int:
