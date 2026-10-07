@@ -42,6 +42,18 @@ once code ships.
   upstream at all is now read by its full ref too: with a tag of the same name,
   `--abbrev-ref HEAD` gave `heads/main`, and preflight skipped the sync
   because the remote had no `heads/main`.
+- **`shelve`'s `next` names the PR on a branch the bot does not render
+  (#191).** After a push to a session or PR branch with its own upstream
+  (`origin/claude/…`), `next` said «pushed — the shelf bot renders derived
+  files on main; nothing else to do», while the episode can reach `main`
+  only through a merge. `next` now resolves the render branch the way
+  `doctor` does (`origin/HEAD`, else `origin/main`, else `origin/master`).
+  Off that branch it says where the episode is and that the next step is a
+  PR into the render branch; on a bot shelf it adds that derived files
+  arrive after the merge and that `memshelf rebuild` must not be run by hand.
+  Committed but not pushed on such a branch (`checkout -B claude/x
+  origin/main` included), it names `git push -u <remote> HEAD`, then the PR.
+  Messages on the render branch itself are unchanged.
 
 ## [0.4.0] — 2026-10-06
 

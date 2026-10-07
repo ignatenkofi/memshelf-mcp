@@ -24,8 +24,14 @@ from memshelf_mcp.core.advisor import (
 from memshelf_mcp.core.archive import purge as purge_shelf
 from memshelf_mcp.core.archive import rollup as rollup_shelf
 from memshelf_mcp.core.digest import validate_digest
-from memshelf_mcp.core.doctor import DERIVED_STALE_AFTER_HOURS, check_shelf
-from memshelf_mcp.core.gitsync import SyncReport, has_remote, preflight
+from memshelf_mcp.core.doctor import DERIVED_STALE_AFTER_HOURS, _render_branch, check_shelf
+from memshelf_mcp.core.gitsync import (
+    SyncReport,
+    _head_branch,
+    _sync_target,
+    has_remote,
+    preflight,
+)
 from memshelf_mcp.core.importer import discover as import_discover
 from memshelf_mcp.core.importer import extract as import_extract
 from memshelf_mcp.core.init import init_shelf
@@ -321,6 +327,38 @@ def _episodes_on_disk(root: Path) -> int:
     return count
 
 
+def _off_render_branch(root: Path, remote: str | None, branch: str | None) -> str | None:
+    """The render branch (``origin/main``) when ``branch`` is not it, else None (#191).
+
+    The bot renders one branch, resolved the way doctor resolves it
+    (``_render_branch``: ``<remote>/HEAD``, else ``main``, else ``master``).
+    A session or PR branch with an upstream of its own pushes fine and is
+    never rendered: its episode reaches the render branch only through a
+    merge. None also when the render branch cannot be named from here — the
+    wording for ``main`` stands then, as doctor falls back to ``@{u}``.
+    """
+    if remote is None or branch is None:
+        return None
+    render = _render_branch(root, remote)
+    return None if render is None or render == f"{remote}/{branch}" else render
+
+
+def _pr_route(where: str, step: str, render: str, bot: bool) -> str:
+    """The next step from a branch the bot does not render: a PR into ``render``."""
+    target = render.split("/", 1)[-1]
+    if bot:
+        return (
+            f"{where} — {step} a PR into {target}: the shelf bot renders only {render}, "
+            "so derived files arrive after the merge; do not run `memshelf rebuild` "
+            "by hand on this branch (#58)"
+        )
+    return (
+        f"{where} — {step} a PR into {target}; no shelf-derived.yml bot on this shelf: "
+        "run `memshelf rebuild` and commit the derived files separately (skip that "
+        "if another bot renders this shelf)"
+    )
+
+
 def _derived_next_step(root: Path, result) -> str:
     """The one action that makes INDEX/ledger include the episode just written.
 
@@ -331,6 +369,11 @@ def _derived_next_step(root: Path, result) -> str:
     — so a shelf with a differently-named bot gets the soft wording, not a
     wrong command. A ``git-local`` shelf (git, no remote) has neither a push
     nor a bot run, so there the answer is the rebuild, workflow file or not.
+
+    Off the render branch (#191) — a session or PR branch, pushed or about to
+    be — the answer is a PR: «nothing else to do» there told an unattended
+    session it was done while the episode sat on a branch the bot never
+    renders. Messages on the render branch itself are unchanged.
     """
     bot = (root / ".github" / "workflows" / "shelf-derived.yml").is_file()
     if result.sync is not None and result.sync.published_branch:
@@ -347,6 +390,13 @@ def _derived_next_step(root: Path, result) -> str:
             "include it yet: run `memshelf rebuild` (plain shelf — no git, no bot)"
         )
     if result.sync is not None and result.sync.pushed:
+        # The push lands on the upstream of the same name (gitsync refuses any
+        # other), so `sync.branch` is the branch that now carries the episode.
+        render = _off_render_branch(root, result.sync.remote, result.sync.branch)
+        if render is not None:
+            return _pr_route(
+                f"pushed to {result.sync.remote}/{result.sync.branch}", "open", render, bot
+            )
         if result.sync.render_pulled:
             return (
                 "pushed, and the bot's render is pulled — this clone matches the "
@@ -373,6 +423,22 @@ def _derived_next_step(root: Path, result) -> str:
                 "episode committed — a git-local shelf has no remote, so there is "
                 "nothing to push; run `memshelf rebuild` and commit the derived "
                 "files separately"
+            )
+        # The checked-out branch is what `git push -u <remote> HEAD` publishes —
+        # not `sync.branch`, which is `main` on a `checkout -B claude/x
+        # origin/main` session branch.
+        head = _head_branch(root)
+        remote = result.sync.remote if result.sync is not None else None
+        if remote is None:
+            target, _why = _sync_target(root)
+            remote = target[0] if target is not None else None
+        render = _off_render_branch(root, remote, head)
+        if render is not None:
+            return _pr_route(
+                f"episode committed locally on {head}, not pushed",
+                f"push the branch (`git push -u {remote} HEAD`) and open",
+                render,
+                bot,
             )
         tail = (
             "the shelf bot renders derived files after the push"

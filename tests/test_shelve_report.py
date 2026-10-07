@@ -45,7 +45,7 @@ def _git(root, *args):
     subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
 
 
-def _shelve(root, slug="2026-07-22-auth-refactor"):
+def _shelve(root, slug="2026-07-22-auth-refactor", **extra):
     return run_shelve(
         ShelveInput(
             shelf_path=str(root),
@@ -55,6 +55,7 @@ def _shelve(root, slug="2026-07-22-auth-refactor"):
             sections={"Decisions": "JWT chosen."},
             approx_tokens=4000,
             date=slug[:10],
+            **extra,
         )
     )
 
@@ -149,6 +150,122 @@ def test_totals_agree_once_the_derived_layer_is_rendered(tmp_path):
     assert totals["episodes"] == 1  # the ledger knows the first episode
     assert totals["episodes_on_disk"] == 2  # the disk already holds both
     assert totals["derived_stale"] is True
+
+
+# --- #191: a branch the bot never renders ends in a PR, not in «done» --------
+
+
+def _shelf_on_main(tmp_path, *, bot=True, origin_head=None):
+    """A shelf whose `main` is pushed and tracked — the render branch.
+
+    ``origin_head`` builds the clone's `refs/remotes/origin/HEAD` explicitly:
+    None deletes it (the agent-session clone measured 2026-10-02 has none),
+    a name points it there. git ≥ 2.48 creates it by itself on a full fetch,
+    so the state is built here rather than left to the git version.
+    """
+    root = _init_shelf(tmp_path / "shelf", origin=tmp_path / "origin.git")
+    _git(root, "checkout", "-q", "-b", "main")
+    if bot:
+        wf = root / ".github" / "workflows" / "shelf-derived.yml"
+        wf.parent.mkdir(parents=True)
+        wf.write_text("name: shelf-derived\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init shelf")
+    _git(root, "push", "-q", "-u", "origin", "main")
+    if origin_head is None:
+        subprocess.run(["git", "-C", str(root), "remote", "set-head", "origin", "-d"], check=False)
+    else:
+        _git(root, "remote", "set-head", "origin", origin_head)
+    return root
+
+
+def _on_session_branch(root, *, tracks="own"):
+    """Move onto `claude/probe`: tracking its own name on origin (pushed with
+    `-u`), or `origin/main` — `git checkout -B claude/probe origin/main`, how
+    night shifts start."""
+    if tracks == "own":
+        _git(root, "checkout", "-q", "-b", "claude/probe")
+        _git(root, "push", "-q", "-u", "origin", "HEAD")
+    else:
+        _git(root, "checkout", "-q", "-B", "claude/probe", "origin/main")
+    return root
+
+
+@pytest.mark.parametrize("origin_head", [None, "main"])
+def test_a_push_to_a_session_branch_names_the_pr_not_nothing_else_to_do(tmp_path, origin_head):
+    """The #191 repro: the push went to `origin/claude/probe`, which the bot
+    never renders, and `next` said «nothing else to do» to an unattended
+    session. The render branch is resolved as doctor resolves it — with and
+    without `origin/HEAD`."""
+    root = _on_session_branch(_shelf_on_main(tmp_path, origin_head=origin_head))
+
+    resp = _shelve(root, push=True, await_render_s=0)
+
+    assert resp["sync"]["pushed"] is True
+    nxt = resp["next"]
+    assert "nothing else to do" not in nxt
+    assert "pushed to origin/claude/probe" in nxt
+    assert "a PR into main" in nxt
+    assert "after the merge" in nxt
+    assert "do not run `memshelf rebuild` by hand" in nxt
+
+
+def test_an_unpushed_commit_on_a_session_branch_is_told_to_push_it_and_open_a_pr(tmp_path):
+    """Committed, not pushed, on a branch with its own upstream: the push is
+    only half of the way — the bot renders nothing after it."""
+    root = _on_session_branch(_shelf_on_main(tmp_path))
+
+    resp = _shelve(root)
+
+    assert resp["committed"] is True and resp["sync"]["pushed"] is False
+    nxt = resp["next"]
+    assert "on claude/probe, not pushed" in nxt
+    assert "`git push -u origin HEAD`" in nxt
+    assert "a PR into main" in nxt
+    assert "renders derived files after the push" not in nxt
+
+
+def test_a_session_branch_tracking_main_is_told_to_publish_it_not_to_push_main(tmp_path):
+    """`checkout -B claude/probe origin/main`: `sync.branch` is `main`, but
+    the checkout is the session branch — `next` names the branch the commit
+    is on and the same `push -u` the hint carries (#185)."""
+    root = _on_session_branch(_shelf_on_main(tmp_path), tracks="main")
+
+    resp = _shelve(root)
+
+    assert resp["sync"]["branch"] == "main"
+    assert resp["sync"]["hint"].endswith("push -u origin HEAD")
+    nxt = resp["next"]
+    assert "on claude/probe, not pushed" in nxt
+    assert "`git push -u origin HEAD`" in nxt
+    assert "a PR into main" in nxt
+
+
+def test_a_botless_session_branch_gets_the_pr_and_keeps_the_rebuild(tmp_path):
+    """Without a bot nobody renders after the merge either: the PR step is
+    added, the rebuild advice stays."""
+    root = _on_session_branch(_shelf_on_main(tmp_path, bot=False))
+
+    nxt = _shelve(root, push=True)["next"]
+
+    assert "pushed to origin/claude/probe" in nxt
+    assert "a PR into main" in nxt
+    assert "run `memshelf rebuild`" in nxt
+    assert "nothing else to do" not in nxt
+
+
+def test_on_the_render_branch_the_wording_is_unchanged(tmp_path):
+    """#191 acceptance: `main` keeps both messages word for word."""
+    root = _shelf_on_main(tmp_path)
+
+    unpushed = _shelve(root)["next"]
+    pushed = _shelve(root, slug="2026-07-23-second-topic", push=True, await_render_s=0)["next"]
+
+    assert unpushed == (
+        "episode committed locally, not pushed — push it (see sync.hint); "
+        "the shelf bot renders derived files after the push"
+    )
+    assert pushed == "pushed — the shelf bot renders derived files on main; nothing else to do"
 
 
 def test_the_tool_docstring_no_longer_promises_a_ledger_append(tmp_path):
