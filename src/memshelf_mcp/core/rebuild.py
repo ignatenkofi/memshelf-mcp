@@ -131,11 +131,23 @@ class RebuildReport:
     drifted: list[str] = field(default_factory=list)
     episodes: int = 0
     warnings: list[str] = field(default_factory=list)
+    #: Derived files the run could not write or, with ``check``, could not
+    #: compare (#186). Each makes ``ok`` false: a rebuild that left INDEX.md
+    #: unrendered has not regenerated the derived layer, whatever else it wrote.
+    errors: list[str] = field(default_factory=list)
+
+    def fail(self, message: str) -> None:
+        """Record an error. The message also stays in ``warnings``: rollup,
+        purge and resolve forward ``rebuild().warnings`` into their own
+        reports, and the failure must not go quiet there."""
+        self.errors.append(message)
+        self.warnings.append(message)
 
     @property
     def ok(self) -> bool:
-        """True when nothing had drifted — the verdict ``--check`` reports."""
-        return not self.drifted
+        """True when nothing had drifted and nothing failed — the verdict
+        ``--check`` reports and the CLI's exit code."""
+        return not self.drifted and not self.errors
 
     def as_dict(self) -> dict:
         return {
@@ -143,6 +155,7 @@ class RebuildReport:
             "written": self.written,
             "unchanged": self.unchanged,
             "drifted": self.drifted,
+            "errors": self.errors,
             "warnings": self.warnings,
             "ok": self.ok,
         }
@@ -292,12 +305,82 @@ def _apply(
     report.written.append(rel)
 
 
+def _check_index(root: Path, report: RebuildReport) -> None:
+    """With ``check``: would ``rebuild`` rewrite INDEX.md? (#186)
+
+    docshelf owns the INDEX format, so docshelf answers: its ``doctor``
+    compares the file with a fresh render of the shelf — the render
+    ``rebuild_index`` writes — and reports ``stale-index`` when they differ.
+
+    That render reads each category's ``.meta.json`` from disk. When one of
+    them has drifted, the rebuild would replace it before rendering INDEX,
+    so a comparison now would judge INDEX against titles about to change:
+    it is skipped and the report says so (the verdict is "drifted" already).
+    docshelf also skips its own comparison while split directories are
+    uncommitted (docshelf#97); then INDEX is unverified, which is an error,
+    not a pass.
+    """
+    stale_meta = [rel for rel in report.drifted if rel.endswith(".meta.json")]
+    if stale_meta:
+        report.warnings.append(
+            f"INDEX.md not compared: it is rendered from {', '.join(stale_meta)}, "
+            "which drifted — rebuild, then check again"
+        )
+        return
+    try:
+        from docshelf_mcp.core.shelf import Shelf
+
+        rules = {f.rule for f in Shelf(root).doctor()}
+    except Exception as exc:  # noqa: BLE001 — an unverified INDEX is an error, not a pass
+        report.fail(f"INDEX.md not checked: {exc}")
+        return
+    if "stale-index" in rules:
+        report.drifted.append("INDEX.md")
+    elif "uncommitted-split-dir" in rules:
+        report.fail(
+            "INDEX.md not checked: docshelf does not compare INDEX while split "
+            f"directories are uncommitted — `memshelf prune-splits --shelf {root} --apply`, "
+            "then check again"
+        )
+    else:
+        report.unchanged.append("INDEX.md")
+
+
+def _check_chart(root: Path, report: RebuildReport) -> None:
+    """With ``check``: would ``rebuild`` redraw stats.svg? (#186)
+
+    The chart is drawn from ``ledger.tsv`` on disk, so when the ledger has
+    drifted the comparison is skipped for the reason INDEX skips a drifted
+    ``.meta.json``. No usable ledger rows → no chart, and ``rebuild`` leaves
+    the file alone too.
+    """
+    if "ledger.tsv" in report.drifted:
+        report.warnings.append(
+            "stats.svg not compared: it is drawn from ledger.tsv, which drifted — "
+            "rebuild, then check again"
+        )
+        return
+    try:
+        from memshelf_mcp.core.chart import render_chart_svg
+
+        svg = render_chart_svg(root)
+    except Exception as exc:  # noqa: BLE001 — an unverified chart is an error, not a pass
+        report.fail(f"stats.svg not checked: {exc}")
+        return
+    if svg is not None:
+        _apply(root, "stats.svg", svg, check=True, report=report)
+
+
 def rebuild(shelf_root: str | Path, *, check: bool = False) -> RebuildReport:
     """Regenerate (or, with ``check``, verify) every derived file on the shelf.
 
     ``check=True`` writes nothing and reports which files would change — the
     PR guard and the bot's own idempotency proof use the same code path, so
-    the guard cannot pass on logic the bot does not run.
+    the guard cannot pass on logic the bot does not run. That covers INDEX.md
+    and stats.svg too (#186): they are compared with a render in memory, and
+    one that cannot be compared is an error, not a pass. Outside ``check``, a
+    derived file that could not be written is an error as well: ``ok`` is
+    false and the CLI exits 1, while the rest is still rebuilt.
     """
     root = Path(shelf_root).expanduser().resolve()
     if not root.is_dir():
@@ -324,17 +407,22 @@ def rebuild(shelf_root: str | Path, *, check: bool = False) -> RebuildReport:
             report=report,
         )
 
-    # INDEX.md and stats.svg are rendered by their own writers rather than
-    # compared as strings: docshelf owns the INDEX format, and the chart is
-    # cosmetic. Both are still derived, so a check run must not invoke them.
-    if not check:
+    # INDEX.md and stats.svg have their own writers: docshelf owns the INDEX
+    # format, and the chart is drawn from the ledger just written. A check run
+    # must not invoke the writers, so it compares their renders instead (#186)
+    # — before that it skipped both, and `--check` said ok over a tampered
+    # INDEX.
+    if check:
+        _check_index(root, report)
+        _check_chart(root, report)
+    else:
         try:
             from docshelf_mcp.core.shelf import Shelf
 
             Shelf(root).rebuild_index()
             report.written.append("INDEX.md")
-        except Exception as exc:  # noqa: BLE001 — a shelf without docshelf still rebuilds the rest
-            report.warnings.append(f"INDEX.md not rebuilt: {exc}")
+        except Exception as exc:  # noqa: BLE001 — the rest is still rebuilt; `ok` says it failed
+            report.fail(f"INDEX.md not rebuilt: {exc}")
         try:
             from memshelf_mcp.core.chart import write_chart
 
@@ -344,8 +432,8 @@ def rebuild(shelf_root: str | Path, *, check: bool = False) -> RebuildReport:
             # field a caller uses to check what happened.
             if write_chart(root) is not None:
                 report.written.append("stats.svg")
-        except Exception as exc:  # noqa: BLE001 — cosmetic layer
-            report.warnings.append(f"stats.svg not redrawn: {exc}")
+        except Exception as exc:  # noqa: BLE001 — the rest is still rebuilt; `ok` says it failed
+            report.fail(f"stats.svg not redrawn: {exc}")
 
     return report
 

@@ -77,6 +77,19 @@ once code ships.
   switch -c <branch>`, `git push -u <remote> HEAD`, a draft PR), or, to land
   on the render branch itself, `git checkout -B main && git branch -u
   origin/main`, which keeps the commit.
+- **`rebuild --check` compares INDEX.md and stats.svg, and a derived file
+  that fails to render fails the run (#186, part 1).** `--check` skipped
+  both writers, so it answered `ok: true` over a tampered INDEX.md or
+  stats.svg. Outside `--check`, a failed INDEX write (INDEX.md turned into a
+  directory) was one more warning — `warnings[51]` on a shelf with ~50
+  description-clamp warnings — and the CLI exited 0. Now `--check` compares
+  INDEX.md through docshelf's `stale-index` and stats.svg with a chart drawn
+  in memory. When their input (`.meta.json`, `ledger.tsv`) drifted in the
+  same run, the comparison is skipped and the warnings say so. A derived
+  file that cannot be written or compared — including INDEX while docshelf
+  skips its comparison over uncommitted split directories — is named in the
+  new `errors` field: `ok` is false and the CLI exits 1. Each message also
+  stays in `warnings`, which rollup, purge and resolve forward.
 
 ## [0.4.0] — 2026-10-06
 

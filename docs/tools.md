@@ -185,7 +185,9 @@ Regenerate `ledger.tsv`, each category's `.meta.json`, `INDEX.md` and
 `stats.svg` from the episodes (#58). The episode is the source; these four are
 output, owned by a bot on `main`, which is what removes the multi-writer
 conflict class at the root. With `check=true` nothing is written and the result
-says which files have drifted — the shelf's PR guard runs exactly this. On a
+says which files have drifted, `INDEX.md` and `stats.svg` included — the
+shelf's PR guard runs exactly this. A derived file that could not be written
+(or, with `check=true`, compared) is named in `errors`, and `ok` is false. On a
 shelf whose bot renders derived files, run it by hand only when the bot is
 down: a hand-committed render collides with the bot's next commit.
 
