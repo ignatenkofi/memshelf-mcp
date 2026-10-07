@@ -312,6 +312,19 @@ def _ledger_ids(path: Path) -> set[str]:
     return {cols[1] for _, cols in _ledger_rows(path) if len(cols) >= 2}
 
 
+def _ledger_key(root: Path, rel: str) -> str | None:
+    """The id ``rebuild`` writes this episode's ledger row under, or None (#189).
+
+    ``collect_episodes`` keys every row by the frontmatter ``id`` and skips an
+    episode without one (missing or empty), so the id — not the filename — is
+    what a row is matched by; ``id-mismatch`` and ``frontmatter-missing-field``
+    report the disagreement itself. None means no render will ever give the
+    episode a row.
+    """
+    fields, _ = parse_frontmatter((root / rel).read_text(encoding="utf-8"))
+    return fields.get("id") or None
+
+
 # shelf-spec v0 § 4.4. Kept here rather than imported: doctor is offline and
 # dependency-free by design, and the spec's own validator is the second reader
 # — the point is that both agree, not that one calls the other.
@@ -1189,13 +1202,23 @@ def _check_episode(
         )
     else:
         for field_name in _REQUIRED_FRONTMATTER:
-            if field_name not in fields:
+            # An empty `id:` is as absent as a missing one: `rebuild` skips both,
+            # and without this the episode would leave doctor silent (#189).
+            present = bool(fields.get("id")) if field_name == "id" else field_name in fields
+            if not present:
+                detail = f"missing required field {field_name!r} (shelf-spec v0 § 5.2)"
+                if field_name == "id":
+                    detail += (
+                        "; the ledger row is keyed by the id and `rebuild` skips an "
+                        "episode without one, so this episode has no row and no render "
+                        "will give it one"
+                    )
                 out.append(
                     Finding(
                         "error",
                         "frontmatter-missing-field",
                         rel,
-                        f"missing required field {field_name!r} (shelf-spec v0 § 5.2)",
+                        detail,
                         f"add {field_name!r} to the frontmatter",
                     )
                 )
@@ -1232,8 +1255,9 @@ def _check_episode(
                 "error",
                 "id-mismatch",
                 rel,
-                f"frontmatter id {fields['id']!r} != filename {stem!r}",
-                "align the id with the filename",
+                f"frontmatter id {fields['id']!r} != filename {stem!r}; the ledger row "
+                f"is keyed by the id, so the episode is counted as {fields['id']!r}",
+                "align the id with the filename — the ledger row follows the id at the next render",
             )
         )
 
@@ -1375,10 +1399,18 @@ def check_shelf(
     for entry_rel in [e.relative_path for e in shelf.scan()] + archived_rel:
         episodes += 1
         rel = entry_rel
-        stem = Path(rel).stem
-        seen.add(stem)
         findings.extend(_check_episode(root, rel, pack.patterns))
-        if stem not in ledger_ids:
+        # #189 — matched by the key `rebuild` writes the row under, not by the
+        # filename: a renamed episode keeps its row under the old id, and its
+        # row is no orphan. An episode without an id falls back to the stem for
+        # the orphan check only — `rebuild` skips it, no render will ever give
+        # it a row, so it stays out of `no-ledger-row` and out of the renderer
+        # verdicts below; `frontmatter-missing-field` already names the cause.
+        key = _ledger_key(root, rel)
+        seen.add(key or Path(rel).stem)
+        if key is None:
+            continue
+        if key not in ledger_ids:
             uncounted.append(rel)
             findings.append(
                 Finding(

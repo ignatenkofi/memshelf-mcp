@@ -54,6 +54,18 @@ once code ships.
   Committed but not pushed on such a branch (`checkout -B claude/x
   origin/main` included), it names `git push -u <remote> HEAD`, then the PR.
   Messages on the render branch itself are unchanged.
+- **`doctor` matches ledger rows by the frontmatter `id`, the key `rebuild`
+  writes them under (#189).** It matched them by the filename stem, so a
+  renamed episode, rendered in the same commit, got `no-ledger-row`, its own
+  row became `orphan-ledger-row` («remove the stale row» — the next render
+  writes it back), and past the threshold `derived-stale` called a healthy
+  renderer stopped. Now the episode is matched by its `id`, and only
+  `id-mismatch` remains. An episode without an `id` (missing or empty) is
+  skipped by `rebuild`, so it is kept out of `no-ledger-row` and out of the
+  renderer verdicts; its stem still matches an old row, so that row is not
+  reported as an orphan. An empty `id:` used to pass with only
+  `no-ledger-row` and is now `frontmatter-missing-field`, like a missing one.
+  Both details now say the ledger row is keyed by the `id`.
 
 ## [0.4.0] — 2026-10-06
 
