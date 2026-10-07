@@ -72,6 +72,30 @@ jobs:
       - name: Start it and talk MCP to it
         run: python3 adapters/claude-desktop/try_bundle.py dist/*-linux-x86_64.mcpb
 
+  registry-manifest:
+    # #194 — release.yml's mcp-registry job runs only on a tag, after PyPI has
+    # already published. This job runs the same pinned install (download +
+    # `sha256sum -c`) and `mcp-publisher validate` on every PR and push, so a
+    # wrong hash, a bad pin bump or a server.json the registry rejects turns a
+    # PR red instead of a release. `validate` asks the live registry, so a
+    # registry outage turns this job red too.
+    name: server.json · mcp-publisher validate (pinned)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/install-mcp-publisher
+      - name: Validate server.json
+        # `validate` exits 0 on a deprecated `$schema` and only warns (v1.8.1,
+        # measured on the 2025-09-29 schema), so the warning is made fatal
+        # here: a deprecated schema is the step before a rejected one.
+        shell: bash
+        run: |
+          ./mcp-publisher validate 2>&1 | tee "$RUNNER_TEMP/validate.log"
+          if grep -qi 'deprecated' "$RUNNER_TEMP/validate.log"; then
+            echo "::error file=server.json::mcp-publisher validate reports a deprecated \$schema; move server.json to the schema it names."
+            exit 1
+          fi
+
   pii-self-verify:
     # The tool redacts other people's episodes (shelf/POLICY.md, the redaction
     # pass in `shelve`) and must obey the no-real-PII policy itself: verify

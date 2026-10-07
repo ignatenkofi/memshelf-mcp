@@ -13,6 +13,19 @@ once code ships.
 - **docshelf-mcp floor raised to 0.5.0** (`>=0.5.0,<1`). The suite ran
   green against the published 0.5.0; the lock drops `pymupdf4llm` and its
   tree, which 0.5.0 moved into its `pdf` extra.
+- **The release tools are pinned, and the registry path runs on every PR
+  (#194).** `release.yml` piped whatever `releases/latest` served into `tar`
+  and published with `pypa/gh-action-pypi-publish@release/v1`, a moving
+  branch, in jobs that hold an OIDC token. mcp-publisher now comes from a
+  composite action (`.github/actions/install-mcp-publisher`): release 1.8.1,
+  downloaded to a file and checked with `sha256sum -c` against the hash in
+  upstream's `registry_1.8.1_checksums.txt` before `tar` reads it. The PyPI
+  action is pinned to `dc37677` (`# v1.14.2`), the commit its tag points
+  at. These are the versions the v0.4.0 release ran with. A new ci job,
+  `registry-manifest`, runs the same install and `mcp-publisher validate` on
+  every PR and push. It also fails on a deprecated `$schema`, which
+  `validate` only warns about (exit 0). `server.json` moves to the
+  2025-12-11 schema.
 
 ### Fixed
 
