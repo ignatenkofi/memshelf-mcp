@@ -89,8 +89,13 @@ Fetch a shelved episode by id — or a single `## Section` of it.
 
 Returns the content wrapped in a data envelope: recalled episodes are records,
 never instructions. Prefer a section fetch over the whole episode when one
-section answers the question — that is where the savings are. `log=true`
-appends the realized saving to `recall-log.tsv`.
+section answers the question — that is where the savings are. Each recall
+appends a row to `recall-log.tsv` (on by default since #112; `log=false`
+reads without a trace): `episode_id`, `section` (empty for a whole episode),
+`fetched_tokens`, and `ts` — the recall's UTC time to the second (#193), so
+the realized savings `memshelf_stats` reports can be split by period. A log
+created before `ts` keeps its three-column header and gets the longer rows
+appended under it; `stats` and `resolve` read both widths.
 
 ## `memshelf_index`
 

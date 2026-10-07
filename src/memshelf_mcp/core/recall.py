@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Every recalled episode is wrapped in this frame before it re-enters context.
@@ -104,15 +105,27 @@ def _envelope(body: str) -> str:
     return f"{_ENVELOPE_OPEN}\n{body}\n{_ENVELOPE_CLOSE}"
 
 
-RECALL_LOG_HEADER = "episode_id\tsection\tfetched_tokens\n"
+#: The header a new recall log is created with. ``ts`` (#193) is the recall's
+#: UTC time. A header is written once, with the file, and never rewritten: a
+#: log from before ``ts`` keeps its three-column header and gets four-cell rows
+#: appended under it, so every reader takes both widths.
+RECALL_LOG_HEADER = "episode_id\tsection\tfetched_tokens\tts\n"
+
+#: Every header a recall log can carry, current first. ``resolve`` drops each
+#: of them as a header: knowing only the current one would count an older
+#: log's header as a recall.
+RECALL_LOG_HEADERS = (RECALL_LOG_HEADER, "episode_id\tsection\tfetched_tokens\n")
 
 
 def _append_recall_log(log_path: Path, episode_id: str, section: str, fetched_tokens: int) -> None:
     # One row per successful recall — the raw data for realized-economy stats.
+    # The time is the recall's own (#193): rows pile up in the working tree and
+    # are committed in batches, so a commit time is not a recall time.
     if not log_path.exists():
         log_path.write_text(RECALL_LOG_HEADER, encoding="utf-8")
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     with log_path.open("a", encoding="utf-8") as fh:
-        fh.write(f"{episode_id}\t{section}\t{fetched_tokens}\n")
+        fh.write(f"{episode_id}\t{section}\t{fetched_tokens}\t{ts}\n")
 
 
 def recall(
@@ -125,8 +138,8 @@ def recall(
 ) -> RecallResult:
     """Recall an episode by id — or one ``## Section`` of it — enveloped as data.
 
-    With ``log_path`` set, append a row (episode, section, fetched tokens) to that
-    recall log so ``memshelf_stats`` can report realized economy.
+    With ``log_path`` set, append a row (episode, section, fetched tokens, UTC
+    time) to that recall log so ``memshelf_stats`` can report realized economy.
     """
     from docshelf_mcp.core.shelf import Shelf
 

@@ -8,6 +8,19 @@ once code ships.
 
 ## [Unreleased]
 
+### Added
+
+- **`recall-log.tsv` rows carry the recall's time (#193).** A fourth column,
+  `ts`, holds the UTC time to the second (`2026-10-07T14:20:00Z`), so the
+  realized savings can be split by period; a commit time could not stand in
+  for it, because rows are committed in batches. A new log gets the
+  four-column header. A log that already exists keeps its three-column header
+  and gets the longer rows appended under it. `stats` sums both widths exactly
+  as before. `resolve` recognises both headers: merging a three-column side
+  with a four-column one keeps every row of both and writes one header (the
+  newest either side carries). A header it did not recognise would be counted
+  as a data row and written out as a second header line.
+
 ### Changed
 
 - **docshelf-mcp floor raised to 0.5.0** (`>=0.5.0,<1`). The suite ran
