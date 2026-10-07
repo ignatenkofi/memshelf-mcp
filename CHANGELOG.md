@@ -8,6 +8,12 @@ once code ships.
 
 ## [Unreleased]
 
+### Changed
+
+- **docshelf-mcp floor raised to 0.5.0** (`>=0.5.0,<1`). The suite ran
+  green against the published 0.5.0; the lock drops `pymupdf4llm` and its
+  tree, which 0.5.0 moved into its `pdf` extra.
+
 ### Fixed
 
 - **`shelve --push` pushes HEAD, and refuses on a branch whose upstream has

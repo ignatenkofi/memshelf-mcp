@@ -37,7 +37,11 @@ dependencies = [
     # longer makes INDEX diverge between checkouts. Below 0.4.1 the same shelf
     # renders differently on the machine that holds the split — the #109 world
     # tests/test_splits.py used to document.
-    "docshelf-mcp>=0.4.1,<1",
+    # Floor raised to 0.5.0 (2026-10-07) after the suite ran green against
+    # the published 0.5.0 (593 passed, conformance on shelf-spec 0.3.0 too);
+    # 0.5.0 also moves pymupdf4llm out of core into the `pdf` extra, which
+    # memshelf never needed.
+    "docshelf-mcp>=0.5.0,<1",
     # Floor at 2.0: server.py imports MCPServer from mcp.server.mcpserver,
     # which 1.x does not have (the 1.x name, mcp.server.fastmcp, was removed
     # in 2.0.0) — a 1.x install fails at import. Major-version ceiling: the

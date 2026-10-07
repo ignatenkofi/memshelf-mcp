@@ -41,7 +41,7 @@ jobs:
       # отдельным PR полки, в чьём прогоне новое поведение и видно
       # (README адаптера, «Как поднять пин»).
       - name: Установить memshelf
-        run: pip install --quiet "memshelf-mcp @ git+https://github.com/ignatenkofi/memshelf-mcp@v0.3.0"
+        run: pip install --quiet "memshelf-mcp @ git+https://github.com/ignatenkofi/memshelf-mcp@v0.4.0"
 
       - name: Дифф PR не трогает производные пути
         run: |
