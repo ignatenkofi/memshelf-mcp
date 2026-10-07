@@ -40,8 +40,24 @@ jobs:
       # PyPI `memshelf-mcp==X.Y.Z` — один и тот же код. Поднимать пин
       # отдельным PR полки, в чьём прогоне новое поведение и видно
       # (README адаптера, «Как поднять пин»).
+      # Три попытки с паузой (15/30 с): установка тянет git+https с GitHub, и
+      # разовый сетевой сбой ронял бы джобу до первого шага по делу (#195; тот
+      # же цикл, что у боевой полки). Bash-цикл, а не сторонний retry-action —
+      # без новой зависимости в supply chain. Раннер исполняет run: под
+      # `bash -e`, и `pip install … && exit 0` его переживает (не-последняя
+      # команда списка && от errexit освобождена), а `pip install …; rc=$?`
+      # умер бы на первой неудаче. tests/test_shelf_repo_templates.py
+      # memshelf-mcp гоняет этот шаг под bash -e на заглушке pip.
       - name: Установить memshelf
-        run: pip install --quiet "memshelf-mcp @ git+https://github.com/ignatenkofi/memshelf-mcp@v0.4.0"
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            pip install --quiet "memshelf-mcp @ git+https://github.com/ignatenkofi/memshelf-mcp@v0.4.0" && exit 0
+            echo "::warning::pip install memshelf не удался (попытка ${attempt} из 3) — сеть или GitHub, не полка; пауза и повтор"
+            [ "$attempt" = 3 ] || sleep $((attempt * 15))
+          done
+          echo "::error::memshelf не установился за три попытки — отказ доставки инструмента, не полки"
+          exit 1
 
       - name: Дифф PR не трогает производные пути
         run: |

@@ -40,6 +40,16 @@ once code ships.
   `if: always()`, opens or comments on one issue when the scan fails, and the
   next green scheduled run closes it. The pipeline's
   `assert-schedule-liveness.py` lint passes on the file.
+- **The shelf-repo templates retry the memshelf install, and a test holds
+  their pin (#195).** `shelf-derived.yml` and `shelf-pr-guard.yml` installed
+  memshelf with one bare `pip install`, so a single network or GitHub failure
+  failed the bot or the guard before its first real step. Both now use the
+  3-attempt bash loop a production shelf already runs: a growing pause, a
+  `::warning::` per failed attempt, then `::error::` and exit 1.
+  `tests/test_shelf_repo_templates.py` checks that each template has exactly
+  one install line, that both pin the same `vX.Y.Z` tag, and that the tag is
+  not newer than `__version__`. It also runs each install step under
+  `bash -e` against a stub pip.
 
 ### Fixed
 
