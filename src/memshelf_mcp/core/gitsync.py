@@ -17,7 +17,11 @@ Two moves, both explicit in the report:
   recorded loudly instead.
 * ``push_with_retry`` — after the shelve commit, when asked: push; on a
   rejection, fetch + rebase and push again **exactly once**; a second
-  rejection surfaces git's own words.
+  rejection surfaces git's own words. What is pushed is HEAD, and only onto
+  the upstream of the same name: a session branch tracking another branch
+  (``checkout -B claude/x origin/main``) is refused before any push or rebase
+  — git's own ``push.default=simple`` rule — because the way from there to
+  ``main`` is a PR, not a push.
 
 A clean run still says so: «pulled 0, retries 0» is a statement, not an
 omission — absence of signal must not look like normal (#146 lesson, the
@@ -70,8 +74,10 @@ class SyncDivergedError(RuntimeError):
 
 
 class PushRejectedError(RuntimeError):
-    """The push failed even after the one rebase-and-retry — git's own words
-    are carried verbatim, because the second refusal is where guessing stops."""
+    """The push did not happen: refused before it started (no remote, a
+    detached HEAD, a branch whose upstream has another name), or failed even
+    after the one rebase-and-retry — then git's own words are carried
+    verbatim, because the second refusal is where guessing stops."""
 
 
 @dataclass
@@ -96,7 +102,9 @@ class SyncReport:
     #: 18.08); callers that cannot push should quote the episode id instead.
     final_sha: str | None = None
     #: The executable catch-up when the commit stayed local: exactly
-    #: ``git -C <shelf> pull --rebase <remote> <branch> && git -C … push …``.
+    #: ``git -C <shelf> pull --rebase <remote> <branch> && git -C … push …``,
+    #: or ``git -C <shelf> push -u <remote> HEAD`` on a branch whose upstream
+    #: has another name (``hint_command``).
     hint: str | None = None
     #: #118 — branch publication. ``published_branch`` is the remote branch
     #: that now carries the shelve commit; ``compare_url`` opens the PR in one
@@ -135,10 +143,54 @@ class SyncReport:
         return ", ".join(parts)
 
 
+def _head_branch(root: Path) -> str | None:
+    """The checked-out branch's name; None on a detached HEAD.
+
+    The full ref with its prefix cut, not ``--short``: git shortens
+    ``refs/heads/main`` to ``heads/main`` once a tag is also named ``main``.
+    """
+    head = _git(root, "symbolic-ref", "--quiet", "HEAD")
+    ref = head.stdout.strip()
+    prefix = "refs/heads/"
+    return ref[len(prefix) :] if head.returncode == 0 and ref.startswith(prefix) else None
+
+
+def _off_upstream(root: Path, branch: str) -> str | None:
+    """The checked-out branch when its name differs from the upstream's ``branch``.
+
+    ``git checkout -B claude/x origin/main`` — how agent sessions and night
+    shifts start — makes ``origin/main`` the upstream of ``claude/x``. There a
+    bare ``git push origin main`` pushes the *local* ``main``, not this
+    branch: «Everything up-to-date» while the episode stays here, stale local
+    commits landing on ``main``, or a rejection whose retry rebases the
+    session branch. None when the names match, or on a detached HEAD.
+    """
+    head = _head_branch(root)
+    return head if head is not None and head != branch else None
+
+
 def hint_command(root: Path, remote: str, branch: str) -> str:
-    """The catch-up as one copy-pastable command, executable from any cwd."""
+    """The catch-up as one copy-pastable command, executable from any cwd.
+
+    From a branch whose upstream has another name, the command publishes the
+    branch under its own name instead — the road to ``branch`` is then a PR.
+    """
     at = shlex.quote(str(root))
+    if _off_upstream(root, branch) is not None:
+        return f"git -C {at} push -u {remote} HEAD"
     return f"git -C {at} pull --rebase {remote} {branch} && git -C {at} push {remote} {branch}"
+
+
+def _way_out(root: Path, remote: str, branch: str) -> str:
+    """The lead-in and the command that end preflight's two refusals."""
+    head = _off_upstream(root, branch)
+    if head is not None:
+        return (
+            f"{head!r} tracks {remote}/{branch}, a branch of another name: publish it "
+            "under its own name (then a PR), and shelve again:\n  "
+            + hint_command(root, remote, branch)
+        )
+    return "Catch up deliberately, then shelve:\n  " + hint_command(root, remote, branch)
 
 
 def has_remote(root: Path) -> bool:
@@ -164,9 +216,10 @@ def _sync_target(root: Path) -> tuple[tuple[str, str] | None, str | None]:
     remotes = [r for r in _git(root, "remote").stdout.split() if r]
     if not remotes:
         return None, "no remote configured (git-local shelf)"
-    head = _git(root, "rev-parse", "--abbrev-ref", "HEAD")
-    branch = head.stdout.strip()
-    if head.returncode != 0 or branch == "HEAD":
+    # The name from _head_branch, as the push guard reads it: `--abbrev-ref
+    # HEAD` says `heads/main` once a tag is also named `main`.
+    branch = _head_branch(root)
+    if branch is None or _git(root, "rev-parse", "--verify", "--quiet", "HEAD").returncode != 0:
         return None, "detached HEAD or unborn branch — nothing to sync onto"
     remote = "origin" if "origin" in remotes else remotes[0]
     return (remote, branch), None
@@ -260,15 +313,14 @@ def preflight(root: Path) -> SyncReport:
         raise SyncDivergedError(
             f"shelve refused before writing: this clone and {upstream} have "
             f"diverged — {ahead} local commit(s) against {behind.stdout.strip()} on the "
-            f"remote, so a fast-forward is impossible. Catch up deliberately, then shelve:\n  "
-            + hint_command(root, report.remote, report.branch)
+            f"remote, so a fast-forward is impossible. "
+            + _way_out(root, report.remote, report.branch)
         )
     merged = _git(root, "merge", "--ff-only", upstream)
     if merged.returncode != 0:
         raise SyncDivergedError(
             f"shelve refused before writing: fast-forwarding to {upstream} failed "
-            f"({_err(merged)}). Catch up deliberately, then shelve:\n  "
-            + hint_command(root, report.remote, report.branch)
+            f"({_err(merged)}). " + _way_out(root, report.remote, report.branch)
         )
     report.performed = True
     report.commits_pulled = int(behind.stdout.strip() or 0)
@@ -346,6 +398,11 @@ def push_with_retry(root: Path, report: SyncReport) -> None:
     Mutates ``report`` in place: ``push_retries``, ``pushed``,
     ``commits_pulled`` (rebase pulls count too) and ``final_sha`` — the
     post-push HEAD, the only sha a report should quote (#108).
+
+    The refspec is ``HEAD:refs/heads/<branch>``: the commit just made, never
+    a local ref that merely shares the upstream's name. A detached HEAD, or a
+    branch named differently from its upstream (see ``_off_upstream``), is
+    refused before any push or rebase; the commit stays where it is.
     """
     report.push_requested = True
     if report.remote is None or report.branch is None:
@@ -354,7 +411,26 @@ def push_with_retry(root: Path, report: SyncReport) -> None:
             raise PushRejectedError(f"push requested, but {why}")
         report.remote, report.branch = target
 
-    first = _git(root, "push", report.remote, report.branch)
+    head = _head_branch(root)
+    if head is None:
+        raise PushRejectedError("push requested, but HEAD is detached — no branch to push")
+    if head != report.branch:
+        # Pushing HEAD to the upstream's name would land the episode on
+        # `main` past the PR, and the rebase-retry would rewrite the session
+        # branch — git's push.default=simple refuses this push for the same
+        # reason, and so does this one.
+        raise PushRejectedError(
+            f"push refused, nothing pushed or rebased: this checkout is on {head!r}, "
+            f"whose upstream is {report.remote}/{report.branch} — a branch of another "
+            f"name. The episode is committed on {head!r}, not pushed. Publish the "
+            "branch under its own name, then open a PR:\n  "
+            + hint_command(root, report.remote, report.branch)
+            + "\nNext time on such a branch, shelve with --publish (a new "
+            "shelve/<slug> branch) instead of --push."
+        )
+
+    refspec = f"HEAD:refs/heads/{report.branch}"
+    first = _git(root, "push", report.remote, refspec)
     if first.returncode != 0:
         # One retry, whatever the rejection: for a non-fast-forward the rebase
         # is the fix; for anything else (auth, protection) the retry is a
@@ -375,7 +451,7 @@ def push_with_retry(root: Path, report: SyncReport) -> None:
             )
         report.commits_pulled += int(behind.stdout.strip() or 0)
         report.push_retries = 1
-        second = _git(root, "push", report.remote, report.branch)
+        second = _git(root, "push", report.remote, refspec)
         if second.returncode != 0:
             raise PushRejectedError(
                 "push rejected twice; after one pull-rebase retry git says:\n" + _err(second)
