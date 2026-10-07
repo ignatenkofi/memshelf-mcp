@@ -64,7 +64,14 @@ jobs:
           python -m pip install --upgrade build
           python -m build
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        # A commit, not the moving `release/v1` branch (#194): this step holds
+        # the OIDC token that publishes the package. It is the commit the tag
+        # points at, not the annotated tag object (a892a5a…): the action runs
+        # the image ghcr.io/pypa/gh-action-pypi-publish:<ref>, and GHCR has
+        # one for the commit and none for the tag object (checked 2026-10-07).
+        # The trailing version comment is what dependabot updates along with
+        # the sha.
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           # Делает релиз ВОЗОБНОВЛЯЕМЫМ. Джобы идут pypi → mcp-registry, и если
           # второй упал (у v0.1.0 — реестр отверг description длиннее 100), то
@@ -83,10 +90,10 @@ jobs:
       id-token: write # MCP Registry GitHub OIDC login
     steps:
       - uses: actions/checkout@v7
-      - name: Install mcp-publisher
-        run: |
-          curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" \
-            | tar xz mcp-publisher
+      # A pinned release checked against upstream's sha256, not the
+      # latest-release download piped into tar at tag time (#194). ci runs
+      # the same action on every PR (job registry-manifest).
+      - uses: ./.github/actions/install-mcp-publisher
       - name: Publish to the MCP Registry
         run: |
           ./mcp-publisher login github-oidc
