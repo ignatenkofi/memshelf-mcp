@@ -90,8 +90,8 @@ jobs:
       id-token: write # MCP Registry GitHub OIDC login
     steps:
       - uses: actions/checkout@v7
-      # A pinned release checked against upstream's sha256, not whatever
-      # `releases/latest` serves at tag time piped into tar (#194). ci runs
+      # A pinned release checked against upstream's sha256, not the
+      # latest-release download piped into tar at tag time (#194). ci runs
       # the same action on every PR (job registry-manifest).
       - uses: ./.github/actions/install-mcp-publisher
       - name: Publish to the MCP Registry

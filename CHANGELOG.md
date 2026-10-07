@@ -23,8 +23,10 @@ once code ships.
   action is pinned to `dc37677` (`# v1.14.2`), the commit its tag points
   at. These are the versions the v0.4.0 release ran with. A new ci job,
   `registry-manifest`, runs the same install and `mcp-publisher validate` on
-  every PR and push. It also fails on a deprecated `$schema`, which
-  `validate` only warns about (exit 0). `server.json` moves to the
+  every PR and push. It also fails on a deprecated `$schema`, which the
+  registry only warns about (`validate` exits 0). `validate` asks the live
+  registry, so the job also turns red with nothing changed here when the
+  registry is down or moves its current schema. `server.json` moves to the
   2025-12-11 schema.
 - **CI tests Python 3.14, and the classifiers say so (#199).** The test
   matrix keeps testing the two ends of the declared range, now 3.10 and

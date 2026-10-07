@@ -78,17 +78,28 @@ jobs:
     # already published. This job runs the same pinned install (download +
     # `sha256sum -c`) and `mcp-publisher validate` on every PR and push, so a
     # wrong hash, a bad pin bump or a server.json the registry rejects turns a
-    # PR red instead of a release. `validate` asks the live registry, so a
-    # registry outage turns this job red too.
+    # PR red instead of a release.
+    #
+    # The pin covers the client, not the verdict. `validate` checks nothing
+    # locally: it POSTs server.json to the live registry's /v0/validate and
+    # prints what the server answers (cmd/publisher/commands/validate.go at
+    # v1.8.1). "Deprecated" is the server's policy too: it compares `$schema`
+    # with its own current schema URL (internal/validators/schema.go). So this
+    # job also turns red with nothing changed here, in two ways: the registry
+    # is down (re-run later), or upstream moves its current schema (move
+    # server.json to the one the warning names).
     name: server.json · mcp-publisher validate (pinned)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/install-mcp-publisher
       - name: Validate server.json
-        # `validate` exits 0 on a deprecated `$schema` and only warns (v1.8.1,
-        # measured on the 2025-09-29 schema), so the warning is made fatal
-        # here: a deprecated schema is the step before a rejected one.
+        # The server answers a non-current `$schema` with a warning
+        # (`schema-version-deprecated`; policy `warn` for both validate and
+        # publish in the registry source at v1.8.1, an `error` policy exists),
+        # and `validate` exits 0 when the answer holds only warnings. The
+        # warning is made fatal here, so the schema moves on a PR rather than
+        # on the tag the registry first refuses.
         shell: bash
         run: |
           ./mcp-publisher validate 2>&1 | tee "$RUNNER_TEMP/validate.log"
