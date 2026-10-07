@@ -1398,6 +1398,93 @@ def test_a_detached_checkout_says_the_renderer_cannot_be_judged(tmp_path):
     assert "detached HEAD" in finding.detail
 
 
+# --- memshelf-mcp#186 part 2: the advised way out keeps the commit ----------
+#
+# doctor meets `upstream-unknown` right after a shelve, with the episode
+# committed on the checkout. The old fix, `git checkout -B main origin/main`,
+# moved off that commit («you are leaving 1 commit behind»). Each test below
+# runs the advised commands and checks the commit is still HEAD and the
+# warning is gone — an advice that reads right but does not work is the
+# defect this replaces.
+
+
+def _git_out(root, *args) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _upstream_unknown(root):
+    report = check_shelf(root, now=datetime(2026, 8, 21, 20, 0, tzinfo=timezone.utc))
+    found = [f for f in report.findings if f.code == "upstream-unknown"]
+    return (found[0] if found else None), report
+
+
+@pytest.mark.parametrize(
+    ("route", "advised", "commands", "after"),
+    [
+        (
+            "session",
+            ["`git switch -c <branch>`", "`git push -u origin HEAD`", "a draft PR into main"],
+            [["switch", "-q", "-c", "claude/probe"], ["push", "-q", "-u", "origin", "HEAD"]],
+            "upstream-not-rendered",
+        ),
+        (
+            "owner",
+            ["`git checkout -B main && git branch -u origin/main`"],
+            [["checkout", "-q", "-B", "main"], ["branch", "-q", "-u", "origin/main"]],
+            "episode-unpushed",
+        ),
+    ],
+)
+def test_the_way_off_a_detached_head_keeps_the_episode_commit(
+    tmp_path, route, advised, commands, after
+):
+    """The episode commit is on the detached HEAD only — local `main` is
+    level with `origin/main`, as in a session that checked out a commit."""
+    _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
+    subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach"], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "branch", "-q", "-f", "main", "origin/main"], check=True
+    )
+    episode = _git_out(root, "rev-parse", "HEAD")
+
+    finding, _ = _upstream_unknown(root)
+
+    assert finding is not None
+    assert "checkout -B main origin/main" not in finding.fix
+    for text in advised:
+        assert text in finding.fix, finding.fix
+    for command in commands:
+        subprocess.run(["git", "-C", str(root), *command], check=True)
+    assert _git_out(root, "rev-parse", "HEAD") == episode, f"{route}: the commit was left behind"
+    finding, report = _upstream_unknown(root)
+    assert finding is None, report.as_dict()
+    assert after in _codes(report)
+
+
+@pytest.mark.parametrize("branch", ["night/probe", "main"])
+def test_a_branch_without_an_upstream_is_told_to_push_it_with_one(tmp_path, branch):
+    """A named branch with no upstream needs no checkout at all: `push -u`
+    publishes it — then a draft PR, unless it is the render branch itself."""
+    _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
+    if branch == "main":
+        subprocess.run(["git", "-C", str(root), "branch", "-q", "--unset-upstream"], check=True)
+    else:
+        subprocess.run(["git", "-C", str(root), "checkout", "-q", "-b", branch], check=True)
+    episode = _git_out(root, "rev-parse", "HEAD")
+
+    finding, _ = _upstream_unknown(root)
+
+    assert finding is not None
+    assert f"push `{branch}` with an upstream: `git push -u origin HEAD`" in finding.fix
+    assert ("a draft PR into main" in finding.fix) is (branch != "main")
+    assert "checkout -B" not in finding.fix
+    subprocess.run(["git", "-C", str(root), "push", "-q", "-u", "origin", "HEAD"], check=True)
+    assert _git_out(root, "rev-parse", "HEAD") == episode
+    assert _upstream_unknown(root)[0] is None
+
+
 def test_a_shelf_without_a_remote_is_not_told_about_upstreams(tmp_path):
     """The other half. A local shelf has no renderer to be fair to; warning it
     about a missing upstream would be noise on every plain-directory shelf."""

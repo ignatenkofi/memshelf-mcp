@@ -66,6 +66,17 @@ once code ships.
   reported as an orphan. An empty `id:` used to pass with only
   `no-ledger-row` and is now `frontmatter-missing-field`, like a missing one.
   Both details now say the ledger row is keyed by the `id`.
+- **`upstream-unknown` advises a way out that keeps the episode commit
+  (#186, part 2).** doctor meets this warning right after a shelve, with the
+  episode already committed on the checkout. The fix said `git checkout -B
+  main origin/main`: on a detached HEAD that moves off the commit (git: «you
+  are leaving 1 commit behind»), and it force-resets a local `main`. The fix
+  now depends on the checkout. On a branch with no upstream it is `git push
+  -u <remote> HEAD`, then a draft PR into the render branch unless the branch
+  is the render branch. On a detached HEAD it is a session branch (`git
+  switch -c <branch>`, `git push -u <remote> HEAD`, a draft PR), or, to land
+  on the render branch itself, `git checkout -B main && git branch -u
+  origin/main`, which keeps the commit.
 
 ## [0.4.0] — 2026-10-06
 

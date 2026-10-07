@@ -27,6 +27,7 @@ from memshelf_mcp.core.episode import (
     required_sections,
 )
 from memshelf_mcp.core.frontmatter import parse_frontmatter
+from memshelf_mcp.core.gitsync import _head_branch
 from memshelf_mcp.core.policy import load_pattern_pack
 from memshelf_mcp.core.redact import scan, scan_patterns
 from memshelf_mcp.core.remote import PRIVATE, PUBLIC, configured_remotes, remote_visibility
@@ -934,8 +935,10 @@ def _check_upstream_unknown(
     if not uncounted or upstream is not None or not (root / ".git").exists():
         return []
     remotes = subprocess.run(["git", "-C", str(root), "remote"], capture_output=True, text=True)
-    if remotes.returncode != 0 or not remotes.stdout.strip():
+    names = remotes.stdout.split() if remotes.returncode == 0 else []
+    if not names:
         return []
+    remote = "origin" if "origin" in names else names[0]
     return [
         Finding(
             "warning",
@@ -944,10 +947,41 @@ def _check_upstream_unknown(
             "this checkout tracks no upstream branch (detached HEAD, or a branch with no "
             "remote counterpart), so what the renderer could see is unknown; the "
             "`derived-stale` verdict below falls back to the ledger's own age",
-            "check out a branch that tracks the remote (`git checkout -B main origin/main`) "
-            "and re-run, or read `derived-stale` as a statement about the ledger only",
+            _upstream_unknown_fix(root, remote),
         )
     ]
+
+
+def _upstream_unknown_fix(root: Path, remote: str) -> str:
+    """A way to an upstream that keeps the commit made here (memshelf-mcp#186).
+
+    doctor meets this state right after a shelve, so the episode's commit is
+    already on the checkout. The old advice, ``git checkout -B main
+    origin/main``, moved off it — git answers «you are leaving 1 commit
+    behind» — and force-reset a local ``main`` on the way. A session's route
+    is its own branch, ``git push -u <remote> HEAD`` and a draft PR (the
+    render branch then judges it, #180); landing on the render branch itself
+    keeps the commit with ``checkout -B <branch>`` from HEAD plus ``-u``.
+    """
+    render = _render_branch(root, remote)
+    target = render[len(remote) + 1 :] if render else None
+    tail = "then re-run doctor, or read `derived-stale` as a statement about the ledger only"
+    head = _head_branch(root)
+    if head is not None:
+        pr = f", then open a draft PR into {target}" if target and head != target else ""
+        return f"push `{head}` with an upstream: `git push -u {remote} HEAD`{pr}; {tail}"
+    into = f" into {target}" if target else ""
+    land = (
+        f"; to land it on {target} itself, `git checkout -B {target} && git branch -u "
+        f"{remote}/{target}` (it keeps the commit)"
+        if target
+        else ""
+    )
+    return (
+        "HEAD is detached, so a commit made here is on no branch yet: from a session, "
+        f"`git switch -c <branch>`, `git push -u {remote} HEAD`, then a draft PR{into}"
+        f"{land}; {tail}"
+    )
 
 
 def _check_unpushed_episodes(local_only: list[str], upstream: str | None) -> list[Finding]:
