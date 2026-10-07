@@ -243,14 +243,17 @@ def test_a_session_branch_tracking_main_is_told_to_publish_it_not_to_push_main(t
 
 def test_a_botless_session_branch_gets_the_pr_and_keeps_the_rebuild(tmp_path):
     """Without a bot nobody renders after the merge either: the PR step is
-    added, the rebuild advice stays."""
+    added, the rebuild advice stays. «run `memshelf rebuild`» alone would not
+    pin it — the bot wording «do not run `memshelf rebuild` by hand» contains
+    it — so the test names what only the bot-less wording says."""
     root = _on_session_branch(_shelf_on_main(tmp_path, bot=False))
 
     nxt = _shelve(root, push=True)["next"]
 
     assert "pushed to origin/claude/probe" in nxt
     assert "a PR into main" in nxt
-    assert "run `memshelf rebuild`" in nxt
+    assert "commit the derived files separately" in nxt
+    assert "do not run" not in nxt
     assert "nothing else to do" not in nxt
 
 
