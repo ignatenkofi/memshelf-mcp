@@ -72,14 +72,17 @@ once code ships.
 - **`upstream-unknown` advises a way out that keeps the episode commit
   (#186, part 2).** doctor meets this warning right after a shelve, with the
   episode already committed on the checkout. The fix said `git checkout -B
-  main origin/main`: on a detached HEAD that moves off the commit (git: «you
-  are leaving 1 commit behind»), and it force-resets a local `main`. The fix
-  now depends on the checkout. On a branch with no upstream it is `git push
-  -u <remote> HEAD`, then a draft PR into the render branch unless the branch
-  is the render branch. On a detached HEAD it is a session branch (`git
-  switch -c <branch>`, `git push -u <remote> HEAD`, a draft PR), or, to land
-  on the render branch itself, `git checkout -B main && git branch -u
-  origin/main`, which keeps the commit.
+  main origin/main`, which on a detached HEAD moves off that commit (git:
+  «you are leaving 1 commit behind»). The fix now depends on the checkout.
+  On a session branch with no upstream it is `git push -u <remote> HEAD`,
+  then a draft PR into the render branch. On the render branch itself it is
+  `git branch -u <remote>/<branch>`, then `git pull --rebase <remote>
+  <branch>` before the push: a `push -u` from there is rejected once the bot
+  has committed to it. On a detached HEAD it is a session branch (`git switch
+  -c <branch>`, `git push -u <remote> HEAD`, a draft PR), or, to land on the
+  render branch itself, `git fetch . HEAD:main && git switch main && git
+  branch -u origin/main` — a fast-forward, which git refuses when local
+  `main` has commits HEAD lacks.
 - **`rebuild --check` compares INDEX.md and stats.svg, and a derived file
   that fails to render fails the run (#186, part 1).** `--check` skipped
   both writers, so it answered `ok: true` over a tampered INDEX.md or

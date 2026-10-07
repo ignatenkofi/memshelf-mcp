@@ -1431,8 +1431,12 @@ def _upstream_unknown(root):
         ),
         (
             "owner",
-            ["`git checkout -B main && git branch -u origin/main`"],
-            [["checkout", "-q", "-B", "main"], ["branch", "-q", "-u", "origin/main"]],
+            ["`git fetch . HEAD:main && git switch main && git branch -u origin/main`"],
+            [
+                ["fetch", "-q", ".", "HEAD:main"],
+                ["switch", "-q", "main"],
+                ["branch", "-q", "-u", "origin/main"],
+            ],
             "episode-unpushed",
         ),
     ],
@@ -1452,7 +1456,7 @@ def test_the_way_off_a_detached_head_keeps_the_episode_commit(
     finding, _ = _upstream_unknown(root)
 
     assert finding is not None
-    assert "checkout -B main origin/main" not in finding.fix
+    assert "checkout -B" not in finding.fix
     for text in advised:
         assert text in finding.fix, finding.fix
     for command in commands:
@@ -1463,26 +1467,82 @@ def test_the_way_off_a_detached_head_keeps_the_episode_commit(
     assert after in _codes(report)
 
 
-@pytest.mark.parametrize("branch", ["night/probe", "main"])
-def test_a_branch_without_an_upstream_is_told_to_push_it_with_one(tmp_path, branch):
-    """A named branch with no upstream needs no checkout at all: `push -u`
-    publishes it — then a draft PR, unless it is the render branch itself."""
+def test_landing_a_detached_commit_on_main_refuses_rather_than_drop_its_commits(tmp_path):
+    """Local `main` carries a commit HEAD lacks: the advised fast-forward
+    fails loudly, and neither that commit nor the episode is lost."""
     _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
-    if branch == "main":
-        subprocess.run(["git", "-C", str(root), "branch", "-q", "--unset-upstream"], check=True)
-    else:
-        subprocess.run(["git", "-C", str(root), "checkout", "-q", "-b", branch], check=True)
+    subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach"], check=True)
+    extra = _git_out(
+        root, "commit-tree", "origin/main^{tree}", "-p", "origin/main", "-m", "local work"
+    )
+    subprocess.run(["git", "-C", str(root), "branch", "-q", "-f", "main", extra], check=True)
+    episode = _git_out(root, "rev-parse", "HEAD")
+
+    finding, _ = _upstream_unknown(root)
+    assert "`git fetch . HEAD:main && git switch main" in finding.fix
+    land = subprocess.run(
+        ["git", "-C", str(root), "fetch", ".", "HEAD:main"], capture_output=True, text=True
+    )
+
+    assert land.returncode != 0
+    assert "rejected" in land.stderr, land.stderr
+    assert _git_out(root, "rev-parse", "HEAD") == episode
+    assert _git_out(root, "rev-parse", "main") == extra
+
+
+def test_a_branch_without_an_upstream_is_told_to_push_it_with_one(tmp_path):
+    """A session branch with no upstream needs no checkout at all: `push -u`
+    publishes it, then a draft PR into the render branch."""
+    _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
+    subprocess.run(["git", "-C", str(root), "checkout", "-q", "-b", "night/probe"], check=True)
     episode = _git_out(root, "rev-parse", "HEAD")
 
     finding, _ = _upstream_unknown(root)
 
     assert finding is not None
-    assert f"push `{branch}` with an upstream: `git push -u origin HEAD`" in finding.fix
-    assert ("a draft PR into main" in finding.fix) is (branch != "main")
+    assert "push `night/probe` with an upstream: `git push -u origin HEAD`" in finding.fix
+    assert "a draft PR into main" in finding.fix
     assert "checkout -B" not in finding.fix
     subprocess.run(["git", "-C", str(root), "push", "-q", "-u", "origin", "HEAD"], check=True)
     assert _git_out(root, "rev-parse", "HEAD") == episode
     assert _upstream_unknown(root)[0] is None
+
+
+def test_the_render_branch_without_an_upstream_is_told_to_track_it(tmp_path):
+    """`main` with its upstream unset while the bot's render is already on
+    `origin/main`: `git push -u origin HEAD` is rejected (non-fast-forward).
+    The advice is `git branch -u`, then `pull --rebase` — which puts the
+    episode on top of the render."""
+    _origin, root = _shelf_with_origin_and_old_ledger(tmp_path)
+    subprocess.run(["git", "-C", str(root), "branch", "-q", "--unset-upstream"], check=True)
+    render = _git_out(
+        root, "commit-tree", "origin/main^{tree}", "-p", "origin/main", "-m", "regenerate derived"
+    )
+    subprocess.run(
+        ["git", "-C", str(root), "push", "-q", "origin", f"{render}:refs/heads/main"], check=True
+    )
+    subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin"], check=True)
+
+    finding, _ = _upstream_unknown(root)
+
+    assert finding is not None
+    assert "`git branch -u origin/main`" in finding.fix
+    assert "`git pull --rebase origin main` before pushing" in finding.fix
+    assert "git push -u" not in finding.fix
+    assert "draft PR" not in finding.fix
+    pushed = subprocess.run(
+        ["git", "-C", str(root), "push", "-u", "origin", "HEAD"], capture_output=True, text=True
+    )
+    assert pushed.returncode != 0 and "rejected" in pushed.stderr, pushed.stderr
+    subprocess.run(["git", "-C", str(root), "branch", "-q", "-u", "origin/main"], check=True)
+    finding, report = _upstream_unknown(root)
+    assert finding is None, report.as_dict()
+    assert "episode-unpushed" in _codes(report)
+    subprocess.run(["git", "-C", str(root), "pull", "-q", "--rebase", "origin", "main"], check=True)
+    assert _git_out(root, "rev-parse", "HEAD~1") == render
+    assert "docs/topics/2026-08-21-unpushed.md" in _git_out(
+        root, "ls-tree", "-r", "--name-only", "HEAD"
+    )
 
 
 def test_a_shelf_without_a_remote_is_not_told_about_upstreams(tmp_path):

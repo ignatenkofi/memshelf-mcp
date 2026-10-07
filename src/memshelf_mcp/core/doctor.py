@@ -956,24 +956,34 @@ def _upstream_unknown_fix(root: Path, remote: str) -> str:
     """A way to an upstream that keeps the commit made here (memshelf-mcp#186).
 
     doctor meets this state right after a shelve, so the episode's commit is
-    already on the checkout. The old advice, ``git checkout -B main
-    origin/main``, moved off it — git answers «you are leaving 1 commit
-    behind» — and force-reset a local ``main`` on the way. A session's route
-    is its own branch, ``git push -u <remote> HEAD`` and a draft PR (the
-    render branch then judges it, #180); landing on the render branch itself
-    keeps the commit with ``checkout -B <branch>`` from HEAD plus ``-u``.
+    already on the checkout; no route below moves off it or takes a commit
+    off a branch. A session's route is its own branch, ``git push -u <remote>
+    HEAD`` and a draft PR (the render branch then judges it, #180). The
+    render branch itself, checked out with no upstream, gets one with ``git
+    branch -u``: a ``push -u`` from there is rejected as non-fast-forward
+    once the bot has committed to it, so ``pull --rebase`` comes before the
+    push. From a detached HEAD, landing on the render branch is a
+    fast-forward, ``git fetch . HEAD:<branch>``, which git refuses when the
+    local branch has commits HEAD lacks.
     """
     render = _render_branch(root, remote)
     target = render[len(remote) + 1 :] if render else None
     tail = "then re-run doctor, or read `derived-stale` as a statement about the ledger only"
     head = _head_branch(root)
+    if head is not None and head == target:
+        return (
+            f"`{head}` is the render branch: give it its upstream with `git branch -u "
+            f"{remote}/{head}`, then `git pull --rebase {remote} {head}` before pushing "
+            f"(the bot commits to it); {tail}"
+        )
     if head is not None:
-        pr = f", then open a draft PR into {target}" if target and head != target else ""
+        pr = f", then open a draft PR into {target}" if target else ""
         return f"push `{head}` with an upstream: `git push -u {remote} HEAD`{pr}; {tail}"
     into = f" into {target}" if target else ""
     land = (
-        f"; to land it on {target} itself, `git checkout -B {target} && git branch -u "
-        f"{remote}/{target}` (it keeps the commit)"
+        f"; to land it on {target} itself, `git fetch . HEAD:{target} && git switch "
+        f"{target} && git branch -u {remote}/{target}` (a fast-forward: git refuses it "
+        f"when {target} has commits HEAD lacks)"
         if target
         else ""
     )
