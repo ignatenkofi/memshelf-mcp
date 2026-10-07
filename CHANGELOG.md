@@ -30,6 +30,16 @@ once code ships.
   matrix keeps testing the two ends of the declared range, now 3.10 and
   3.14 (was 3.10 and 3.13), and `pyproject.toml` gains the
   `Programming Language :: Python :: 3.14` classifier.
+- **The security scan also runs weekly on main, and a failed weekly run
+  opens an issue (#196).** `security.yml` ran only on PRs and pushes, so an
+  advisory against a package already in `uv.lock` stayed silent until the
+  next one (pyjwt, 2026-09-29/30, first red on a PR two days later). It now
+  also runs on Mondays (`cron: "17 6 * * 1"`) and on `workflow_dispatch`. A
+  `health` job runs after scheduled runs only. Its
+  `devsecops-pipeline-public/actions/health-issue@v1` step, under
+  `if: always()`, opens or comments on one issue when the scan fails, and the
+  next green scheduled run closes it. The pipeline's
+  `assert-schedule-liveness.py` lint passes on the file.
 
 ### Fixed
 

@@ -7,8 +7,41 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Раз в неделю по main (#196): адвизори на пакет, который уже лежит в
+  # uv.lock, иначе всплывает только со следующим PR или push. Так было с
+  # pyjwt 2.13.0: адвизори вышли 29–30.09, а sca покраснел лишь на PR 01.10.
+  # Минута не на ровном часе; GitHub cron стреляет позже объявленного, для
+  # недельного скана это неважно.
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
 jobs:
   pipeline:
     uses: ignatenkofi/devsecops-pipeline-public/.github/workflows/pipeline-light.yml@v1
     with:
       repo-class: library
+
+  # Признак живости планового прогона: красный scheduled-прогон виден только
+  # во вкладке Actions, куда никто не смотрит. Отказ заводит одну issue
+  # (следующий отказ — комментарий к ней), зелёный плановый прогон её
+  # закрывает; cancelled и skipped health-issue@v1 не трогают (no-op).
+  # Только schedule: PR и push видит тот, кто их запустил, а ручной dispatch
+  # не должен закрывать issue за плановую ветку. Шаг под `if: always()`
+  # требует линт конвейера tests/lint/assert-schedule-liveness.py.
+  health:
+    needs: pipeline
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Issue on failure, closed by the next green run
+        if: always()
+        uses: ignatenkofi/devsecops-pipeline-public/actions/health-issue@v1
+        with:
+          state: ${{ needs.pipeline.result }}
+          title: "security: the weekly scan of main failed"
+          body: >-
+            The scheduled `security` run on main did not pass:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          token: ${{ github.token }}
