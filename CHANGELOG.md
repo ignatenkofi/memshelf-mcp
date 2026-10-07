@@ -53,7 +53,10 @@ once code ships.
   arrive after the merge and that `memshelf rebuild` must not be run by hand.
   Committed but not pushed on such a branch (`checkout -B claude/x
   origin/main` included), it names `git push -u <remote> HEAD`, then the PR.
-  Messages on the render branch itself are unchanged.
+  On a detached HEAD it said «push it» with no branch to push; it now names
+  `git switch -c shelve/<slug>`, `git push -u <remote> HEAD` and the PR, the
+  way out `doctor`'s `upstream-unknown` gives. Messages on the render branch
+  itself are unchanged.
 - **`doctor` matches ledger rows by the frontmatter `id`, the key `rebuild`
   writes them under (#189).** It matched them by the filename stem, so a
   renamed episode, rendered in the same commit, got `no-ledger-row`, its own

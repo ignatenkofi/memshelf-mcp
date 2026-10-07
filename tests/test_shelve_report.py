@@ -257,6 +257,43 @@ def test_a_botless_session_branch_gets_the_pr_and_keeps_the_rebuild(tmp_path):
     assert "nothing else to do" not in nxt
 
 
+def test_a_detached_head_is_told_to_branch_push_and_open_a_pr(tmp_path):
+    """«push it» on a detached HEAD has no branch to push: `next` names the
+    way out doctor's `upstream-unknown` names — a branch, `push -u`, a PR —
+    and the commands it names put the episode on origin as they stand."""
+    root = _shelf_on_main(tmp_path)
+    _git(root, "checkout", "-q", "--detach")
+
+    resp = _shelve(root)
+
+    assert resp["committed"] is True
+    nxt = resp["next"]
+    assert "detached HEAD" in nxt
+    assert "`git switch -c shelve/2026-07-22-auth-refactor`" in nxt
+    assert "`git push -u origin HEAD`" in nxt
+    assert "a PR into main" in nxt
+    assert "push it;" not in nxt
+    assert "renders derived files after the push" not in nxt
+
+    _git(root, "switch", "-q", "-c", "shelve/2026-07-22-auth-refactor")
+    _git(root, "push", "-q", "-u", "origin", "HEAD")
+    on_origin = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "origin/shelve/2026-07-22-auth-refactor",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    assert resp["address"] in on_origin
+
+
 def test_on_the_render_branch_the_wording_is_unchanged(tmp_path):
     """#191 acceptance: `main` keeps both messages word for word."""
     root = _shelf_on_main(tmp_path)

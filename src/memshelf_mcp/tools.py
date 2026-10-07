@@ -27,6 +27,7 @@ from memshelf_mcp.core.digest import validate_digest
 from memshelf_mcp.core.doctor import DERIVED_STALE_AFTER_HOURS, _render_branch, check_shelf
 from memshelf_mcp.core.gitsync import (
     SyncReport,
+    _git,
     _head_branch,
     _sync_target,
     has_remote,
@@ -373,7 +374,8 @@ def _derived_next_step(root: Path, result) -> str:
     Off the render branch (#191) — a session or PR branch, pushed or about to
     be — the answer is a PR: «nothing else to do» there told an unattended
     session it was done while the episode sat on a branch the bot never
-    renders. Messages on the render branch itself are unchanged.
+    renders; a detached HEAD first needs a branch to push. Messages on the
+    render branch itself are unchanged.
     """
     bot = (root / ".github" / "workflows" / "shelf-derived.yml").is_file()
     if result.sync is not None and result.sync.published_branch:
@@ -432,6 +434,26 @@ def _derived_next_step(root: Path, result) -> str:
         if remote is None:
             target, _why = _sync_target(root)
             remote = target[0] if target is not None else None
+        tail = (
+            "the shelf bot renders derived files after the push"
+            if bot
+            else "then run `memshelf rebuild` in a separate commit "
+            "(skip the rebuild if a bot renders this shelf)"
+        )
+        if head is None:
+            # A detached HEAD: the commit is on no branch, so «push it» has
+            # nothing to push — the way out doctor's `upstream-unknown` names.
+            names = _git(root, "remote").stdout.split()
+            remote = remote or ("origin" if "origin" in names else names[0])
+            where = "episode committed on a detached HEAD (on no branch), not pushed"
+            switch = f"`git switch -c shelve/{Path(result.address).stem}`"
+            push = f"`git push -u {remote} HEAD`"
+            render = _render_branch(root, remote)
+            if render is not None:
+                return _pr_route(
+                    where, f"put it on a branch ({switch}), push it ({push}) and open", render, bot
+                )
+            return f"{where} — put it on a branch ({switch}) and push it ({push}); {tail}"
         render = _off_render_branch(root, remote, head)
         if render is not None:
             return _pr_route(
@@ -440,14 +462,8 @@ def _derived_next_step(root: Path, result) -> str:
                 render,
                 bot,
             )
-        tail = (
-            "the shelf bot renders derived files after the push"
-            if bot
-            else "then run `memshelf rebuild` in a separate commit "
-            "(skip the rebuild if a bot renders this shelf)"
-        )
-        # Point at sync.hint only when the response carries one: no sync, a
-        # detached HEAD or an unborn branch leave it empty.
+        # Point at sync.hint only when the response carries one: no sync or
+        # an unborn branch leave it empty.
         see = " (see sync.hint)" if result.sync is not None and result.sync.hint else ""
         return f"episode committed locally, not pushed — push it{see}; {tail}"
     return (
