@@ -471,7 +471,7 @@ def shelve(
             f"{found_at.relative_to(root).as_posix()}, under a different kind. "
             "Pass --amend (CLI) / amend=True to rewrite it under "
             f"kind={kind!r} — the file is moved, so the shelf keeps one episode "
-            "and one ledger row."
+            "for the slug."
         )
 
     # The shelf's own machine-readable POLICY pack (#16) layers onto the builtin
@@ -685,8 +685,10 @@ def shelve(
             # caller actually has — that gap is what #71 was filed about.
             raise EpisodeExists(
                 f"episode {slug!r} is already on this shelf. Pass --amend "
-                "(CLI) / amend=True to rewrite it in place — same slug, one "
-                f"ledger row, redaction and the digest contract re-run.\n{exc}"
+                "(CLI) / amend=True to rewrite it in place — same slug, redaction "
+                "and the digest contract re-run; only the episode file is "
+                "rewritten, derived files come from `memshelf rebuild` or the "
+                f"shelf bot.\n{exc}"
             ) from exc
     finally:
         tmp.unlink(missing_ok=True)

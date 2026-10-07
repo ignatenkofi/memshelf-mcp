@@ -644,9 +644,10 @@ def build_parser() -> argparse.ArgumentParser:
     sh.add_argument(
         "--amend",
         action="store_true",
-        help="Rewrite an episode already on the shelf under the same slug: one episode, "
-        "one recomputed ledger row, redaction and the digest contract re-run. "
-        "Fails if the slug is not there.",
+        help="Rewrite an episode already on the shelf under the same slug: redaction "
+        "and the digest contract re-run, and only the episode file is written and "
+        "committed — derived files are rendered by `memshelf rebuild` or the shelf "
+        "bot. Fails if the slug is not there.",
     )
     sh.set_defaults(func=_cmd_shelve)
 

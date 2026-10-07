@@ -29,6 +29,27 @@ once code ships.
 
 ### Fixed
 
+- **`--amend` no longer promises a ledger row, and the packaged `/shelve`
+  skill writes the episode alone (#192).** Since #58 an amend rewrites and
+  commits only the episode file, but the `--amend` help, the `amend` field of
+  the `memshelf_shelve` schema and the «already on this shelf» hint still said
+  «one recomputed ledger row». They now say that only the episode is written
+  and that derived files come from `memshelf rebuild` or the shelf bot. Step 5
+  of `adapters/claude-code/skills/shelve/SKILL.md` called docshelf
+  `add_document` with its defaults. Followed as written, it left `INDEX.md`
+  and the category `.meta.json` modified, and an episode past 50 KiB also
+  left a section directory that step 7 never stages. The Python form also
+  needed `docshelf_mcp` in the bare `python3`. That form now runs through
+  `uvx --from docshelf-mcp`, passes `split=False, rebuild_index=False` and
+  puts `.meta.json` back. The MCP form, which has no `rebuild_index` switch,
+  passes `split=false` and restores `INDEX.md` and `.meta.json` before
+  staging. Both were run on a git shelf, and `git status` showed only the
+  new episode. Step 4 points to `memshelf lint-digest --strict`. The step-2
+  skeleton gains `date`, `display_title`, `description`, `mode` and `notes`,
+  the fields the ledger row and the INDEX line are rendered from. The skill's
+  description says it prefers `memshelf shelve`. Copies of the skill kept in
+  shelf repositories are separate files and do not change with this one;
+  `adapters/claude-code/check-shelve-copies.sh --discover` lists them.
 - **`shelve --push` pushes HEAD, and refuses on a branch whose upstream has
   another name.** The push was `git push <remote> <upstream-branch>`, a bare
   refspec, so git sent the *local* branch of that name rather than the commit

@@ -1,15 +1,17 @@
 ---
 name: shelve
-description: Offload a closed conversation topic (or a whole imported dialog) to the memory shelf as a Markdown episode with a validated digest. Use when a topic is finished, when context grows heavy, before compaction, or when the user asks to shelve/archive part of the conversation. M0 prompt-only version — the agent does the work, no memshelf server required.
+description: Offload a closed conversation topic (or a whole imported dialog) to the memory shelf as a Markdown episode with a validated digest. Use when a topic is finished, when context grows heavy, before compaction, or when the user asks to shelve/archive part of the conversation. Prefers the `memshelf shelve` CLI or tool, which needs no server (`uvx --from memshelf-mcp memshelf shelve` runs it), and keeps the manual steps for hosts without it.
 ---
 
-# /shelve — offload an episode to the memory shelf (M0, prompt-only)
+# /shelve — offload an episode to the memory shelf
 
 > **Prefer the tool when it is installed.** `memshelf shelve --shelf … --slug …
 > --kind … --digest … --section …` does everything below in one call —
 > redaction, the digest contract, composition, the episode write and the
-> auto-commit — and cannot drift from the contract the way a prompt can. These
-> steps are the fallback for hosts without `memshelf`; keep them in sync with
+> auto-commit — and cannot drift from the contract the way a prompt can. It
+> needs no server, and where `uv` is installed it needs no install either:
+> `uvx --from memshelf-mcp memshelf shelve …` runs it from PyPI. These steps
+> are the fallback for hosts without `memshelf`; keep them in sync with
 > `core/shelve.py` when the contract changes.
 
 > **Required sections by kind.** The contract is enforced *before* anything is
@@ -38,8 +40,8 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
 - `MEMSHELF_ROOT` env var (or an explicit path given by the user) points to
   an initialized shelf: a docshelf shelf with categories
   `topics`, `research`, `sessions` and `provider: none`.
-- Shelf write path: docshelf-mcp MCP tools if attached, otherwise the Python
-  library fallback in step 4.
+- Shelf write path: docshelf's Python library run through `uvx`, or the
+  docshelf-mcp MCP tools if attached (step 5).
 - Read the shelf's PII/redaction policy first if `POLICY.md` exists in the
   shelf root — it overrides the generic rules below.
 
@@ -59,8 +61,13 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
    kind: topic                      # topic | research | session
    session: <ref>                   # optional: opaque ref for the session that produced this
    span: YYYY-MM-DD..YYYY-MM-DD     # when the work actually happened
+   date: YYYY-MM-DD                 # the shelve date: the ledger's date column
+   display_title: "<title>"         # optional: free-form INDEX title, any script
+   description: "<≤120 chars>"      # the INDEX line, capped (step 5)
    tags: [..]
    approx_tokens: <estimate>        # what this cost in-window (chars/4)
+   mode: live                       # live | import (see Import mode)
+   notes: "<one tab-free line>"     # optional: the ledger's last column
    ---
 
    ## Digest
@@ -74,6 +81,13 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
    `## Digest` + `## Decisions` are mandatory for `kind: topic`;
    `research` needs Digest + one body section;
    `session` needs Digest + Timeline + Open threads.
+
+   The ledger row and the INDEX line are rendered from this frontmatter
+   (step 6), so a value that is not here is not on the shelf: `date`, `mode`
+   and `notes` fill the row, `display_title` and `description` the INDEX line.
+   Without `date` the render falls back to the id's date prefix and warns.
+   Free-text values go in double quotes — a `: ` inside an unquoted one is
+   invalid YAML to the shelf's validator.
 
    Write the skeleton frontmatter-first as above, but note the **stored** file
    differs: docshelf `add_document` prepends `# <id>` when the content doesn't
@@ -105,31 +119,61 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
      C1..C7, S1..S15).
    - Report in your reply what was redacted, so false positives get caught.
 
-4. **Validate the digest yourself** (M0 has no tool to do it):
-   ≤120 words; states what was decided, what was rejected and why, what
+4. **Validate the digest.** `memshelf lint-digest --strict --digest-file
+   <digest.txt>` (or `--digest '<text>'`; without an install,
+   `uvx --from memshelf-mcp memshelf lint-digest …`) runs the validator
+   `shelve` runs, needs no server and writes nothing; `--strict` also fails
+   on the `thin` and `referent-bare` warnings. Where it cannot run, check by
+   hand: ≤120 words; states what was decided, what was rejected and why, what
    artifacts exist, what is still open; readable by someone with zero
    session context (named referents — no bare "we"/"it"); no secrets.
 
-5. **Write to the shelf.** Preferred — docshelf MCP:
-   `docshelf_add_document(path=<temp .md>, category=<kind-mapped>,
-   title="<id>", description="<the capped description, see below>")`.
-   Fallback — Python:
+5. **Write to the shelf — the episode file and nothing else.** docshelf's
+   `add_document` splits a long episode into H2 section files, rebuilds
+   `INDEX.md` and rewrites the category's `.meta.json` by default; all of
+   that is derived (step 6), and step 7 commits the episode alone. So turn
+   the first two off and put `.meta.json` back. Python, through `uvx` so the
+   bare `python3` need not have docshelf installed:
 
    ```bash
-   python3 -c "
+   uvx --from docshelf-mcp python -c "
+   from pathlib import Path
    from docshelf_mcp import Shelf
-   s = Shelf('$MEMSHELF_ROOT')
-   s.add_document('<temp .md>', category='<kind-mapped>', title='<id>',
-                  description='<the capped description>')"
+   root = Path('$MEMSHELF_ROOT')
+   meta = root / 'docs' / '<kind-mapped>' / '.meta.json'
+   before = meta.read_bytes() if meta.is_file() else None
+   Shelf(root).add_document('<temp .md>', category='<kind-mapped>', title='<id>',
+                            split=False, rebuild_index=False)
+   meta.write_bytes(before) if before is not None else meta.unlink(missing_ok=True)"
    ```
+
+   Or the docshelf MCP tool, if attached:
+   `docshelf_add_document(source_path=<temp .md>, category=<kind-mapped>,
+   title="<id>", split=false, shelf_path=<shelf>)`. It has no
+   `rebuild_index` switch: it always rewrites `INDEX.md` as well as the
+   `.meta.json`, so put both back before step 7 (on a git shelf; a
+   `.meta.json` git does not know yet is one the call created):
+
+   ```bash
+   git -C "$MEMSHELF_ROOT" checkout -- INDEX.md
+   git -C "$MEMSHELF_ROOT" checkout -- docs/<kind-mapped>/.meta.json 2>/dev/null ||
+     rm -f "$MEMSHELF_ROOT/docs/<kind-mapped>/.meta.json"
+   ```
+
+   Its reply also suggests committing with a blanket stage: do not follow
+   that, step 7 stages the episode by path. Either way, `git status
+   --porcelain` should show no change from this step but the new episode —
+   no `INDEX.md`, no `.meta.json`, no section directory.
 
    Category mapping: `topic → topics`, `research → research`,
    `session → sessions`.
 
-   **Cap the description at 120 characters yourself.** The tool applies
-   `MAX_DESCRIPTION_CHARS` on both the write and the render path; this
-   fallback writes the files directly, so nothing applies it for you, and an
-   uncapped description here reproduces exactly what the cap exists to stop.
+   **Cap the description at 120 characters yourself.** It is the
+   frontmatter `description` of step 2 — `.meta.json` and the INDEX line are
+   rendered from it, not from anything passed to `add_document`. The tool
+   applies `MAX_DESCRIPTION_CHARS` when it writes the episode; nothing in this
+   fallback does, so an uncapped description here reproduces exactly what the
+   cap exists to stop.
    The digest's first sentence is a starting point, not the answer — on a real
    shelf it ran to 420 characters, and descriptions alone reached 43% of
    INDEX.md, which is paid for in every session by every reader who only
@@ -184,6 +228,7 @@ When the user hands you an exported transcript to retro-shelve:
 1. Read it and propose a segmentation: one episode per coherent topic/arc,
    plus one `kind: session` digest for the whole dialog. Show the list
    (id + one-line scope + rough tokens) and get confirmation.
-2. Then run steps 2–8 per episode, `mode: import` in the ledger.
+2. Then run steps 2–8 per episode, with `mode: import` in the frontmatter
+   (the ledger row is rendered from it, step 6).
 3. The raw transcript is input only — it is never copied into the shelf and
    never committed anywhere.

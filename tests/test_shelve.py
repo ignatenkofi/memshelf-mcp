@@ -478,6 +478,38 @@ def test_amend_rewrites_the_episode_in_place(tmp_path):
     assert result.amended is True
 
 
+def test_amend_help_schema_and_hint_promise_no_ledger_write(tmp_path, capsys):
+    """#192: since #58 `--amend` writes and commits the episode alone — the
+    ledger is rendered later. The CLI help, the tool schema and the same-slug
+    hint still said "one recomputed ledger row", a write that never happens."""
+    from memshelf_mcp.cli import main
+    from memshelf_mcp.core.shelve import EpisodeExists
+    from memshelf_mcp.tools import ShelveInput
+
+    with pytest.raises(SystemExit):
+        main(["shelve", "--help"])
+    help_text = " ".join(capsys.readouterr().out.split())
+    amend_help = help_text[help_text.rindex("--amend") :]
+    schema = ShelveInput.model_json_schema()["properties"]["amend"]["description"]
+
+    root = _amend_setup(tmp_path)
+    with pytest.raises(EpisodeExists) as err:
+        shelve(
+            root,
+            slug="2026-08-02-thin",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "a second write, no --amend"},
+            date="2026-08-02",
+        )
+    hint = " ".join(str(err.value).split())
+
+    for text in (amend_help, schema, hint):
+        assert "ledger row" not in text.lower(), text
+        assert "only the episode file" in text, text
+        assert "rebuild" in text, text
+
+
 def test_amend_leaves_exactly_one_episode_and_one_ledger_row(tmp_path):
     """The reason a new slug was the wrong workaround: it doubles the registry."""
     root = _amend_setup(tmp_path)
