@@ -33,6 +33,15 @@ once code ships.
 
 ### Fixed
 
+- **The desktop bundle declares the package's own dependency floors again
+  (#198).** `adapters/claude-desktop/build.py` still had `docshelf-mcp>=0.4.1`,
+  `mcp>=2.0.0` and `pydantic>=2.6` after `pyproject.toml` had moved to 0.5.0,
+  2.1.1 and 2.13.5, so both bundles declared wider ranges than the package.
+  The lists now carry `pyproject.toml`'s specifiers, and
+  `tests/test_bundle_floors.py` compares them package by package (pyyaml,
+  which only the bundle installs, is exempt by name). It fails when only one
+  side moves, and when `pyproject.toml` gains a dependency the bundle does
+  not install.
 - **`shelve --push` pushes HEAD, and refuses on a branch whose upstream has
   another name.** The push was `git push <remote> <upstream-branch>`, a bare
   refspec, so git sent the *local* branch of that name rather than the commit
