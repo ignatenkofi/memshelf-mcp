@@ -8,6 +8,12 @@ once code ships.
 
 ## [Unreleased]
 
+### Changed
+
+- **docshelf-mcp floor raised to 0.5.0** (`>=0.5.0,<1`). The suite ran
+  green against the published 0.5.0; the lock drops `pymupdf4llm` and its
+  tree, which 0.5.0 moved into its `pdf` extra.
+
 ## [0.4.0] — 2026-10-06
 
 ### Added
