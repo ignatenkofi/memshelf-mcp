@@ -492,6 +492,25 @@ def test_check_with_an_uncommitted_split_dir_does_not_pass_the_index(tmp_path):
     assert any("split directories are uncommitted" in e for e in report.errors)
 
 
+def test_check_without_docs_names_the_index_not_compared(tmp_path):
+    """Without docs/ docshelf's doctor compares nothing, and a tampered INDEX
+    was counted unchanged. git keeps no empty directory, so an episode-less
+    clone has no docs/ and its `rebuild` passes: a warning, not an error."""
+    import shutil
+
+    root = _init(tmp_path)
+    shutil.rmtree(root / "docs")
+    assert rebuild(root).ok is True
+    (root / "INDEX.md").write_text("tampered\n", encoding="utf-8")
+
+    report = rebuild(root, check=True)
+
+    assert "INDEX.md" not in report.unchanged
+    assert "INDEX.md" not in report.drifted
+    assert any(w.startswith("INDEX.md not compared: there is no docs/") for w in report.warnings)
+    assert report.errors == []
+
+
 @pytest.mark.parametrize(
     ("check", "target", "prefix"),
     [

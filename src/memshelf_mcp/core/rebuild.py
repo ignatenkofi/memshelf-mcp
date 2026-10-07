@@ -318,13 +318,21 @@ def _check_index(root: Path, report: RebuildReport) -> None:
     it is skipped and the report says so (the verdict is "drifted" already).
     docshelf also skips its own comparison while split directories are
     uncommitted (docshelf#97); then INDEX is unverified, which is an error,
-    not a pass.
+    not a pass. Without ``docs/`` docshelf compares nothing at all; that is
+    a warning, not an error: git keeps no empty directory, so a clone of a
+    shelf with no episodes yet has no ``docs/``, and its ``rebuild`` passes.
     """
     stale_meta = [rel for rel in report.drifted if rel.endswith(".meta.json")]
     if stale_meta:
         report.warnings.append(
             f"INDEX.md not compared: it is rendered from {', '.join(stale_meta)}, "
             "which drifted — rebuild, then check again"
+        )
+        return
+    if not (root / "docs").is_dir():
+        report.warnings.append(
+            "INDEX.md not compared: there is no docs/ directory, and docshelf "
+            "compares INDEX only against one"
         )
         return
     try:
