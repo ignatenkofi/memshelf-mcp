@@ -127,12 +127,14 @@ class ShelveInput(ShelfScopedInput):
         "recorded as approx_tokens_source: unmeasured instead of a silent 0 "
         "(#113): absence of measurement must not look like a measured zero.",
     )
-    approx_tokens_source: Literal["estimate", "measured"] | None = Field(
+    approx_tokens_source: Literal["estimate", "measured", "unmeasured"] | None = Field(
         default=None,
         description="Where the number came from (#79). Default for any passed "
         "number is 'estimate' — that is what callers actually produce; say "
-        "'measured' only when it was. Contradiction (a source with no number) "
-        "is refused.",
+        "'measured' only when it was. 'unmeasured' (no number, or 0) is what an "
+        "episode shelved without a number carries, so an amend can pass it back "
+        "(#205). A contradiction is refused: 'estimate' or 'measured' with no "
+        "number, 'unmeasured' with a number other than 0.",
     )
     mode: Literal["live", "import"] = "live"
     notes: str = ""
@@ -179,8 +181,11 @@ class ShelveInput(ShelfScopedInput):
     amend: bool = Field(
         default=False,
         description="Rewrite an episode already on the shelf, under the same slug (#71): "
-        "one episode, one recomputed ledger row, redaction and the digest contract re-run. "
-        "Errors if the slug is not there — that is a typo, not a create.",
+        "redaction and the digest contract re-run, and only the episode file is written "
+        "and committed — derived files are rendered by memshelf_rebuild or the shelf's "
+        "bot. Errors if the slug is not there — that is a typo, not a create. A "
+        "description passed back unchanged (whitespace aside) is kept as stored, and "
+        "the sections keep the episode's order (#205).",
     )
 
 

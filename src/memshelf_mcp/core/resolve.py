@@ -21,9 +21,10 @@ sub-shelf has its own INDEX, which ``rebuild`` does not touch).
 ``recall-log.tsv`` is the one file here that really is append-only — nothing
 regenerates it, because a recall is an event, not a fact about the episodes.
 It keeps a union, and that union is a **three-way multiset** merge: two
-sessions recalling the same section of the same episode produce byte-identical
-rows, and collapsing them would silently undercount the savings the log exists
-to measure.
+sessions recalling the same section of the same episode can produce
+byte-identical rows (no timestamp before #193, one to the second since), and
+collapsing them would silently undercount the savings the log exists to
+measure.
 
 What it deliberately does NOT touch: conflicting *episodes* (two branches
 editing the same ``docs/**/*.md``). That is a content conflict — it is
@@ -44,12 +45,14 @@ from pathlib import Path
 
 from memshelf_mcp.core.doctor import check_shelf
 from memshelf_mcp.core.rebuild import DERIVED_PATHS
-from memshelf_mcp.core.recall import RECALL_LOG_HEADER
+from memshelf_mcp.core.recall import RECALL_LOG_HEADERS
 from memshelf_mcp.core.shelve import _git, git_commit
 
 #: Files nothing regenerates — a union is the only way to keep both sides.
+#: Each maps to every header it can carry, current first: a recall log keeps
+#: the header it was created with (#193), so the two sides may disagree.
 APPEND_FILES = {
-    "recall-log.tsv": RECALL_LOG_HEADER,
+    "recall-log.tsv": RECALL_LOG_HEADERS,
 }
 META_PATTERN = "docs/*/.meta.json"
 
@@ -145,8 +148,8 @@ def _has_markers(text: str) -> bool:
     return any(line.startswith((CONFLICT_OURS, CONFLICT_THEIRS)) for line in text.splitlines())
 
 
-def _rows(text: str | None, header_line: str) -> list[str]:
-    return [line for line in (text or "").splitlines() if line.strip() and line != header_line]
+def _rows(text: str | None, header_lines: tuple[str, ...]) -> list[str]:
+    return [line for line in (text or "").splitlines() if line.strip() and line not in header_lines]
 
 
 def _row_key(row: str) -> tuple[str, ...]:
@@ -190,28 +193,44 @@ def _canonical(rows: list[str]) -> dict[tuple[str, ...], str]:
     return best
 
 
-def _union_tsv(ours: str | None, theirs: str | None, header: str, base: str | None = None) -> str:
+def _union_tsv(
+    ours: str | None,
+    theirs: str | None,
+    header: str | tuple[str, ...],
+    base: str | None = None,
+) -> str:
     """Three-way multiset union of an append-only log.
 
     An append-only log only ever grows, so each side is ``base`` plus its own
     tail and the merge is ``base + ours_tail + theirs_tail``. Counting rather
-    than de-duplicating matters: ``recall-log.tsv`` rows are
-    ``episode_id/section/tokens`` with no timestamp, so two sessions recalling
-    the same section legitimately write byte-identical rows — a set union would
-    drop one and undercount the realized savings the log exists to measure.
+    than de-duplicating matters: two sessions recalling the same section write
+    byte-identical ``recall-log.tsv`` rows — always in a log from before #193,
+    whose rows are ``episode_id/section/tokens`` with no timestamp, and still
+    within one second since — and a set union would drop one and undercount
+    the realized savings the log exists to measure.
 
     Rows are counted by ``_row_key``, not by their text, so one row written by
     two writers — with and without the trailing empty column — counts once
     (#78).
 
+    ``header`` is every header the log can carry, current first (a bare string
+    is a single one). Each is dropped wherever it appears: counted as a row,
+    an older header would come out as a second header line (#193). The merge
+    writes the newest one any side carries, so a log keeps its own header and a
+    side already on the wider one is not narrowed back; with none, the current
+    one.
+
     Without ``base`` (the marker fallback, where git's stage 1 is gone) the
     multiset is approximated by ``max`` of the two counts: still never fewer
     rows than either side had, which a set union could not promise.
     """
-    header_line = header.strip("\n")
-    base_rows = _rows(base, header_line)
-    ours_rows = _rows(ours, header_line)
-    theirs_rows = _rows(theirs, header_line)
+    headers = (header,) if isinstance(header, str) else header
+    header_lines = tuple(h.strip("\n") for h in headers)
+    carried = {line for text in (ours, theirs, base) for line in (text or "").splitlines()}
+    out_header = next((h for h in headers if h.strip("\n") in carried), headers[0])
+    base_rows = _rows(base, header_lines)
+    ours_rows = _rows(ours, header_lines)
+    theirs_rows = _rows(theirs, header_lines)
     canonical = _canonical(ours_rows + theirs_rows)
 
     def _counts(rows: list[str]) -> dict[tuple[str, ...], int]:
@@ -247,7 +266,7 @@ def _union_tsv(ours: str | None, theirs: str | None, header: str, base: str | No
         if seen < _target(key):
             emitted[key] = seen + 1
             merged.append(canonical.get(key, row))
-    return header + "".join(row + "\n" for row in merged)
+    return out_header + "".join(row + "\n" for row in merged)
 
 
 def _classify(rel: str) -> str:

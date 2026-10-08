@@ -34,6 +34,7 @@ from memshelf_mcp.core.episode import (
     Frontmatter,
     clamp_description,
     compose_episode,
+    flatten,
 )
 from memshelf_mcp.core.frontmatter import parse_frontmatter
 from memshelf_mcp.core.gitsync import (
@@ -109,6 +110,52 @@ class DigestContractError(ValueError):
 #: shelf's natural sort chronological.
 _DATED_SLUG = re.compile(r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])-")
 
+#: An H2 heading line of an episode body, the pattern doctor (`_sections`)
+#: and recall (`_slice_section`) read sections by.
+_H2_LINE = re.compile(r"^\#\#[ \t]+(.+?)[ \t]*$")
+
+#: A fenced code block's fence (CommonMark: up to three spaces of indent,
+#: three or more backticks or tildes), and what follows it on the line.
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _closes(line: str, fence: str) -> bool:
+    """Whether ``line`` closes the block ``fence`` opened: the same character,
+    a run at least as long, and nothing else on the line."""
+    m = _FENCE.match(line)
+    return bool(
+        m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip()
+    )
+
+
+def _h2_headings(body: str) -> list[str]:
+    """The H2 headings of an episode body, in file order (#205).
+
+    A ``## …`` line inside a fenced code block is code, not a section: an
+    episode quoting a template in its Decisions would otherwise move its own
+    sections around on the next amend. A fence nothing closes is read as no
+    fence at all: CommonMark runs it to the end of the body, but the headings
+    after it are the episode's own sections, and the amend keeps them in
+    place. doctor and recall have no fence rule and still count a fenced
+    heading; only the order an amend keeps reads past it.
+    """
+    lines = body.splitlines()
+    headings: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = _FENCE.match(lines[i])
+        # A backtick fence's info string cannot hold a backtick (CommonMark).
+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            end = next((j for j in range(i + 1, len(lines)) if _closes(lines[j], m.group(1))), None)
+            if end is not None:
+                i = end + 1
+                continue
+        heading = _H2_LINE.match(lines[i])
+        if heading:
+            headings.append(heading.group(1))
+        i += 1
+    return headings
+
 
 class SlugContractError(ValueError):
     """Raised when a *new* episode's slug has no date prefix (#101).
@@ -140,6 +187,20 @@ class EpisodeExists(FileExistsError):
 
     docshelf's own guard says «pass overwrite=True» — advice the CLI could not
     take before #71. This one names the flag that exists.
+    """
+
+
+class EpisodePathBlocked(FileExistsError):
+    """Raised when docshelf refuses the write because a path is in its way.
+
+    The case behind it is ``docs/<category>/<slug>/``, a directory named like
+    the episode that is not a split docshelf wrote. Since docshelf-mcp#115
+    (merged after 0.5.0) ``add_document`` refuses to write beside one with
+    ``SplitDirConflictError``, a :class:`FileExistsError`. It is raised before
+    anything is written and whatever ``overwrite`` says, so ``--amend`` does
+    not clear it. Uncaught, it ended ``shelve`` in a traceback whose advice
+    names docshelf's own kwargs (``title``, ``overwrite=True``). This one names
+    what the caller can do: move the directory aside (#186).
     """
 
 
@@ -200,6 +261,14 @@ def _find_archived_episode(root: Path, doc_stem: str) -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
+def _undo_kind_move(moved: Path, original: Path, text: bytes) -> None:
+    """Put an episode a kind change moved back where it was, with ``text``."""
+    if moved.exists():
+        moved.replace(original)
+    if not original.is_file() or original.read_bytes() != text:
+        original.write_bytes(text)
 
 
 def _first_sentence(text: str) -> str:
@@ -471,7 +540,7 @@ def shelve(
             f"{found_at.relative_to(root).as_posix()}, under a different kind. "
             "Pass --amend (CLI) / amend=True to rewrite it under "
             f"kind={kind!r} — the file is moved, so the shelf keeps one episode "
-            "and one ledger row."
+            "for the slug."
         )
 
     # The shelf's own machine-readable POLICY pack (#16) layers onto the builtin
@@ -510,15 +579,29 @@ def shelve(
     # (shelf-spec v0 § 4.4); the field rides in the frontmatter, which is
     # where rebuild renders the ledger from — data first, column when the
     # spec gets one.
+    #
+    # `unmeasured` is accepted from the caller too (#205): it is what an
+    # episode shelved without a number carries, so a caller passing every
+    # stored field back passes it — with no number or with the stored 0. With
+    # any other number it is the mirror contradiction. Both are EpisodeErrors
+    # (a ValueError), so the CLI refuses with the message instead of a
+    # traceback.
     if approx_tokens is None:
         if approx_tokens_source not in (None, "", "unmeasured"):
-            raise ValueError(
+            raise EpisodeError(
                 f"approx_tokens_source={approx_tokens_source!r} without approx_tokens "
                 "is a contradiction: a source asserts where a number came from, "
                 "and there is no number"
             )
         approx_tokens = 0
         approx_tokens_source = "unmeasured"
+    elif approx_tokens_source == "unmeasured" and approx_tokens != 0:
+        raise EpisodeError(
+            f"approx_tokens_source='unmeasured' with approx_tokens={approx_tokens} "
+            "is a contradiction: 'unmeasured' marks the placeholder 0 of an episode "
+            "shelved without a number. Pass the number with 'estimate' or "
+            "'measured', or no number at all"
+        )
     else:
         approx_tokens_source = approx_tokens_source or "estimate"
     if approx_tokens_source not in APPROX_TOKENS_SOURCES:
@@ -536,11 +619,24 @@ def shelve(
     # new name) rather than the machine's clock, so a session that crosses
     # midnight keeps id and date on the same day; only a legacy, undated slug
     # (grandfathered into `--amend` above) falls back to today().
-    existing_fields: dict[str, str] = {}
-    if amend and date is None:
+    #
+    # The episode an amend rewrites is read whatever `--date` says: #205
+    # compares the description and the section order against it below, and
+    # the repro behind #205 passed `--date`. Only the #170 inheritance of date
+    # and span stays gated on its absence. The read is best effort: a byte
+    # that is not UTF-8 reads as U+FFFD, not as a traceback, so an episode an
+    # amend with `--date` used to overwrite without reading it still gets
+    # rewritten from the call.
+    stored_fields: dict[str, str] = {}
+    stored_headings: list[str] = []
+    if amend:
         existing_episode = found_at if found_at is not None else archived_at
         assert existing_episode is not None  # the amend guard above already required one
-        existing_fields, _ = parse_frontmatter(existing_episode.read_text(encoding="utf-8"))
+        stored_fields, stored_body = parse_frontmatter(
+            existing_episode.read_text(encoding="utf-8", errors="replace")
+        )
+        stored_headings = _h2_headings(stored_body)
+    existing_fields = stored_fields if date is None else {}
 
     if date is not None:
         shelved_on = date
@@ -562,11 +658,37 @@ def shelve(
     # `_first_sentence`, which runs only when the caller supplies no
     # description — so the path callers actually take wrote whatever they were
     # given, straight into a line every future session reads.
-    desc, desc_warning = clamp_description(
-        description if description is not None else _first_sentence(digest)
-    )
-    if desc_warning:
-        warnings.append(desc_warning)
+    #
+    # Not applied to the description an amend passes back unchanged (#205).
+    # The cap decides what a shelve writes, and that value is written already:
+    # capping it again cut a stored description past the cap to 119 characters
+    # and left the caller no way to amend the digest and keep it. The episode
+    # keeps the value; `rebuild` caps the INDEX line it renders from it, as it
+    # does for every description on disk, and the warning says what that line
+    # gets. "Unchanged" is judged with whitespace collapsed on both sides, and
+    # the stored value is what gets written: a wrapper that trims what it read
+    # (the issue's own description ends in a space) passes back the same
+    # description, and it must not be cut for that.
+    stored_description = stored_fields.get("description")
+    if (
+        amend
+        and description is not None
+        and stored_description is not None
+        and flatten(description) == flatten(stored_description)
+    ):
+        desc = stored_description
+        _, rendered = clamp_description(stored_description)
+        if rendered:
+            warnings.append(
+                "description kept as stored, since --amend passed it back unchanged "
+                f"(#205); rebuild renders its INDEX line through the cap: {rendered}"
+            )
+    else:
+        desc, desc_warning = clamp_description(
+            description if description is not None else _first_sentence(digest)
+        )
+        if desc_warning:
+            warnings.append(desc_warning)
     ledger_notes, notes_warning = _flatten_notes(notes)
     if notes_warning:
         warnings.append(notes_warning)
@@ -589,16 +711,18 @@ def shelve(
         notes=ledger_notes,
         retain_until=retain_until,
     )
-    markdown = compose_episode(frontmatter, digest, sections)
+    markdown = compose_episode(frontmatter, digest, sections, order=stored_headings)
 
     # The kind change decided above is performed here, after everything that can
     # still refuse this shelve — redaction, the digest contract, and the section
     # contract inside `compose_episode`. A refused amend must leave the shelf
     # exactly as it found it; a move done at decision time would outlive the
     # refusal and strand the episode in the new category with its old text.
+    moved_bytes = b""
     if moved_from is not None:
         episode_path.parent.mkdir(parents=True, exist_ok=True)
         (root / moved_from).rename(episode_path)
+        moved_bytes = episode_path.read_bytes()
 
     # Layer 1 — the write. An archived episode is rewritten in place: docshelf
     # owns docs/, not archive/, and everything docshelf's write path adds on
@@ -680,14 +804,42 @@ def shelve(
                 # left by older versions: `memshelf prune-splits`.
                 split=False,
             )
-        except DocumentExistsError as exc:
-            # docshelf's guard points at its own Python kwarg. Name the flag the
-            # caller actually has — that gap is what #71 was filed about.
-            raise EpisodeExists(
-                f"episode {slug!r} is already on this shelf. Pass --amend "
-                "(CLI) / amend=True to rewrite it in place — same slug, one "
-                f"ledger row, redaction and the digest contract re-run.\n{exc}"
-            ) from exc
+        except BaseException as exc:
+            # A shelve that does not write leaves the shelf as it found it,
+            # whatever stopped the write — a refusal below, a permission error,
+            # an interrupt. So a kind change moved above goes back, with the
+            # bytes it had in case docshelf failed after writing the new text.
+            if moved_from is not None:
+                _undo_kind_move(episode_path, root / moved_from, moved_bytes)
+            if isinstance(exc, DocumentExistsError):
+                # docshelf's guard points at its own Python kwarg. Name the flag
+                # the caller actually has — that gap is what #71 was filed about.
+                raise EpisodeExists(
+                    f"episode {slug!r} is already on this shelf. Pass --amend "
+                    "(CLI) / amend=True to rewrite it in place — same slug, "
+                    "redaction and the digest contract re-run; only the episode "
+                    "file is rewritten, derived files come from `memshelf "
+                    f"rebuild` or the shelf bot.\n{exc}"
+                ) from exc
+            if isinstance(exc, FileExistsError):
+                # docshelf refused a path in the write's way: after 0.5.0, a
+                # directory named like the episode that it did not write as
+                # sections (SplitDirConflictError, docshelf-mcp#115). Caught by
+                # the base class, because 0.5.0 has no such name to import.
+                in_the_way = episode_path.parent / doc_stem
+                what = (
+                    f"{in_the_way.relative_to(root).as_posix()}/ is a directory "
+                    "that docshelf did not write as split sections, and docshelf "
+                    "will not add a document beside it"
+                    if in_the_way.is_dir()
+                    else "docshelf refused a path in the write's way"
+                )
+                raise EpisodePathBlocked(
+                    f"episode {slug!r} was not written: {what}. Move it aside (a "
+                    "new episode can take another slug instead) and shelve again; "
+                    f"--amend (CLI) / amend=True does not clear this.\n{exc}"
+                ) from exc
+            raise
     finally:
         tmp.unlink(missing_ok=True)
         if sidecar_before is None:

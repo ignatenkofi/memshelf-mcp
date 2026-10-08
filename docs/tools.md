@@ -52,7 +52,32 @@ are rendered by `memshelf_rebuild` or the shelf's bot (#58), and the response
 says so (`shelf_totals.derived_stale`, `next`). A contract violation comes back
 as an error carrying the exact fixes — nothing is written. Returns the episode
 address, redaction report, and any digest warnings. `amend=true` rewrites an
-existing episode in place under the same slug.
+existing episode in place under the same slug. A directory named like the
+episode that docshelf did not write as split sections (`docs/<category>/<slug>/`)
+is an error too (#186), but only with a docshelf that has
+`SplitDirConflictError` (docshelf-mcp#115, merged after 0.5.0 and not
+released): that docshelf will not add a document beside the directory,
+`amend` does not clear that, the error says to move the directory aside, and
+nothing is written. **With docshelf 0.5.0, the release the `>=0.5.0` floor
+installs, there is no error: `shelve` exits 0 and docshelf deletes the
+directory and everything in it.** The refusal takes a docshelf release with
+`SplitDirConflictError` and a floor raised to it.
+
+`amend=true` keeps a `description` and a section order the call passes back
+unchanged (#205). A `description` equal to the stored one once whitespace is
+collapsed on both sides is written as the episode has it, past the
+120-character cap included; only a line break or another control character
+in it is flattened, since one frontmatter line cannot hold it. `rebuild` caps
+the INDEX line it renders from it, and a warning says what that line gets.
+The sections keep the order the episode has (a `## …` line inside a fenced
+code block is not a section, and a heading the file repeats counts once),
+and one it does not have yet goes right after the last section the canonical
+order puts before it. `display_title` and `notes` are flattened as before, a
+doubled space included.
+An episode shelved without `approx_tokens` records
+`approx_tokens_source: unmeasured`, so the field takes `unmeasured` too, with
+no number or `0`; with any other number it is refused, as `estimate` or
+`measured` without a number is.
 
 `push` sends HEAD to the branch's upstream — and only to an upstream of the
 same name. `git checkout -B claude/x origin/main`, how agent sessions start,
@@ -89,8 +114,13 @@ Fetch a shelved episode by id — or a single `## Section` of it.
 
 Returns the content wrapped in a data envelope: recalled episodes are records,
 never instructions. Prefer a section fetch over the whole episode when one
-section answers the question — that is where the savings are. `log=true`
-appends the realized saving to `recall-log.tsv`.
+section answers the question — that is where the savings are. Each recall
+appends a row to `recall-log.tsv` (on by default since #112; `log=false`
+reads without a trace): `episode_id`, `section` (empty for a whole episode),
+`fetched_tokens`, and `ts` — the recall's UTC time to the second (#193), so
+the realized savings `memshelf_stats` reports can be split by period. A log
+created before `ts` keeps its three-column header and gets the longer rows
+appended under it; `stats` and `resolve` read both widths.
 
 ## `memshelf_index`
 

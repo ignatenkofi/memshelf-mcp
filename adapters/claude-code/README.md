@@ -134,11 +134,11 @@ follow-up — it needs the adapter files shipped as package data.
 The `shelve` skill exists in more than one place at once — the copy packaged
 here, a shelf's own `.claude/skills/shelve/SKILL.md`, and an account-level copy
 synced into agent sessions. They are **not** meant to be byte-equal: the
-packaged one is the prompt-only fallback for hosts without the MCP server,
-while the synced one drives the tool path. What they must agree on is the
-handful of rules that make an episode land cleanly — chiefly *stage the episode
-by path, never `git add -A`/`git add -u`*, whose absence from one copy went
-unnoticed for sixteen days (claude-bus#21).
+packaged one points to `memshelf shelve` and keeps the manual steps for hosts
+without it, while the synced one drives the tool path. What they must agree on
+is the handful of rules that make an episode land cleanly — chiefly *stage the
+episode by path, never `git add -A`/`git add -u`*, whose absence from one copy
+went unnoticed for sixteen days (claude-bus#21).
 
 ```bash
 adapters/claude-code/check-shelve-copies.sh --discover

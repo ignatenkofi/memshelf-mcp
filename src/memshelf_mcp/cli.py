@@ -22,7 +22,7 @@ from memshelf_mcp.core import reuse, semantic
 from memshelf_mcp.core.advisor import DEFAULT_BUDGET_TOKENS, STALE_AFTER_TURNS
 from memshelf_mcp.core.archive import ArchiveError
 from memshelf_mcp.core.doctor import DERIVED_STALE_AFTER_HOURS
-from memshelf_mcp.core.episode import EpisodeError
+from memshelf_mcp.core.episode import APPROX_TOKENS_SOURCES, EpisodeError
 from memshelf_mcp.core.gitsync import DirtyShelfError, PushRejectedError, SyncDivergedError
 from memshelf_mcp.core.importer import TranscriptError
 from memshelf_mcp.core.init import InitError
@@ -31,6 +31,7 @@ from memshelf_mcp.core.shelve import (
     AmendTargetMissing,
     DigestContractError,
     EpisodeExists,
+    EpisodePathBlocked,
     SlugContractError,
 )
 from memshelf_mcp.core.stats import CONTEXT_WINDOW_ENV, DEFAULT_CONTEXT_WINDOW
@@ -143,6 +144,7 @@ def _cmd_shelve(args: argparse.Namespace) -> int:
         EpisodeError,
         AmendTargetMissing,
         EpisodeExists,
+        EpisodePathBlocked,
         DirtyShelfError,
         SyncDivergedError,
         PushRejectedError,
@@ -594,9 +596,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sh.add_argument(
         "--approx-tokens-source",
-        choices=["estimate", "measured"],
+        choices=list(APPROX_TOKENS_SOURCES),
         default=None,
-        help="Where the number came from (#79); default for any passed number is 'estimate'.",
+        help="Where the number came from (#79); default for any passed number is "
+        "'estimate'. 'unmeasured' (no number, or 0) is what an episode shelved "
+        "without a number carries, so --amend can pass it back (#205).",
     )
     sh.add_argument("--mode", choices=["live", "import"], default="live")
     sh.add_argument("--notes", default="")
@@ -644,9 +648,12 @@ def build_parser() -> argparse.ArgumentParser:
     sh.add_argument(
         "--amend",
         action="store_true",
-        help="Rewrite an episode already on the shelf under the same slug: one episode, "
-        "one recomputed ledger row, redaction and the digest contract re-run. "
-        "Fails if the slug is not there.",
+        help="Rewrite an episode already on the shelf under the same slug: redaction "
+        "and the digest contract re-run, and only the episode file is written and "
+        "committed — derived files are rendered by `memshelf rebuild` or the shelf "
+        "bot. Fails if the slug is not there. A --description passed back unchanged "
+        "(whitespace aside) is kept as stored, and the sections keep the episode's "
+        "order (#205).",
     )
     sh.set_defaults(func=_cmd_shelve)
 
