@@ -84,16 +84,23 @@ once code ships.
   paired with the file name's: the span swallowed the ` — ` separator, and
   the file name rendered as plain text with a stray backtick. Now the cut
   never lands inside a span. It moves before the span or, when that would
-  keep less than two thirds of the cap, closes the span before the `…`. Runs
-  pair by equal length, as in CommonMark, so a double-backtick span may hold
-  a single backtick. A description within the cap that has an unpaired run
-  gets the run closed at its end, with a warning. Descriptions the old cap
+  keep less than two thirds of the cap, closes the span before the `…`. The
+  value is read as CommonMark reads it: runs pair by equal length, so a
+  double-backtick span may hold a single backtick; the scan goes on past a
+  run nothing closes; a backtick inside an autolink or an HTML tag is no run.
+  A description within the cap that leaves a single backtick unpaired gets
+  it closed at its end, with a warning. A longer unpaired run is literal and
+  is left alone unless a code span follows it: GitHub's renderer then loses
+  the file name's span all the same (once a closer search has failed it
+  trusts a cache that the later span leaves stale; checked with its
+  `POST /markdown`), so that run is escaped, which renders the same, with a
+  warning. Descriptions the old cap
   cut are in episode frontmatter already; `rebuild` renders them repaired
   without an edit, so on a shelf that has one, the next rebuild changes its
   `.meta.json` entry and INDEX line. `shelve`, `rebuild` and rollup
-  descriptions share the one function. In the issue's repro, markdown-it
-  renders the file name inside `<code>`, both after a fresh shelve and after
-  a rebuild of an episode written by the old cap.
+  descriptions share the one function. In the issue's repro, markdown-it and
+  GitHub's renderer show the file name inside `<code>`, both after a fresh
+  shelve and after a rebuild of an episode written by the old cap.
 - **`shelve --push` pushes HEAD, and refuses on a branch whose upstream has
   another name.** The push was `git push <remote> <upstream-branch>`, a bare
   refspec, so git sent the *local* branch of that name rather than the commit

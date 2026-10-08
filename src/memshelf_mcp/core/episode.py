@@ -8,6 +8,7 @@ concern, added when those tools land. See ``docs/ARCHITECTURE.md`` → Layer 2.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 CATEGORY_BY_KIND = {"topic": "topics", "research": "research", "session": "sessions"}
@@ -64,31 +65,43 @@ def clamp_description(text: str | None) -> tuple[str, str | None]:
     as cut rather than as a sentence that happens to end oddly.
 
     It also keeps code spans whole (#190). INDEX prints the episode's file name
-    in backticks right after the description, so a backtick run the
-    description leaves unpaired pairs with the file name's backtick instead:
-    the span swallows the separator, and the file name renders as plain text
-    with a stray backtick. So a cut never lands inside a code span. It moves
-    before the span or, when that would keep less than the floor, closes the
-    span before the ellipsis. A value within the cap that carries an unpaired
-    run gets the run closed at its end. Such values include descriptions that
+    in backticks right after the description, so a single backtick the
+    description leaves unpaired pairs with the file name's instead: the span
+    swallows the separator, and the file name renders as plain text with a
+    stray backtick. So a cut never lands inside a code span. It moves before
+    the span or, when that would keep less than the floor, closes the span
+    before the ellipsis. A value within the cap that leaves a single backtick
+    unpaired gets it closed at its end. Such values include descriptions that
     an earlier cap cut inside a span, already on disk, so ``rebuild`` repairs
-    them without an edit. Runs pair the way CommonMark pairs them, by equal
-    length, so a double-backtick span may hold a single backtick.
+    them without an edit.
+
+    A longer run left unpaired is literal in CommonMark and cannot pair with
+    the file name's single backtick, yet it can still cost the file name its
+    span: GitHub's renderer and markdown-it stop searching once a run has
+    found no closer and trust a cache instead, which a code span later in the
+    line can leave saying the file name's backtick has none (see
+    ``_escape_before_spans``). So such a run is escaped when a code span
+    follows it; escaped, it renders as it did. The value is read the way
+    CommonMark reads it (see ``_backtick_runs``), so a backtick inside an
+    autolink or an HTML tag is left alone.
     """
     text = flatten(text or "").strip()
-    spans, unpaired = _code_spans(text)
     if len(text) <= MAX_DESCRIPTION_CHARS:
-        if unpaired is None:
+        balanced, done = _balance(text)
+        if not done:
             return text, None
-        balanced, closed = _close_span(text, *unpaired)
         if len(balanced) <= MAX_DESCRIPTION_CHARS:
-            return balanced, (
-                f"description has an unpaired {'`' * unpaired[1]}, which the INDEX "
-                "line would pair with the backtick before the file name; "
-                + ("closed it at the end" if closed else "dropped it, as nothing follows it")
-                + ". Pair it in the episode to say where the code ends."
-            )
-        # No room to close it within the cap: cut, as any longer value is.
+            return balanced, " ".join(_BALANCE_NOTES[step] for step in done)
+        # No room to balance it within the cap: cut, as any longer value is.
+    # Escapes go in before the cut, which has to count their backslashes. The
+    # single backtick left open counts as a span here: the cut closes it or
+    # moves before it.
+    spans, unpaired, open_single = _backtick_runs(text)
+    if open_single is not None:
+        spans = [s for s in spans if s[0] < open_single] + [(open_single, len(text), 1)]
+        unpaired = [r for r in unpaired if r[0] < open_single]
+    text = _escape_before_spans(text, spans, unpaired)
+    spans, _, open_single = _backtick_runs(text)
     head = text[: MAX_DESCRIPTION_CHARS - 1]
     # Prefer a word boundary, but only when one is near the end. Cutting at the
     # *last* space in the head unconditionally is how a description with one
@@ -100,13 +113,17 @@ def clamp_description(text: str | None) -> tuple[str, str | None]:
     cut = head.rsplit(" ", 1)[0].rstrip(" ,;:—-") if " " in head else ""
     if len(cut) < floor:
         cut = head.rstrip()
+        if text[len(cut) : len(cut) + 1] == "`":
+            # A hard cut through a backtick run keeps none of it: a shorter run
+            # pairs with other runs than the whole one did.
+            cut = cut.rstrip("`").rstrip()
     kept = f"{cut}…"
-    # An unpaired run counts as a span open to the end: the INDEX line would
-    # close it with the file name's backtick.
+    # The single backtick left open counts as a span open to the end: the
+    # INDEX line would close it with the file name's backtick.
     regions = list(spans)
-    if unpaired is not None:
-        regions.append((unpaired[0], len(text) + 1, unpaired[1]))
-    for start, end, length in regions:
+    if open_single is not None:
+        regions.append((open_single, len(text) + 1, 1))
+    for start, end, length in sorted(regions):
         if not start < len(cut) < end:
             continue
         before = text[:start].rstrip(" ,;:—-")
@@ -121,6 +138,7 @@ def clamp_description(text: str | None) -> tuple[str, str | None]:
             cut = inner
             kept, _ = _close_span(f"{inner}…", start, length)
         break
+    cut, kept = _settle(cut, kept, floor)
     return kept, (
         f"description was {len(text)} chars, cut to {len(kept)} "
         f"({len(text) - len(cut)} dropped): INDEX shows it in every session. "
@@ -128,20 +146,61 @@ def clamp_description(text: str | None) -> tuple[str, str | None]:
     )
 
 
-def _code_spans(text: str) -> tuple[list[tuple[int, int, int]], tuple[int, int] | None]:
-    """Code spans in ``text`` up to its first unpaired backtick run.
+#: What CommonMark ranks level with a code span: an autolink or an inline HTML
+#: tag that starts first holds its backticks, which then delimit nothing. The
+#: patterns are markdown-it-py's (``rules_inline/autolink.py``,
+#: ``common/html_re.py``), the parser #190 was checked against.
+_ATTRIBUTE = (
+    r"(?:\s+[a-zA-Z_:][a-zA-Z0-9:._-]*"
+    r"""(?:\s*=\s*(?:[^"'=<>`\x00-\x20]+|'[^']*'|"[^"]*"))?)"""
+)
+_AUTOLINK_OR_HTML = re.compile(
+    "|".join(
+        (
+            r"<[a-zA-Z][a-zA-Z0-9+.\-]{1,31}:[^<>\x00-\x20]*>",
+            r"<[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
+            r"(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*>",
+            rf"<[A-Za-z][A-Za-z0-9\-]*{_ATTRIBUTE}*\s*/?>",
+            r"</[A-Za-z][A-Za-z0-9\-]*\s*>",
+            r"<!---?>|<!--(?:[^-]|-[^-]|--[^>])*-->",
+            r"<[?][\s\S]*?[?]>",
+            r"<![A-Za-z][^>]*>",
+            r"<!\[CDATA\[[\s\S]*?\]\]>",
+        )
+    )
+)
 
-    Returns ``(spans, unpaired)``: each span as ``(start, end, run length)``,
-    and ``(start, run length)`` of the first run that no later run closes, or
-    None. As in CommonMark, a run is closed by the next run of exactly its
-    length; a backslash escapes a backtick outside a span and nothing inside
-    one.
+
+def _backtick_runs(
+    text: str,
+) -> tuple[list[tuple[int, int, int]], list[tuple[int, int]], int | None]:
+    """Code spans in ``text``, its unpaired longer runs, and the single backtick
+    it leaves open.
+
+    Read as CommonMark reads it: a backslash escapes the character after it
+    outside a span; an autolink or an inline HTML tag that starts first holds
+    its backticks; a run is closed by the next run of exactly its length,
+    wherever that is; a run nothing closes is literal, and the scan goes on
+    after it. Returns the spans as ``(start, end, run length)``, the unclosed
+    runs of two or more as ``(start, length)``, and the start of the unclosed
+    run of length one, or None. That one would pair with the file name's single
+    backtick. There is at most one, as any later single backtick would have
+    closed it.
+
+    Not modelled: a link destination or title, ``[text](url "title")``, also
+    holds its backticks in CommonMark; here one is read as a run.
     """
     spans: list[tuple[int, int, int]] = []
+    unpaired: list[tuple[int, int]] = []
+    open_single = None
     i, n = 0, len(text)
     while i < n:
         if text[i] == "\\":
             i += 2
+            continue
+        if text[i] == "<":
+            held = _AUTOLINK_OR_HTML.match(text, i)
+            i = held.end() if held else i + 1
             continue
         if text[i] != "`":
             i += 1
@@ -149,20 +208,121 @@ def _code_spans(text: str) -> tuple[list[tuple[int, int, int]], tuple[int, int] 
         j = i
         while j < n and text[j] == "`":
             j += 1
-        k = j
-        while True:
-            k = text.find("`", k)
-            if k < 0:
-                return spans, (i, j - i)
-            m = k
-            while m < n and text[m] == "`":
-                m += 1
-            if m - k == j - i:
-                break
-            k = m
-        spans.append((i, m, j - i))
-        i = m
-    return spans, None
+        end = _closing_run_end(text, j, j - i)
+        if end is not None:
+            spans.append((i, end, j - i))
+            i = end
+            continue
+        if j - i == 1:
+            open_single = i
+        else:
+            unpaired.append((i, j - i))
+        i = j
+    return spans, unpaired, open_single
+
+
+_BALANCE_NOTES = {
+    "closed": (
+        "description has an unpaired `, which the INDEX line would pair with the "
+        "backtick before the file name; closed it at the end. Pair it in the "
+        "episode to say where the code ends."
+    ),
+    "dropped": (
+        "description has an unpaired `, which the INDEX line would pair with the "
+        "backtick before the file name; dropped it, as nothing follows it."
+    ),
+    "escaped": (
+        "description has an unpaired run of backticks before a code span, after "
+        "which GitHub's renderer shows the file name as plain text; escaped the "
+        "run, which renders the same. Escape or pair it in the episode."
+    ),
+}
+
+
+def _balance(text: str) -> tuple[str, list[str]]:
+    """Close the single backtick ``text`` leaves open, and escape the unpaired
+    runs a code span follows: ``(text, steps taken)``, the steps keyed as in
+    ``_BALANCE_NOTES``."""
+    spans, unpaired, open_single = _backtick_runs(text)
+    done = []
+    if open_single is not None:
+        text, closed = _close_span(text, open_single, 1)
+        done.append("closed" if closed else "dropped")
+        # Whatever followed the opener is inside the span now.
+        spans = [s for s in spans if s[0] < open_single]
+        unpaired = [r for r in unpaired if r[0] < open_single]
+        if closed:
+            spans.append((open_single, len(text), 1))
+    escaped = _escape_before_spans(text, spans, unpaired)
+    if escaped != text:
+        done.append("escaped")
+    return escaped, done
+
+
+def _escape_before_spans(
+    text: str, spans: list[tuple[int, int, int]], unpaired: list[tuple[int, int]]
+) -> str:
+    """Escape each unpaired run in ``text`` that a code span follows.
+
+    CommonMark leaves such a run literal, but cmark-gfm (GitHub) and
+    markdown-it search for closers with a cache: once a run has searched to
+    the end of the line in vain, a later opener whose cached position for its
+    length lies behind it is taken to have no closer. A span closed after the
+    unpaired run updates that cache with a position inside the description,
+    and the file name's opening backtick is then taken to have none: measured
+    with GitHub's renderer (``POST /markdown``) on "a `` b `c` d". With every
+    such run escaped no search fails before the last span, so the cache is
+    never read; an escaped backtick renders as the literal run did.
+    """
+    if not unpaired or not any(start > unpaired[0][0] for start, _, _ in spans):
+        return text
+    for start, length in reversed(unpaired):
+        if any(s > start for s, _, _ in spans):
+            text = text[:start] + "\\`" * length + text[start + length :]
+    return text
+
+
+def _settle(cut: str, kept: str, floor: int) -> tuple[str, str]:
+    """Balance what a cut kept: ``(cut, kept)``.
+
+    A cut through an autolink or an HTML tag frees the backticks it held, and
+    a span the cut closed may follow a run left unpaired. A single backtick
+    left open goes the way of a span the cut lands in; runs a span follows are
+    escaped, or cut away when the escapes do not fit.
+    """
+    body = kept[:-1]  # every cut ends in the ellipsis
+    spans, unpaired, opened = _backtick_runs(body)
+    if opened is not None:
+        before = body[:opened].rstrip(" ,;:—-")
+        inner = body[: MAX_DESCRIPTION_CHARS - 3].rstrip(" `")
+        if len(before) >= floor or len(inner) <= opened + 1:
+            cut, kept = before, f"{before}…"
+        else:
+            cut = inner
+            kept, _ = _close_span(f"{inner}…", opened, 1)
+        body = kept[:-1]
+        spans, unpaired, _ = _backtick_runs(body)
+    escaped = _escape_before_spans(body, spans, unpaired)
+    if escaped != body:
+        if len(escaped) < MAX_DESCRIPTION_CHARS:
+            kept = f"{escaped}…"
+        else:
+            cut = body[: unpaired[0][0]].rstrip(" ,;:—-")
+            kept = f"{cut}…"
+    return cut, kept
+
+
+def _closing_run_end(text: str, start: int, length: int) -> int | None:
+    """End of the first backtick run of exactly ``length`` at or after ``start``."""
+    k = text.find("`", start)
+    while k >= 0:
+        m = k
+        while m < len(text) and text[m] == "`":
+            m += 1
+        if m - k == length:
+            return m
+        k = text.find("`", m)
+    return None
 
 
 def _close_span(text: str, start: int, length: int) -> tuple[str, bool]:

@@ -182,9 +182,9 @@ def test_clamp_survives_the_frontmatter_round_trip():
 # INDEX prints the episode's file name in backticks right after the
 # description, so a run the description leaves open pairs with the file name's
 # backtick: the span swallows the separator and the file name renders as plain
-# text. The helpers pair runs the way CommonMark does (by equal length; these
-# inputs carry no backslash escapes), and are written apart from the code
-# under test.
+# text. The helpers pair runs the way CommonMark does (by equal length, a
+# backslash escaping outside a span only; these inputs carry no autolinks or
+# HTML), and are written apart from the code under test.
 
 FILE_NAME = "2026-10-07-probe-span.md"
 
@@ -200,30 +200,41 @@ CUT_INSIDE_A_SPAN = (
 )
 
 
-def _code_spans_of(line):
-    """``(start, end)`` of each code span in ``line``; unpaired runs stay text."""
-    runs = [(m.start(), m.end()) for m in re.finditer(r"`+", line)]
-    spans, i = [], 0
-    while i < len(runs):
-        start, end = runs[i]
-        closer = next(
-            (j for j in range(i + 1, len(runs)) if runs[j][1] - runs[j][0] == end - start),
-            None,
-        )
-        if closer is None:
+def _runs_of(line):
+    """``(start, end)`` of each backtick run that opens in ``line``: ``end`` is
+    where the span it opens ends, or None when nothing closes it."""
+    runs, i = [], 0
+    while i < len(line):
+        if line[i] == "\\":
+            i += 2
+        elif line[i] == "`":
+            run = re.match(r"`+", line[i:]).group()
+            closer = re.compile(rf"(?<!`){run}(?!`)").search(line, i + len(run))
+            runs.append((i, closer.end() if closer else None))
+            i = closer.end() if closer else i + len(run)
+        else:
             i += 1
-            continue
-        spans.append((start, runs[closer][1]))
-        i = closer + 1
-    return spans
+    return runs
+
+
+def _code_spans_of(line):
+    """``(start, end)`` of each code span in ``line``."""
+    return [(start, end) for start, end in _runs_of(line) if end is not None]
 
 
 def _file_name_renders_as_code(description):
     """Whether the INDEX line built around ``description`` ends in the file name
-    as a code span of its own."""
+    as a code span of its own, in CommonMark and on GitHub. GitHub's renderer
+    loses it as well when another span follows a run nothing closes."""
     line = f"- **2026-10-07-probe-span** — {description} — `{FILE_NAME}`"
-    spans = _code_spans_of(line)
-    return bool(spans) and line[spans[-1][0] : spans[-1][1]] == f"`{FILE_NAME}`"
+    runs = _runs_of(line)
+    spans = [start for start, end in runs if end is not None]
+    first_open = next((start for start, end in runs if end is None), len(line))
+    return (
+        bool(spans)
+        and line[spans[-1] :].startswith(f"`{FILE_NAME}`")
+        and not any(first_open < start for start in spans[:-1])
+    )
 
 
 def test_the_issue_line_was_broken_before_the_fix():
@@ -286,9 +297,13 @@ def test_clamp_does_not_close_a_span_on_a_run_the_cut_split():
     "on_disk,expected",
     [
         (CUT_INSIDE_A_SPAN, CUT_INSIDE_A_SPAN[:-1] + "`…"),
-        ("see ``a`b…", "see ``a`b``…"),
+        # The run of two is literal; the single backtick after it is the open
+        # one, and the span that closes it follows the run of two, which is
+        # escaped for GitHub's sake (see the next test).
+        ("see ``a`b…", "see \\`\\`a`b`…"),
+        ("see ``a`…", "see ``a…"),
         # The closer must not touch a backtick, or the two runs merge into one.
-        ("see ``a`…", "see ``a` ``…"),
+        ("a ` b ``", "a ` b `` `"),
         ("press the ` key", "press the ` key`"),
         ("nothing after it `", "nothing after it"),
     ],
@@ -302,6 +317,70 @@ def test_clamp_balances_an_unpaired_run_within_the_cap(on_disk, expected):
     assert warning is not None and "unpaired" in warning
     assert _file_name_renders_as_code(kept)
     # A fixed point: rebuild clamps again what shelve already clamped.
+    assert clamp_description(kept) == (kept, None)
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        # CommonMark gives the backtick to the autolink or the tag that starts
+        # first, so it delimits nothing.
+        "Spec lives at <https://example.com/a`b> and nowhere else",
+        'Tooltip <abbr title="`">bt</abbr> marks the key',
+        # A run of two nothing closes stays literal, and the file name's single
+        # backtick cannot close it either; no span follows it.
+        "Ends with a double run ``",
+        "a `x` span, then a literal ``",
+    ],
+)
+def test_clamp_leaves_alone_a_value_that_renders_right(description):
+    """Found in review with markdown-it-py: each of these rendered the file name
+    as code before #190, and the first version of the repair broke the line
+    (the autolink and the tag) or dropped a literal run. Within the cap, the
+    value before #190 was the value itself."""
+    assert clamp_description(description) == (description, None)
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Use `` around a literal backtick; the `x` span stays code",
+        "a `` b `c` d",
+    ],
+)
+def test_clamp_escapes_an_unpaired_run_a_code_span_follows(description):
+    """The run of two is literal in CommonMark, and markdown-it-py renders the
+    file name as code. GitHub's renderer does not: checked with its
+    ``POST /markdown`` on 2026-10-08, the INDEX line of each value as written
+    ends in a plain-text file name, and with the run escaped in code. An
+    escaped backtick renders as the literal run did."""
+    kept, warning = clamp_description(description)
+
+    assert kept == description.replace("``", "\\`\\`", 1)
+    assert warning is not None and "unpaired run" in warning
+    assert not _file_name_renders_as_code(description)
+    assert _file_name_renders_as_code(kept)
+    assert clamp_description(kept) == (kept, None)
+
+
+def test_clamp_reads_an_autolink_before_the_cut_as_one_piece():
+    text = "See <https://example.com/a`b> for " + "word " * 25
+    kept, warning = clamp_description(text)
+
+    assert kept.startswith("See <https://example.com/a`b> for word")
+    assert kept.endswith("word…")
+    assert "cut to" in warning
+    assert clamp_description(kept) == (kept, None)
+
+
+def test_clamp_cut_through_an_autolink_does_not_free_its_backtick():
+    """The cut leaves the autolink without its `>`, so it is no autolink any
+    more and its backtick is a run: the cut moves before that backtick."""
+    text = "x" * 70 + " <https://example.com/a`b" + "c" * 60 + ">"
+    kept, _ = clamp_description(text)
+
+    assert kept == "x" * 70 + " <https://example.com/a…"
+    assert _file_name_renders_as_code(kept)
     assert clamp_description(kept) == (kept, None)
 
 
