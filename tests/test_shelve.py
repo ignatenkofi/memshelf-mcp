@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -1447,6 +1448,54 @@ def test_a_split_dir_refusal_of_a_kind_change_moves_the_episode_back(tmp_path, m
     assert was.is_file(), "the refused kind change left the episode moved"
     assert was.read_text(encoding="utf-8") == before
     assert not (root / "docs" / "topics" / "2026-08-13-recount.md").exists()
+
+
+@pytest.mark.parametrize(
+    "writes_first", [False, True], ids=["fails-before-writing", "fails-after-writing"]
+)
+def test_any_failed_write_of_a_kind_change_moves_the_episode_back(
+    tmp_path, monkeypatch, writes_first
+):
+    """Not only docshelf's refusal: whatever stops the write after the move —
+    here a permission error, before or after docshelf wrote the new text —
+    leaves the old episode where it was, byte for byte."""
+    root = _init_shelf(tmp_path)
+    was = _session_episode(root)
+    before = was.read_bytes()
+    status_before = _porcelain(root)
+
+    def add_document(self, source, *, category, title, **kwargs):
+        if writes_first:
+            target = self.root / "docs" / category / f"{title}.md"
+            target.write_text(Path(source).read_text(encoding="utf-8"), encoding="utf-8")
+        raise PermissionError(f"docs/{category} is not writable")
+
+    monkeypatch.setattr(Shelf, "add_document", add_document)
+
+    with pytest.raises(PermissionError):
+        shelve(
+            root,
+            slug="2026-08-13-recount",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "kind corrected"},
+            date="2026-08-13",
+            amend=True,
+        )
+
+    assert was.is_file(), "the failed kind change left the episode moved"
+    assert was.read_bytes() == before
+    assert not (root / "docs" / "topics" / "2026-08-13-recount.md").exists()
+    assert _porcelain(root) == status_before
+
+
+def _porcelain(root):
+    return subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
 
 
 def test_cli_split_dir_refusal_exits_1_with_the_fix_not_a_traceback(tmp_path, monkeypatch, capsys):

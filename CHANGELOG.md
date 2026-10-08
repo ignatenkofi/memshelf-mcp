@@ -63,7 +63,10 @@ once code ships.
   moved aside and that `--amend` does not clear it; the CLI prints it and
   exits 1.
   A kind-changing `--amend` has already moved the episode to its new
-  category at that point, so the refusal moves it back first. Measured
+  category at that point, so the refusal moves it back first; so does any
+  other failure of the write, such as a permission error, and the episode
+  goes back with the bytes it had even when docshelf failed after writing
+  the new text. Measured
   against docshelf `main` (`e7bd775`): before, rc 1 with a
   `SplitDirConflictError` traceback; after, rc 1 with the refusal and no
   traceback. CI installs docshelf 0.5.0, so the tests stand the guard in;

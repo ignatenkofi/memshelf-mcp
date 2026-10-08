@@ -216,6 +216,14 @@ def _find_archived_episode(root: Path, doc_stem: str) -> Path | None:
     return None
 
 
+def _undo_kind_move(moved: Path, original: Path, text: bytes) -> None:
+    """Put an episode a kind change moved back where it was, with ``text``."""
+    if moved.exists():
+        moved.replace(original)
+    if not original.is_file() or original.read_bytes() != text:
+        original.write_bytes(text)
+
+
 def _first_sentence(text: str) -> str:
     """The digest's opening sentence, as a default description.
 
@@ -610,9 +618,11 @@ def shelve(
     # contract inside `compose_episode`. A refused amend must leave the shelf
     # exactly as it found it; a move done at decision time would outlive the
     # refusal and strand the episode in the new category with its old text.
+    moved_bytes = b""
     if moved_from is not None:
         episode_path.parent.mkdir(parents=True, exist_ok=True)
         (root / moved_from).rename(episode_path)
+        moved_bytes = episode_path.read_bytes()
 
     # Layer 1 — the write. An archived episode is rewritten in place: docshelf
     # owns docs/, not archive/, and everything docshelf's write path adds on
@@ -694,38 +704,42 @@ def shelve(
                 # left by older versions: `memshelf prune-splits`.
                 split=False,
             )
-        except DocumentExistsError as exc:
-            # docshelf's guard points at its own Python kwarg. Name the flag the
-            # caller actually has — that gap is what #71 was filed about.
-            raise EpisodeExists(
-                f"episode {slug!r} is already on this shelf. Pass --amend "
-                "(CLI) / amend=True to rewrite it in place — same slug, redaction "
-                "and the digest contract re-run; only the episode file is "
-                "rewritten, derived files come from `memshelf rebuild` or the "
-                f"shelf bot.\n{exc}"
-            ) from exc
-        except FileExistsError as exc:
-            # docshelf refused a path in the write's way: after 0.5.0, a
-            # directory named like the episode that it did not write as
-            # sections (SplitDirConflictError, docshelf-mcp#115). Caught by the
-            # base class, because 0.5.0 has no such name to import. docshelf
-            # refuses before it writes anything, and a refused shelve leaves
-            # the shelf as it found it, so a kind change moved above goes back.
+        except BaseException as exc:
+            # A shelve that does not write leaves the shelf as it found it,
+            # whatever stopped the write — a refusal below, a permission error,
+            # an interrupt. So a kind change moved above goes back, with the
+            # bytes it had in case docshelf failed after writing the new text.
             if moved_from is not None:
-                episode_path.rename(root / moved_from)
-            in_the_way = episode_path.parent / doc_stem
-            what = (
-                f"{in_the_way.relative_to(root).as_posix()}/ is a directory that "
-                "docshelf did not write as split sections, and docshelf will not "
-                "add a document beside it"
-                if in_the_way.is_dir()
-                else "docshelf refused a path in the write's way"
-            )
-            raise EpisodePathBlocked(
-                f"episode {slug!r} was not written: {what}. Move it aside (a new "
-                "episode can take another slug instead) and shelve again; "
-                f"--amend (CLI) / amend=True does not clear this.\n{exc}"
-            ) from exc
+                _undo_kind_move(episode_path, root / moved_from, moved_bytes)
+            if isinstance(exc, DocumentExistsError):
+                # docshelf's guard points at its own Python kwarg. Name the flag
+                # the caller actually has — that gap is what #71 was filed about.
+                raise EpisodeExists(
+                    f"episode {slug!r} is already on this shelf. Pass --amend "
+                    "(CLI) / amend=True to rewrite it in place — same slug, "
+                    "redaction and the digest contract re-run; only the episode "
+                    "file is rewritten, derived files come from `memshelf "
+                    f"rebuild` or the shelf bot.\n{exc}"
+                ) from exc
+            if isinstance(exc, FileExistsError):
+                # docshelf refused a path in the write's way: after 0.5.0, a
+                # directory named like the episode that it did not write as
+                # sections (SplitDirConflictError, docshelf-mcp#115). Caught by
+                # the base class, because 0.5.0 has no such name to import.
+                in_the_way = episode_path.parent / doc_stem
+                what = (
+                    f"{in_the_way.relative_to(root).as_posix()}/ is a directory "
+                    "that docshelf did not write as split sections, and docshelf "
+                    "will not add a document beside it"
+                    if in_the_way.is_dir()
+                    else "docshelf refused a path in the write's way"
+                )
+                raise EpisodePathBlocked(
+                    f"episode {slug!r} was not written: {what}. Move it aside (a "
+                    "new episode can take another slug instead) and shelve again; "
+                    f"--amend (CLI) / amend=True does not clear this.\n{exc}"
+                ) from exc
+            raise
     finally:
         tmp.unlink(missing_ok=True)
         if sidecar_before is None:
