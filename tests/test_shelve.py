@@ -10,6 +10,7 @@ pytest.importorskip("docshelf_mcp")
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
 from memshelf_mcp.core.episode import (  # noqa: E402
+    APPROX_TOKENS_SOURCES,
     MAX_DESCRIPTION_CHARS,
     EpisodeError,
 )
@@ -1744,3 +1745,96 @@ def test_amend_keeps_the_stored_section_order_and_slots_a_new_one_in(tmp_path):
         "Open threads",
     ]
     assert "- t, amended" in text
+
+
+def test_cli_and_schema_take_every_source_an_episode_can_carry(tmp_path, capsys):
+    """`--approx-tokens-source` offered estimate|measured while the tool itself
+    writes `unmeasured` when no number is passed: a wrapper passing every
+    stored field back failed with «invalid choice: 'unmeasured'», and
+    `--approx-tokens 0` alone records `estimate` instead."""
+    from memshelf_mcp.cli import main
+    from memshelf_mcp.tools import ShelveInput
+
+    schema = ShelveInput.model_json_schema()["properties"]["approx_tokens_source"]
+    assert tuple(schema["anyOf"][0]["enum"]) == APPROX_TOKENS_SOURCES
+
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-09-01-no-number",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        date="2026-09-01",
+    )
+    episode = tmp_path / "docs" / "topics" / "2026-09-01-no-number.md"
+    before = episode.read_text(encoding="utf-8")
+    assert "approx_tokens_source: unmeasured" in before
+
+    code = main(
+        [
+            "shelve",
+            "--shelf",
+            str(root),
+            "--slug",
+            "2026-09-01-no-number",
+            "--kind",
+            "topic",
+            "--digest",
+            GOOD_DIGEST,
+            "--section",
+            "Decisions=JWT chosen.",
+            "--approx-tokens",
+            "0",
+            "--approx-tokens-source",
+            "unmeasured",
+            "--amend",
+        ]
+    )
+
+    assert code == 0, capsys.readouterr().err
+    assert episode.read_text(encoding="utf-8") == before
+
+
+def test_unmeasured_with_a_number_is_a_contradiction(tmp_path, capsys):
+    """The mirror of a source without a number, refused before any write; the
+    CLI says so and exits 1 rather than ending in a traceback."""
+    from memshelf_mcp.cli import main
+
+    root = _init_shelf(tmp_path)
+    with pytest.raises(EpisodeError, match="contradiction"):
+        shelve(
+            root,
+            slug="2026-09-01-contradiction",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "JWT chosen."},
+            approx_tokens=500,
+            approx_tokens_source="unmeasured",
+            date="2026-09-01",
+        )
+    assert list((tmp_path / "docs" / "topics").iterdir()) == []
+
+    code = main(
+        [
+            "shelve",
+            "--shelf",
+            str(root),
+            "--slug",
+            "2026-09-01-contradiction",
+            "--kind",
+            "topic",
+            "--digest",
+            GOOD_DIGEST,
+            "--section",
+            "Decisions=JWT chosen.",
+            "--approx-tokens",
+            "500",
+            "--approx-tokens-source",
+            "unmeasured",
+        ]
+    )
+
+    assert code == 1
+    assert "contradiction" in capsys.readouterr().err
+    assert list((tmp_path / "docs" / "topics").iterdir()) == []

@@ -143,9 +143,16 @@ once code ships.
   section it does not have yet goes before the first one the canonical order
   puts after it, so an episode in canonical order comes out as before. The
   amend reads the stored episode whatever `--date` says: the read was gated
-  on its absence for #170, and the issue's repro passed `--date`. In the
-  issue's repro, run with and without `--date`, `git diff` after the amend
-  is empty.
+  on its absence for #170, and the issue's repro passed `--date`.
+  `--approx-tokens-source` and the `approx_tokens_source` field of
+  `memshelf_shelve` take `unmeasured`, the value the tool writes when no
+  number is passed, so a caller passing every stored field back no longer
+  fails with `invalid choice: 'unmeasured'`. With no number or `0` it is
+  stored as is; with any other number it is refused as a contradiction, the
+  mirror of a source without a number. Both contradictions are
+  `EpisodeError`s now (still `ValueError`s), so the CLI prints them and
+  exits 1 instead of a traceback. In the issue's repro, run with and without
+  `--date`, `git diff` after the amend is empty.
 
 ## [0.4.0] — 2026-10-06
 

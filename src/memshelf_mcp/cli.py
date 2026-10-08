@@ -22,7 +22,7 @@ from memshelf_mcp.core import reuse, semantic
 from memshelf_mcp.core.advisor import DEFAULT_BUDGET_TOKENS, STALE_AFTER_TURNS
 from memshelf_mcp.core.archive import ArchiveError
 from memshelf_mcp.core.doctor import DERIVED_STALE_AFTER_HOURS
-from memshelf_mcp.core.episode import EpisodeError
+from memshelf_mcp.core.episode import APPROX_TOKENS_SOURCES, EpisodeError
 from memshelf_mcp.core.gitsync import DirtyShelfError, PushRejectedError, SyncDivergedError
 from memshelf_mcp.core.importer import TranscriptError
 from memshelf_mcp.core.init import InitError
@@ -596,9 +596,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sh.add_argument(
         "--approx-tokens-source",
-        choices=["estimate", "measured"],
+        choices=list(APPROX_TOKENS_SOURCES),
         default=None,
-        help="Where the number came from (#79); default for any passed number is 'estimate'.",
+        help="Where the number came from (#79); default for any passed number is "
+        "'estimate'. 'unmeasured' (no number, or 0) is what an episode shelved "
+        "without a number carries, so --amend can pass it back (#205).",
     )
     sh.add_argument("--mode", choices=["live", "import"], default="live")
     sh.add_argument("--notes", default="")

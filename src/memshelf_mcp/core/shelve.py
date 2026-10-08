@@ -536,15 +536,29 @@ def shelve(
     # (shelf-spec v0 § 4.4); the field rides in the frontmatter, which is
     # where rebuild renders the ledger from — data first, column when the
     # spec gets one.
+    #
+    # `unmeasured` is accepted from the caller too (#205): it is what an
+    # episode shelved without a number carries, so a caller passing every
+    # stored field back passes it — with no number or with the stored 0. With
+    # any other number it is the mirror contradiction. Both are EpisodeErrors
+    # (a ValueError), so the CLI refuses with the message instead of a
+    # traceback.
     if approx_tokens is None:
         if approx_tokens_source not in (None, "", "unmeasured"):
-            raise ValueError(
+            raise EpisodeError(
                 f"approx_tokens_source={approx_tokens_source!r} without approx_tokens "
                 "is a contradiction: a source asserts where a number came from, "
                 "and there is no number"
             )
         approx_tokens = 0
         approx_tokens_source = "unmeasured"
+    elif approx_tokens_source == "unmeasured" and approx_tokens != 0:
+        raise EpisodeError(
+            f"approx_tokens_source='unmeasured' with approx_tokens={approx_tokens} "
+            "is a contradiction: 'unmeasured' marks the placeholder 0 of an episode "
+            "shelved without a number. Pass the number with 'estimate' or "
+            "'measured', or no number at all"
+        )
     else:
         approx_tokens_source = approx_tokens_source or "estimate"
     if approx_tokens_source not in APPROX_TOKENS_SOURCES:

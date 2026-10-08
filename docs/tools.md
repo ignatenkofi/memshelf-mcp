@@ -69,6 +69,10 @@ directory and everything in it.** The refusal takes a docshelf release with
 and a warning says what that line gets. The sections keep the order the
 episode has, and one it does not have yet goes before the first section the
 canonical order puts after it.
+An episode shelved without `approx_tokens` records
+`approx_tokens_source: unmeasured`, so the field takes `unmeasured` too, with
+no number or `0`; with any other number it is refused, as `estimate` or
+`measured` without a number is.
 
 `push` sends HEAD to the branch's upstream — and only to an upstream of the
 same name. `git checkout -B claude/x origin/main`, how agent sessions start,
