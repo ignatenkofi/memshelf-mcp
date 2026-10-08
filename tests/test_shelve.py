@@ -1,6 +1,7 @@
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -1329,7 +1330,7 @@ def test_measured_is_an_explicit_claim(tmp_path):
 
 def test_a_source_without_a_number_is_a_contradiction(tmp_path):
     root = _init_shelf(tmp_path)
-    with pytest.raises(ValueError, match="contradiction"):
+    with pytest.raises(EpisodeError, match="contradiction"):
         shelve(
             root,
             slug="2026-09-01-contradiction",
@@ -1943,3 +1944,47 @@ def test_unmeasured_with_a_number_is_a_contradiction(tmp_path, capsys):
     assert code == 1
     assert "contradiction" in capsys.readouterr().err
     assert list((tmp_path / "docs" / "topics").iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "number_args,source",
+    [([], "measured"), (["--approx-tokens", "500"], "unmeasured")],
+    ids=["source-without-number", "unmeasured-with-number"],
+)
+def test_cli_refuses_a_contradiction_with_the_message_not_a_traceback(
+    tmp_path, number_args, source
+):
+    """Run as a user runs it, in a process of its own: the first case was a
+    plain ValueError, which the CLI does not catch, and ended in a traceback."""
+    root = _init_shelf(tmp_path)
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "memshelf_mcp.cli",
+            "shelve",
+            "--shelf",
+            str(root),
+            "--slug",
+            "2026-09-01-contradiction",
+            "--kind",
+            "topic",
+            "--digest",
+            GOOD_DIGEST,
+            "--section",
+            "Decisions=JWT chosen.",
+            *number_args,
+            "--approx-tokens-source",
+            source,
+            "--no-commit",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 1, proc.stderr
+    assert "contradiction" in proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert list((root / "docs" / "topics").iterdir()) == []
