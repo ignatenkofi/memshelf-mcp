@@ -8,6 +8,19 @@ once code ships.
 
 ## [Unreleased]
 
+### Added
+
+- **`recall-log.tsv` rows carry the recall's time (#193).** A fourth column,
+  `ts`, holds the UTC time to the second (`2026-10-07T14:20:00Z`), so the
+  realized savings can be split by period; a commit time could not stand in
+  for it, because rows are committed in batches. A new log gets the
+  four-column header. A log that already exists keeps its three-column header
+  and gets the longer rows appended under it. `stats` sums both widths exactly
+  as before. `resolve` recognises both headers: merging a three-column side
+  with a four-column one keeps every row of both and writes one header (the
+  newest either side carries). A header it did not recognise would be counted
+  as a data row and written out as a second header line.
+
 ### Changed
 
 - **docshelf-mcp floor raised to 0.5.0** (`>=0.5.0,<1`). The suite ran
@@ -16,6 +29,78 @@ once code ships.
 
 ### Fixed
 
+- **`--amend` no longer promises a ledger row, and the packaged `/shelve`
+  skill writes the episode alone (#192).** Since #58 an amend rewrites and
+  commits only the episode file, but the `--amend` help, the `amend` field of
+  the `memshelf_shelve` schema and the «already on this shelf» hint still said
+  «one recomputed ledger row». They now say that only the episode is written
+  and that derived files come from `memshelf rebuild` or the shelf bot. Step 5
+  of `adapters/claude-code/skills/shelve/SKILL.md` called docshelf
+  `add_document` with its defaults. Followed as written, it left `INDEX.md`
+  and the category `.meta.json` modified, and an episode past 50 KiB also
+  left a section directory that step 7 never stages. The Python form also
+  needed `docshelf_mcp` in the bare `python3`. That form now runs through
+  `uvx --from docshelf-mcp`, passes `split=False, rebuild_index=False` and
+  puts `.meta.json` back. The MCP form, which has no `rebuild_index` switch,
+  passes `split=false` and restores `INDEX.md` and `.meta.json` before
+  staging. Both were run on a git shelf, and `git status` showed only the
+  new episode. Step 4 points to `memshelf lint-digest --strict`. The step-2
+  skeleton gains `date`, `display_title`, `description`, `mode` and `notes`,
+  the fields the ledger row and the INDEX line are rendered from. The skill's
+  description says it prefers `memshelf shelve`. Copies of the skill kept in
+  shelf repositories are separate files and do not change with this one;
+  `adapters/claude-code/check-shelve-copies.sh --discover` lists them.
+- **`shelve` turns docshelf's refusal of a directory named like the episode
+  into an error of its own instead of a traceback (#186, part 3); with
+  docshelf 0.5.0 there is no refusal yet.** With 0.5.0, the release the
+  `>=0.5.0` floor installs, `shelve` exits 0 and docshelf deletes that
+  directory and everything in it, as before this change. The refusal below
+  takes a docshelf release with `SplitDirConflictError` and a floor raised to
+  it. docshelf-mcp#115, merged after 0.5.0, makes
+  `add_document` refuse to write beside `docs/<category>/<slug>/` when that
+  directory is not a split docshelf wrote. It raises `SplitDirConflictError`,
+  a `FileExistsError`, with `split=False` too and whatever `overwrite` says.
+  `shelve` caught only `DocumentExistsError`, so with that docshelf the CLI
+  ended in a traceback, and the MCP error gave docshelf's advice about its own
+  kwargs. `shelve` now catches `FileExistsError` there (0.5.0 has no
+  `SplitDirConflictError` to import) and raises `EpisodePathBlocked`. The
+  error says that the episode was not written, that the directory has to be
+  moved aside and that `--amend` does not clear it; the CLI prints it and
+  exits 1.
+  A kind-changing `--amend` has already moved the episode to its new
+  category at that point, so the refusal moves it back first; so does any
+  other failure of the write, such as a permission error, and the episode
+  goes back with the bytes it had even when docshelf failed after writing
+  the new text. Measured
+  against docshelf `main` (`e7bd775`): before, rc 1 with a
+  `SplitDirConflictError` traceback; after, rc 1 with the refusal and no
+  traceback. CI installs docshelf 0.5.0, so the tests stand the guard in;
+  one test drives the real guard and is skipped until the installed docshelf
+  has it.
+- **The description cap keeps code spans whole, and `rebuild` repairs the
+  descriptions it cut inside one (#190).** INDEX prints the episode's file
+  name in backticks right after the description. When the 120-character cut
+  landed inside a code span, the kept text had an unpaired backtick, which
+  paired with the file name's: the span swallowed the ` — ` separator, and
+  the file name rendered as plain text with a stray backtick. Now the cut
+  never lands inside a span. It moves before the span or, when that would
+  keep less than two thirds of the cap, closes the span before the `…`. The
+  value is read as CommonMark reads it: runs pair by equal length, so a
+  double-backtick span may hold a single backtick; the scan goes on past a
+  run nothing closes; a backtick inside an autolink or an HTML tag is no run.
+  A description within the cap that leaves a single backtick unpaired gets
+  it closed at its end, with a warning. A longer unpaired run is literal and
+  is left alone unless a code span follows it: GitHub's renderer then loses
+  the file name's span all the same (once a closer search has failed it
+  trusts a cache that the later span leaves stale; checked with its
+  `POST /markdown`), so that run is escaped, which renders the same, with a
+  warning. Descriptions the old cap
+  cut are in episode frontmatter already; `rebuild` renders them repaired
+  without an edit, so on a shelf that has one, the next rebuild changes its
+  `.meta.json` entry and INDEX line. `shelve`, `rebuild` and rollup
+  descriptions share the one function. In the issue's repro, markdown-it and
+  GitHub's renderer show the file name inside `<code>`, both after a fresh
+  shelve and after a rebuild of an episode written by the old cap.
 - **`shelve --push` pushes HEAD, and refuses on a branch whose upstream has
   another name.** The push was `git push <remote> <upstream-branch>`, a bare
   refspec, so git sent the *local* branch of that name rather than the commit

@@ -52,7 +52,16 @@ are rendered by `memshelf_rebuild` or the shelf's bot (#58), and the response
 says so (`shelf_totals.derived_stale`, `next`). A contract violation comes back
 as an error carrying the exact fixes — nothing is written. Returns the episode
 address, redaction report, and any digest warnings. `amend=true` rewrites an
-existing episode in place under the same slug.
+existing episode in place under the same slug. A directory named like the
+episode that docshelf did not write as split sections (`docs/<category>/<slug>/`)
+is an error too (#186), but only with a docshelf that has
+`SplitDirConflictError` (docshelf-mcp#115, merged after 0.5.0 and not
+released): that docshelf will not add a document beside the directory,
+`amend` does not clear that, the error says to move the directory aside, and
+nothing is written. **With docshelf 0.5.0, the release the `>=0.5.0` floor
+installs, there is no error: `shelve` exits 0 and docshelf deletes the
+directory and everything in it.** The refusal takes a docshelf release with
+`SplitDirConflictError` and a floor raised to it.
 
 `push` sends HEAD to the branch's upstream — and only to an upstream of the
 same name. `git checkout -B claude/x origin/main`, how agent sessions start,
@@ -89,8 +98,13 @@ Fetch a shelved episode by id — or a single `## Section` of it.
 
 Returns the content wrapped in a data envelope: recalled episodes are records,
 never instructions. Prefer a section fetch over the whole episode when one
-section answers the question — that is where the savings are. `log=true`
-appends the realized saving to `recall-log.tsv`.
+section answers the question — that is where the savings are. Each recall
+appends a row to `recall-log.tsv` (on by default since #112; `log=false`
+reads without a trace): `episode_id`, `section` (empty for a whole episode),
+`fetched_tokens`, and `ts` — the recall's UTC time to the second (#193), so
+the realized savings `memshelf_stats` reports can be split by period. A log
+created before `ts` keeps its three-column header and gets the longer rows
+appended under it; `stats` and `resolve` read both widths.
 
 ## `memshelf_index`
 

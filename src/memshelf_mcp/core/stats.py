@@ -251,6 +251,9 @@ def compute_stats(shelf_root: str | Path, *, context_window: int | None = None) 
     # Realized economy: each logged recall fetched `fetched` tokens where the
     # baseline — carrying / re-deriving that episode — was its freed mass, i.e.
     # the clipped one: a recall cannot save context the window never held.
+    # Only the first three cells are read and the header is skipped by
+    # position, so a log from before the ``ts`` column (#193) — three-column
+    # header, rows of both widths under it — sums exactly as it did.
     fetched_tokens = 0
     realized = 0
     recalled_ids: set[str] = set()

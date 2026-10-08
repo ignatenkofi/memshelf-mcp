@@ -179,8 +179,9 @@ class ShelveInput(ShelfScopedInput):
     amend: bool = Field(
         default=False,
         description="Rewrite an episode already on the shelf, under the same slug (#71): "
-        "one episode, one recomputed ledger row, redaction and the digest contract re-run. "
-        "Errors if the slug is not there — that is a typo, not a create.",
+        "redaction and the digest contract re-run, and only the episode file is written "
+        "and committed — derived files are rendered by memshelf_rebuild or the shelf's "
+        "bot. Errors if the slug is not there — that is a typo, not a create.",
     )
 
 
