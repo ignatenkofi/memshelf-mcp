@@ -54,9 +54,14 @@ as an error carrying the exact fixes — nothing is written. Returns the episode
 address, redaction report, and any digest warnings. `amend=true` rewrites an
 existing episode in place under the same slug. A directory named like the
 episode that docshelf did not write as split sections (`docs/<category>/<slug>/`)
-is an error too (#186): docshelf after 0.5.0 will not add a document beside it,
-`amend` does not clear that, and the error says to move the directory aside.
-Nothing is written in that case either.
+is an error too (#186), but only with a docshelf that has
+`SplitDirConflictError` (docshelf-mcp#115, merged after 0.5.0 and not
+released): that docshelf will not add a document beside the directory,
+`amend` does not clear that, the error says to move the directory aside, and
+nothing is written. **With docshelf 0.5.0, the release the `>=0.5.0` floor
+installs, there is no error: `shelve` exits 0 and docshelf deletes the
+directory and everything in it.** The refusal takes a docshelf release with
+`SplitDirConflictError` and a floor raised to it.
 
 `push` sends HEAD to the branch's upstream — and only to an upstream of the
 same name. `git checkout -B claude/x origin/main`, how agent sessions start,

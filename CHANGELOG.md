@@ -50,8 +50,13 @@ once code ships.
   description says it prefers `memshelf shelve`. Copies of the skill kept in
   shelf repositories are separate files and do not change with this one;
   `adapters/claude-code/check-shelve-copies.sh --discover` lists them.
-- **`shelve` refuses a directory named like the episode instead of ending in
-  a traceback (#186, part 3).** docshelf-mcp#115, merged after 0.5.0, makes
+- **`shelve` turns docshelf's refusal of a directory named like the episode
+  into an error of its own instead of a traceback (#186, part 3); with
+  docshelf 0.5.0 there is no refusal yet.** With 0.5.0, the release the
+  `>=0.5.0` floor installs, `shelve` exits 0 and docshelf deletes that
+  directory and everything in it, as before this change. The refusal below
+  takes a docshelf release with `SplitDirConflictError` and a floor raised to
+  it. docshelf-mcp#115, merged after 0.5.0, makes
   `add_document` refuse to write beside `docs/<category>/<slug>/` when that
   directory is not a split docshelf wrote. It raises `SplitDirConflictError`,
   a `FileExistsError`, with `split=False` too and whatever `overwrite` says.
