@@ -1578,7 +1578,7 @@ PROBE_DIGEST = (
 PROBE_SECTIONS = {"Decisions": "- d", "Timeline": "- t", "Findings": "- f", "Open threads": "- o"}
 
 
-def _older_episode(root, description=LONG_DESCRIPTION):
+def _older_episode(root, description=LONG_DESCRIPTION, sections=PROBE_SECTIONS):
     """The issue's repro up to the amend: an episode the way a hand-edit or an
     older memshelf leaves it (the description stored whole, Findings before
     Open threads), committed."""
@@ -1587,7 +1587,7 @@ def _older_episode(root, description=LONG_DESCRIPTION):
         slug=PROBE_SLUG,
         kind="session",
         digest=PROBE_DIGEST,
-        sections=PROBE_SECTIONS,
+        sections=sections,
         description=description,
         approx_tokens=100,
     )
@@ -1600,7 +1600,8 @@ def _older_episode(root, description=LONG_DESCRIPTION):
         count=1,
         flags=re.M,
     )
-    op, fi = text.index("## Open threads\n"), text.index("## Findings\n")
+    # The last `## Open threads`: a Decisions body may quote one in a fence.
+    op, fi = text.rindex("## Open threads\n"), text.index("## Findings\n")
     text = text[:op] + text[fi:].rstrip("\n") + "\n\n" + text[op:fi].rstrip("\n") + "\n"
     episode.write_text(text, encoding="utf-8")
     subprocess.run(["git", "-C", str(root), "commit", "-qam", "older episode"], check=True)
@@ -1780,6 +1781,75 @@ def test_amend_keeps_the_stored_section_order_and_slots_a_new_one_in(tmp_path):
         "Open threads",
     ]
     assert "- t, amended" in text
+
+
+@pytest.mark.parametrize("date", ["2026-10-08", None], ids=["with-date", "without-date"])
+def test_amend_reads_a_stored_episode_that_is_not_utf8(tmp_path, date):
+    """The amend reads the episode on every run now, and a byte that is not
+    UTF-8 reads as U+FFFD instead of ending it in a UnicodeDecodeError: with
+    `--date`, the amend before #205 wrote over such a file without reading
+    it. The rest is kept as for any other episode."""
+    root = _init_shelf(tmp_path)
+    episode = _older_episode(root)
+    raw = episode.read_bytes().replace(b"- f\n", b"- f\xff\n", 1)
+    episode.write_bytes(raw)
+    subprocess.run(["git", "-C", str(root), "commit", "-qam", "a stray byte"], check=True)
+
+    shelve(
+        root,
+        slug=PROBE_SLUG,
+        kind="session",
+        digest=PROBE_DIGEST,
+        sections=PROBE_SECTIONS,
+        description=LONG_DESCRIPTION,
+        approx_tokens=100,
+        date=date,
+        amend=True,
+        autocommit=False,
+    )
+
+    expected = raw.decode("utf-8", errors="replace").replace("�", "")
+    assert episode.read_text(encoding="utf-8") == expected
+
+
+@pytest.mark.parametrize(
+    "decisions",
+    [
+        "- Kept the template:\n\n```markdown\n## Open threads\n- none\n```",
+        "- Kept the template:\n\n~~~~\n## Open threads\n- none\n~~~~",
+        "- Kept the template:\n\n````\n```\n## Open threads\n```\n````",
+        "- Kept the template:\n\n~~~\n````\n## Open threads\n````\n~~~",
+        "- Kept the template:\n\n```\n```text\n## Open threads\n```",
+        "```x` opens no fence: its info string holds a backtick\n```\n## Open threads\n```",
+        "- Quoted a template and never closed it:\n\n```markdown\n- none",
+    ],
+    ids=["backticks", "tildes", "shorter-run", "other-char", "info-string", "no-fence", "unclosed"],
+)
+def test_amend_reads_past_a_heading_inside_a_fenced_block(tmp_path, decisions):
+    """A `## Open threads` line quoted in a fenced block is code. Read as a
+    heading, it moved Open threads above Timeline on an amend that passed
+    everything back unchanged. A line that only looks like a fence, or a fence
+    nothing closes, must not hide the sections after it either."""
+    root = _init_shelf(tmp_path)
+    sections = {**PROBE_SECTIONS, "Decisions": decisions}
+    episode = _older_episode(root, sections=sections)
+    before = episode.read_text(encoding="utf-8")
+    assert _headings(before)[-3:] == ["Timeline", "Findings", "Open threads"]
+
+    shelve(
+        root,
+        slug=PROBE_SLUG,
+        kind="session",
+        digest=PROBE_DIGEST,
+        sections=sections,
+        description=LONG_DESCRIPTION,
+        approx_tokens=100,
+        date="2026-10-08",
+        amend=True,
+        autocommit=False,
+    )
+
+    assert episode.read_text(encoding="utf-8") == before
 
 
 def test_cli_and_schema_take_every_source_an_episode_can_carry(tmp_path, capsys):

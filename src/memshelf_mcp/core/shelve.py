@@ -110,9 +110,51 @@ class DigestContractError(ValueError):
 #: shelf's natural sort chronological.
 _DATED_SLUG = re.compile(r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])-")
 
-#: An H2 heading of an episode body, read the way doctor (`_sections`) and
-#: recall (`_slice_section`) read it, so an amend sees the sections they see.
-_H2_HEADING = re.compile(r"^\#\#[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+#: An H2 heading line of an episode body, the pattern doctor (`_sections`)
+#: and recall (`_slice_section`) read sections by.
+_H2_LINE = re.compile(r"^\#\#[ \t]+(.+?)[ \t]*$")
+
+#: A fenced code block's fence (CommonMark: up to three spaces of indent,
+#: three or more backticks or tildes), and what follows it on the line.
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _closes(line: str, fence: str) -> bool:
+    """Whether ``line`` closes the block ``fence`` opened: the same character,
+    a run at least as long, and nothing else on the line."""
+    m = _FENCE.match(line)
+    return bool(
+        m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip()
+    )
+
+
+def _h2_headings(body: str) -> list[str]:
+    """The H2 headings of an episode body, in file order (#205).
+
+    A ``## …`` line inside a fenced code block is code, not a section: an
+    episode quoting a template in its Decisions would otherwise move its own
+    sections around on the next amend. A fence nothing closes is read as no
+    fence at all: CommonMark runs it to the end of the body, but the headings
+    after it are the episode's own sections, and the amend keeps them in
+    place. doctor and recall have no fence rule and still count a fenced
+    heading; only the order an amend keeps reads past it.
+    """
+    lines = body.splitlines()
+    headings: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = _FENCE.match(lines[i])
+        # A backtick fence's info string cannot hold a backtick (CommonMark).
+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            end = next((j for j in range(i + 1, len(lines)) if _closes(lines[j], m.group(1))), None)
+            if end is not None:
+                i = end + 1
+                continue
+        heading = _H2_LINE.match(lines[i])
+        if heading:
+            headings.append(heading.group(1))
+        i += 1
+    return headings
 
 
 class SlugContractError(ValueError):
@@ -581,14 +623,19 @@ def shelve(
     # The episode an amend rewrites is read whatever `--date` says: #205
     # compares the description and the section order against it below, and
     # the repro behind #205 passed `--date`. Only the #170 inheritance of date
-    # and span stays gated on its absence.
+    # and span stays gated on its absence. The read is best effort: a byte
+    # that is not UTF-8 reads as U+FFFD, not as a traceback, so an episode an
+    # amend with `--date` used to overwrite without reading it still gets
+    # rewritten from the call.
     stored_fields: dict[str, str] = {}
     stored_headings: list[str] = []
     if amend:
         existing_episode = found_at if found_at is not None else archived_at
         assert existing_episode is not None  # the amend guard above already required one
-        stored_fields, stored_body = parse_frontmatter(existing_episode.read_text(encoding="utf-8"))
-        stored_headings = _H2_HEADING.findall(stored_body)
+        stored_fields, stored_body = parse_frontmatter(
+            existing_episode.read_text(encoding="utf-8", errors="replace")
+        )
+        stored_headings = _h2_headings(stored_body)
     existing_fields = stored_fields if date is None else {}
 
     if date is not None:
