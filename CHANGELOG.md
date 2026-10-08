@@ -127,23 +127,33 @@ once code ships.
   upstream at all is now read by its full ref too: with a tag of the same name,
   `--abbrev-ref HEAD` gave `heads/main`, and preflight skipped the sync
   because the remote had no `heads/main`.
-- **`shelve --amend` leaves what the call passes back unchanged as it was
-  (#205).** An amend applied the rules for a new episode to content that was
-  already written. A stored `description` past the 120-character cap came
-  back cut to 119 characters, the `…` included, so a caller could not amend
-  the digest and keep the description; since #190 the cap also closes a
+- **`shelve --amend` keeps a description and a section order passed back
+  unchanged (#205).** An amend applied the rules for a new episode to content
+  that was already written. A stored `description` past the 120-character cap
+  came back cut to 119 characters, the `…` included, so a caller could not
+  amend the digest and keep the description; since #190 the cap also closes a
   single backtick left open, so a shorter one could change as well. A
-  description equal to the stored one now bypasses the cap and is written as
-  stored, its spaces included. `rebuild` still caps the INDEX line it renders
-  from it, as for every description on disk, and the amend warns what that
-  line gets. A changed description is capped as before. The sections went to
-  the canonical order (`Decisions`, `Timeline`, `Artifacts`, `Open threads`,
+  description equal to the stored one once whitespace is collapsed on both
+  sides (a wrapper may trim what it read, and the issue's own ends in a
+  space) now bypasses the cap, and the stored value is written: its spaces,
+  no-break ones included, stay, and only a line break or another control
+  character still flattens it. A control character that is not whitespace
+  (an escape, say) used to stay in any description as written, and a YAML
+  loader refused the whole frontmatter over it; it becomes a space now.
+  `rebuild` still caps the INDEX line it renders from it, as for every
+  description on disk, and the amend warns what that line gets. A changed
+  description is capped as before. `display_title` and `notes` are flattened
+  as before, a doubled space included. The sections went to the canonical
+  order (`Decisions`, `Timeline`, `Artifacts`, `Open threads`,
   `Raw excerpts`, then the rest as passed) whatever the file and the call
-  said, with no warning. An amend now keeps the order the episode has; a
-  section it does not have yet goes before the first one the canonical order
-  puts after it, so an episode in canonical order comes out as before. The
-  amend reads the stored episode whatever `--date` says: the read was gated
-  on its absence for #170, and the issue's repro passed `--date`.
+  said, with no warning. An amend now keeps the order the episode has: a
+  heading the file repeats counts once, a `## …` line inside a fenced code
+  block is not a section, and a section the episode does not have yet goes
+  right after the last one the canonical order puts before it, so an episode
+  in canonical order comes out as before. The amend reads the stored episode
+  whatever `--date` says: the read was gated on its absence for #170, and the
+  issue's repro passed `--date`. A byte in it that is not UTF-8 reads as
+  U+FFFD; an amend without `--date` used to end in a traceback on it.
   `--approx-tokens-source` and the `approx_tokens_source` field of
   `memshelf_shelve` take `unmeasured`, the value the tool writes when no
   number is passed, so a caller passing every stored field back no longer

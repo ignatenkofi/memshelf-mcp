@@ -63,12 +63,17 @@ installs, there is no error: `shelve` exits 0 and docshelf deletes the
 directory and everything in it.** The refusal takes a docshelf release with
 `SplitDirConflictError` and a floor raised to it.
 
-`amend=true` leaves what the call passes back unchanged as it was (#205). A
-`description` equal to the stored one is written as stored, past the
-120-character cap included: `rebuild` caps the INDEX line it renders from it,
-and a warning says what that line gets. The sections keep the order the
-episode has, and one it does not have yet goes before the first section the
-canonical order puts after it.
+`amend=true` keeps a `description` and a section order the call passes back
+unchanged (#205). A `description` equal to the stored one once whitespace is
+collapsed on both sides is written as the episode has it, past the
+120-character cap included; only a line break or another control character
+in it is flattened, since one frontmatter line cannot hold it. `rebuild` caps
+the INDEX line it renders from it, and a warning says what that line gets.
+The sections keep the order the episode has (a `## …` line inside a fenced
+code block is not a section, and a heading the file repeats counts once),
+and one it does not have yet goes right after the last section the canonical
+order puts before it. `display_title` and `notes` are flattened as before, a
+doubled space included.
 An episode shelved without `approx_tokens` records
 `approx_tokens_source: unmeasured`, so the field takes `unmeasured` too, with
 no number or `0`; with any other number it is refused, as `estimate` or
