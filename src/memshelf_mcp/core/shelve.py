@@ -34,6 +34,7 @@ from memshelf_mcp.core.episode import (
     Frontmatter,
     clamp_description,
     compose_episode,
+    flatten,
 )
 from memshelf_mcp.core.frontmatter import parse_frontmatter
 from memshelf_mcp.core.gitsync import (
@@ -617,10 +618,19 @@ def shelve(
     # and left the caller no way to amend the digest and keep it. The episode
     # keeps the value; `rebuild` caps the INDEX line it renders from it, as it
     # does for every description on disk, and the warning says what that line
-    # gets.
-    if amend and description is not None and description == stored_fields.get("description"):
-        desc = description
-        _, rendered = clamp_description(description)
+    # gets. "Unchanged" is judged with whitespace collapsed on both sides, and
+    # the stored value is what gets written: a wrapper that trims what it read
+    # (the issue's own description ends in a space) passes back the same
+    # description, and it must not be cut for that.
+    stored_description = stored_fields.get("description")
+    if (
+        amend
+        and description is not None
+        and stored_description is not None
+        and flatten(description) == flatten(stored_description)
+    ):
+        desc = stored_description
+        _, rendered = clamp_description(stored_description)
         if rendered:
             warnings.append(
                 "description kept as stored, since --amend passed it back unchanged "

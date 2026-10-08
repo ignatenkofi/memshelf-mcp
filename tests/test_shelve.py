@@ -1683,6 +1683,41 @@ def test_amend_keeps_a_stored_description_the_cap_would_balance(tmp_path):
     assert any("kept as stored" in w and "unpaired" in w for w in result.warnings)
 
 
+@pytest.mark.parametrize(
+    "stored,passed",
+    [
+        (LONG_DESCRIPTION, LONG_DESCRIPTION),
+        (LONG_DESCRIPTION, LONG_DESCRIPTION.rstrip()),
+        (LONG_DESCRIPTION, " ".join(LONG_DESCRIPTION.split())),
+        ("Kept as stored,  spaces and all", "Kept as stored, spaces and all"),
+    ],
+    ids=["exact", "trimmed", "collapsed", "no-break"],
+)
+def test_amend_keeps_a_description_passed_back_whitespace_aside(tmp_path, stored, passed):
+    """A wrapper that trims or collapses what it read passes back the same
+    description; the issue's own ends in a space. It is kept as stored: not
+    cut to 119 characters, and not rewritten to the value passed either."""
+    root = _init_shelf(tmp_path)
+    episode = _older_episode(root, description=stored)
+    before = episode.read_text(encoding="utf-8")
+    assert parse_frontmatter(before)[0]["description"] == stored
+
+    shelve(
+        root,
+        slug=PROBE_SLUG,
+        kind="session",
+        digest=PROBE_DIGEST,
+        sections=PROBE_SECTIONS,
+        description=passed,
+        approx_tokens=100,
+        date="2026-10-08",
+        amend=True,
+        autocommit=False,
+    )
+
+    assert episode.read_text(encoding="utf-8") == before
+
+
 def test_amend_caps_a_description_that_changed(tmp_path):
     """Only the value passed back unchanged is kept; a new one is capped as on
     any shelve."""

@@ -159,14 +159,20 @@ def test_order_drops_what_was_not_passed_and_keeps_the_rest_in_place():
     [
         ("Long  description ", '"Long  description "'),
         (" leading", '" leading"'),
+        ("no\u00a0break, narrow\u202fno-break", '"no\u00a0break, narrow\u202fno-break"'),
         ("two\nlines", '"two lines"'),
         ("a\ttab", '"a tab"'),
+        ("line\u2028separator", '"line separator"'),
+        ("an \x1b[1mescape", '"an [1mescape"'),
+        ("no\u00a0break, then\na line break", '"no break, then a line break"'),
     ],
+    ids=["doubled", "leading", "no-break", "newline", "tab", "u2028", "escape", "both"],
 )
-def test_description_keeps_its_spaces_and_flattens_other_whitespace(stored, written):
-    """An amend keeps the stored description as it is (#205), a trailing or
-    doubled space included. Other whitespace is flattened as before: a line
-    break would end the field."""
+def test_description_keeps_what_one_line_holds_and_flattens_the_rest(stored, written):
+    """An amend keeps the stored description as it is (#205): a trailing,
+    doubled or no-break space included. A line break or another control
+    character flattens the value as before: it would end the field, or not
+    read back."""
     from memshelf_mcp.core.frontmatter import parse_frontmatter
 
     md = compose_episode(_fm(description=stored), "A decided thing.", {"Decisions": "d"})

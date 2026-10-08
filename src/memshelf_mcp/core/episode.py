@@ -359,19 +359,29 @@ def flatten(text: str) -> str:
     return " ".join(text.split())
 
 
-def _spaces_kept(text: str) -> str:
-    """``text`` as it is when its only whitespace is plain spaces, else ``flatten``-ed.
+#: What one frontmatter line cannot hold: the C0 and C1 control characters (a
+#: line break and a tab among them; a raw tab or control character also fails
+#: the strict ``json.loads`` that reads a quoted value back) and the line and
+#: paragraph separators, where ``str.splitlines`` ends the line.
+_NOT_ON_ONE_LINE = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+
+
+def _one_line(text: str) -> str:
+    """``text`` as it is, unless it holds what one line cannot: then each such
+    character becomes a space and the whole value is ``flatten``-ed.
 
     For ``description``, which reaches the frontmatter already flat on every
     path but one: ``clamp_description`` flattens what it returns. The one is
-    the stored value an amend passes back unchanged and keeps (#205), and
-    flattening it would rewrite a leading, trailing or doubled space the caller
-    passed back. Any other whitespace is flattened as before, a line break
-    above all, since it would end the field.
+    the stored value an amend keeps (#205), and flattening it would rewrite a
+    leading, trailing or doubled space, or a no-break space, the episode
+    carries. Only a line break or another control character (see
+    ``_NOT_ON_ONE_LINE``) still changes it, since it would end the field or
+    fail to read back; ``flatten`` alone would keep one that is not
+    whitespace, such as an escape character.
     """
-    if all(ch == " " or not ch.isspace() for ch in text):
+    if _NOT_ON_ONE_LINE.search(text) is None:
         return text
-    return flatten(text)
+    return flatten(_NOT_ON_ONE_LINE.sub(" ", text))
 
 
 def yaml_scalar(text: str) -> str:
@@ -453,7 +463,7 @@ class Frontmatter:
         if self.display_title:
             lines.append(f"display_title: {yaml_scalar(flatten(self.display_title))}")
         if self.description:
-            lines.append(f"description: {yaml_scalar(_spaces_kept(self.description))}")
+            lines.append(f"description: {yaml_scalar(_one_line(self.description))}")
         lines.append(f"tags: [{', '.join(self.tags)}]")
         if self.keywords:
             lines.append(f"keywords: [{', '.join(self.keywords)}]")
