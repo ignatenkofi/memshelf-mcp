@@ -69,6 +69,23 @@ once code ships.
   traceback. CI installs docshelf 0.5.0, so the tests stand the guard in;
   one test drives the real guard and is skipped until the installed docshelf
   has it.
+- **The description cap keeps code spans whole, and `rebuild` repairs the
+  descriptions it cut inside one (#190).** INDEX prints the episode's file
+  name in backticks right after the description. When the 120-character cut
+  landed inside a code span, the kept text had an unpaired backtick, which
+  paired with the file name's: the span swallowed the ` — ` separator, and
+  the file name rendered as plain text with a stray backtick. Now the cut
+  never lands inside a span. It moves before the span or, when that would
+  keep less than two thirds of the cap, closes the span before the `…`. Runs
+  pair by equal length, as in CommonMark, so a double-backtick span may hold
+  a single backtick. A description within the cap that has an unpaired run
+  gets the run closed at its end, with a warning. Descriptions the old cap
+  cut are in episode frontmatter already; `rebuild` renders them repaired
+  without an edit, so on a shelf that has one, the next rebuild changes its
+  `.meta.json` entry and INDEX line. `shelve`, `rebuild` and rollup
+  descriptions share the one function. In the issue's repro, markdown-it
+  renders the file name inside `<code>`, both after a fresh shelve and after
+  a rebuild of an episode written by the old cap.
 - **`shelve --push` pushes HEAD, and refuses on a branch whose upstream has
   another name.** The push was `git push <remote> <upstream-branch>`, a bare
   refspec, so git sent the *local* branch of that name rather than the commit

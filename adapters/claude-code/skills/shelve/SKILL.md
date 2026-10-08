@@ -178,6 +178,9 @@ description: Offload a closed conversation topic (or a whole imported dialog) to
    shelf it ran to 420 characters, and descriptions alone reached 43% of
    INDEX.md, which is paid for in every session by every reader who only
    wanted to know which file to open. Cut at a word boundary and end with `…`.
+   Never cut inside a code span: cut before its opening backtick, or close it
+   before the `…`. The INDEX line puts the file name in backticks right after
+   the description, and a backtick left unpaired pairs with that one instead.
    The full account belongs in `## Digest`, which is what recall fetches.
 
 6. **Do NOT write the ledger by hand.** Since #58 `ledger.tsv` — like

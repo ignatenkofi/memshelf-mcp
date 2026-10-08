@@ -62,10 +62,33 @@ def clamp_description(text: str | None) -> tuple[str, str | None]:
 
     Truncation is word-aware and marked with an ellipsis, so a cut line reads
     as cut rather than as a sentence that happens to end oddly.
+
+    It also keeps code spans whole (#190). INDEX prints the episode's file name
+    in backticks right after the description, so a backtick run the
+    description leaves unpaired pairs with the file name's backtick instead:
+    the span swallows the separator, and the file name renders as plain text
+    with a stray backtick. So a cut never lands inside a code span. It moves
+    before the span or, when that would keep less than the floor, closes the
+    span before the ellipsis. A value within the cap that carries an unpaired
+    run gets the run closed at its end. Such values include descriptions that
+    an earlier cap cut inside a span, already on disk, so ``rebuild`` repairs
+    them without an edit. Runs pair the way CommonMark pairs them, by equal
+    length, so a double-backtick span may hold a single backtick.
     """
     text = flatten(text or "").strip()
+    spans, unpaired = _code_spans(text)
     if len(text) <= MAX_DESCRIPTION_CHARS:
-        return text, None
+        if unpaired is None:
+            return text, None
+        balanced, closed = _close_span(text, *unpaired)
+        if len(balanced) <= MAX_DESCRIPTION_CHARS:
+            return balanced, (
+                f"description has an unpaired {'`' * unpaired[1]}, which the INDEX "
+                "line would pair with the backtick before the file name; "
+                + ("closed it at the end" if closed else "dropped it, as nothing follows it")
+                + ". Pair it in the episode to say where the code ends."
+            )
+        # No room to close it within the cap: cut, as any longer value is.
     head = text[: MAX_DESCRIPTION_CHARS - 1]
     # Prefer a word boundary, but only when one is near the end. Cutting at the
     # *last* space in the head unconditionally is how a description with one
@@ -78,11 +101,85 @@ def clamp_description(text: str | None) -> tuple[str, str | None]:
     if len(cut) < floor:
         cut = head.rstrip()
     kept = f"{cut}…"
+    # An unpaired run counts as a span open to the end: the INDEX line would
+    # close it with the file name's backtick.
+    regions = list(spans)
+    if unpaired is not None:
+        regions.append((unpaired[0], len(text) + 1, unpaired[1]))
+    for start, end, length in regions:
+        if not start < len(cut) < end:
+            continue
+        before = text[:start].rstrip(" ,;:—-")
+        # Room for a space, the closing run and the ellipsis after the content.
+        # Trailing backticks go: a run the cut split in two is shorter than it
+        # was, and one as long as the opener would close the span early.
+        inner = text[: min(len(cut), max(0, MAX_DESCRIPTION_CHARS - 2 - length))]
+        inner = inner.rstrip(" `")
+        if len(before) >= floor or len(inner) <= start + length:
+            cut, kept = before, f"{before}…"
+        else:
+            cut = inner
+            kept, _ = _close_span(f"{inner}…", start, length)
+        break
     return kept, (
         f"description was {len(text)} chars, cut to {len(kept)} "
         f"({len(text) - len(cut)} dropped): INDEX shows it in every session. "
         "Put the full account in the digest, which is what recall fetches."
     )
+
+
+def _code_spans(text: str) -> tuple[list[tuple[int, int, int]], tuple[int, int] | None]:
+    """Code spans in ``text`` up to its first unpaired backtick run.
+
+    Returns ``(spans, unpaired)``: each span as ``(start, end, run length)``,
+    and ``(start, run length)`` of the first run that no later run closes, or
+    None. As in CommonMark, a run is closed by the next run of exactly its
+    length; a backslash escapes a backtick outside a span and nothing inside
+    one.
+    """
+    spans: list[tuple[int, int, int]] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] != "`":
+            i += 1
+            continue
+        j = i
+        while j < n and text[j] == "`":
+            j += 1
+        k = j
+        while True:
+            k = text.find("`", k)
+            if k < 0:
+                return spans, (i, j - i)
+            m = k
+            while m < n and text[m] == "`":
+                m += 1
+            if m - k == j - i:
+                break
+            k = m
+        spans.append((i, m, j - i))
+        i = m
+    return spans, None
+
+
+def _close_span(text: str, start: int, length: int) -> tuple[str, bool]:
+    """Close the span opened at ``start`` at the end of ``text``: ``(text, closed)``.
+
+    The closing run goes before a trailing ellipsis, so a cut still reads as
+    cut. A space keeps it apart from content that ends in a backtick, which
+    would otherwise merge with it into a run of another length. When only
+    spaces follow the opener there is nothing to close, and the opener is
+    dropped instead.
+    """
+    body, tail = (text[:-1], "…") if text.endswith("…") else (text, "")
+    body = body.rstrip()
+    if not body[start + length :].strip():
+        return body[:start].rstrip() + tail, False
+    pad = " " if body.endswith("`") else ""
+    return f"{body}{pad}{'`' * length}{tail}", True
 
 
 class EpisodeError(ValueError):
