@@ -1,5 +1,6 @@
 import re
 import subprocess
+import time
 from datetime import datetime, timezone
 
 import pytest
@@ -111,7 +112,25 @@ def _utc_now_to_the_second():
     return datetime.now(timezone.utc).replace(microsecond=0)
 
 
-def test_recall_log_row_carries_the_recall_time(tmp_path):
+@pytest.fixture
+def local_clock_far_from_utc(monkeypatch):
+    """Local time 14 hours ahead of UTC for the test, whatever the machine's zone.
+
+    A UTC check run where local time *is* UTC (CI runners) cannot tell a
+    local stamp from a UTC one: ``datetime.now()`` in place of
+    ``datetime.now(timezone.utc)`` passed there.
+    """
+    if not hasattr(time, "tzset"):
+        pytest.skip("time.tzset is POSIX-only")
+    monkeypatch.setenv("TZ", "Pacific/Kiritimati")
+    time.tzset()
+    assert time.localtime().tm_gmtoff == 14 * 3600, "the zone did not take"
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_recall_log_row_carries_the_recall_time(tmp_path, local_clock_far_from_utc):
     """#193: without a time column the realized savings cannot be split by
     period, and a commit time is not a recall time — rows are committed in
     batches."""
