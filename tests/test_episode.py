@@ -80,7 +80,7 @@ def test_order_keeps_the_sections_an_episode_has_where_they_are():
         {"Decisions": "d", "Timeline": "t", "Open threads": "o", "Findings": "f", "Notes": "n"},
         order=["Digest", "Decisions", "Timeline", "Findings", "Open threads"],
     )
-    # Notes is new, and nothing the canonical order puts after it is there.
+    # Notes is new, and every section there ranks before it.
     assert _headings(md) == ["Digest", "Decisions", "Timeline", "Findings", "Open threads", "Notes"]
 
 
@@ -99,6 +99,49 @@ def test_a_canonical_order_composes_as_a_new_episode_would():
 
     assert amended == fresh
     assert _headings(amended) == ["Digest", "Decisions", "Timeline", "Artifacts", "Open threads"]
+
+
+@pytest.mark.parametrize(
+    "sections,stored,expected",
+    [
+        # A section the canonical order does not know ranks after every known
+        # one: inserted before the first section ranked after it, Artifacts
+        # went above Context, to the top.
+        (
+            ["Context", "Decisions", "Timeline", "Open threads", "Artifacts"],
+            ["Digest", "Context", "Decisions", "Timeline", "Open threads"],
+            ["Digest", "Context", "Decisions", "Timeline", "Artifacts", "Open threads"],
+        ),
+        # The issue's layout, Findings moved above Open threads: Raw excerpts
+        # went above Findings.
+        (
+            ["Decisions", "Timeline", "Findings", "Open threads", "Raw excerpts"],
+            ["Digest", "Decisions", "Timeline", "Findings", "Open threads"],
+            ["Digest", "Decisions", "Timeline", "Findings", "Open threads", "Raw excerpts"],
+        ),
+    ],
+    ids=["context-first", "issue-layout"],
+)
+def test_a_new_section_goes_after_the_last_one_ranked_before_it(sections, stored, expected):
+    md = compose_episode(
+        _fm("session"),
+        "A decided thing.",
+        {name: name.lower() for name in sections},
+        order=stored,
+    )
+    assert _headings(md) == expected
+
+
+def test_a_heading_the_file_repeats_is_written_once_at_its_first_place():
+    """A hand-edit can leave a heading twice; the section is one entry of the
+    call, so it is written once, where the file has it first."""
+    md = compose_episode(
+        _fm("session"),
+        "A decided thing.",
+        {"Decisions": "d", "Timeline": "t", "Open threads": "o"},
+        order=["Digest", "Timeline", "Decisions", "Open threads", "Timeline"],
+    )
+    assert _headings(md) == ["Digest", "Timeline", "Decisions", "Open threads"]
 
 
 def test_order_drops_what_was_not_passed_and_keeps_the_rest_in_place():

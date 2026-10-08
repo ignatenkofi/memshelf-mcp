@@ -485,9 +485,13 @@ def _section_order(sections: dict[str, str], stored: Sequence[str]) -> list[str]
     A new episode (no ``stored``) takes the canonical order: known sections in
     ``_SECTION_ORDER``, then the rest in the order passed. An amend passes the
     headings of the episode it rewrites, in file order (#205): the sections
-    still there keep that order, and a section the episode does not have yet
-    goes before the first one the canonical order puts after it. An episode
-    already in canonical order therefore comes out as a new one would.
+    still there keep that order, a heading the file repeats counts once, at
+    its first place, and a section the episode does not have yet goes right
+    after the last one the canonical order puts before it (first, if none
+    does). After, not before the first one ranked later: a section the
+    canonical order does not know ranks after every known one, so an episode
+    that opens with one (`Context`, say) would get a new `Artifacts` above it.
+    An episode already in canonical order comes out as a new one would.
     """
     present = [name for name in sections if sections[name].strip()]
     fresh = [s for s in _SECTION_ORDER if s in present]
@@ -496,8 +500,8 @@ def _section_order(sections: dict[str, str], stored: Sequence[str]) -> list[str]
     ordered = [name for name in dict.fromkeys(stored) if name in rank]
     for name in fresh:
         if name not in ordered:
-            later = (i for i, kept in enumerate(ordered) if rank[kept] > rank[name])
-            ordered.insert(next(later, len(ordered)), name)
+            earlier = [i for i, kept in enumerate(ordered) if rank[kept] < rank[name]]
+            ordered.insert(earlier[-1] + 1 if earlier else 0, name)
     return ordered
 
 
