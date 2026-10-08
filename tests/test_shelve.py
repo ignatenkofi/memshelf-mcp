@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from memshelf_mcp.core.episode import (  # noqa: E402
     MAX_DESCRIPTION_CHARS,
     EpisodeError,
 )
+from memshelf_mcp.core.frontmatter import parse_frontmatter  # noqa: E402
 from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.shelve import (  # noqa: E402
     AmendTargetMissing,
@@ -1553,3 +1555,192 @@ def test_the_real_split_dir_guard_ends_in_the_same_refusal(tmp_path):
     assert isinstance(err.value.__cause__, splitter.SplitDirConflictError)
     assert not (root / "docs" / "topics" / "2026-10-07-probe.md").exists()
     assert sorted(p.name for p in foreign.iterdir()) == ["diagram.png"]
+
+
+# ── #205: an amend keeps what is passed back unchanged ────────────────────
+#
+# `--amend` applied create-time rules to content that already existed: a
+# description past the cap came back cut to 119 characters, and the sections
+# moved to the canonical order, so a caller that passed every field and
+# section back as stored got a diff it had not made. The issue's repro passes
+# `--date`, and the amend read the stored episode only without one (#170), so
+# the repro runs both ways.
+
+#: The issue's description, as `$(printf 'Long description %.0s' $(seq 20))`
+#: builds it: 340 characters, the trailing space included.
+LONG_DESCRIPTION = "Long description " * 20
+PROBE_SLUG = "2026-10-08-amend-probe"
+PROBE_DIGEST = (
+    "The amend probe checks what memshelf shelve --amend rewrites. "
+    "Decided: probe only. Open: nothing."
+)
+PROBE_SECTIONS = {"Decisions": "- d", "Timeline": "- t", "Findings": "- f", "Open threads": "- o"}
+
+
+def _older_episode(root, description=LONG_DESCRIPTION):
+    """The issue's repro up to the amend: an episode the way a hand-edit or an
+    older memshelf leaves it (the description stored whole, Findings before
+    Open threads), committed."""
+    shelve(
+        root,
+        slug=PROBE_SLUG,
+        kind="session",
+        digest=PROBE_DIGEST,
+        sections=PROBE_SECTIONS,
+        description=description,
+        approx_tokens=100,
+    )
+    episode = root / "docs" / "sessions" / f"{PROBE_SLUG}.md"
+    text = episode.read_text(encoding="utf-8")
+    text = re.sub(
+        r"^description: .*$",
+        lambda _: "description: " + json.dumps(description, ensure_ascii=False),
+        text,
+        count=1,
+        flags=re.M,
+    )
+    op, fi = text.index("## Open threads\n"), text.index("## Findings\n")
+    text = text[:op] + text[fi:].rstrip("\n") + "\n\n" + text[op:fi].rstrip("\n") + "\n"
+    episode.write_text(text, encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "commit", "-qam", "older episode"], check=True)
+    return episode
+
+
+def _headings(text):
+    return re.findall(r"^## (.+)$", text, re.M)
+
+
+@pytest.mark.parametrize(
+    "date_args", [["--date", "2026-10-08"], []], ids=["with-date", "without-date"]
+)
+def test_amend_passing_everything_back_rewrites_nothing(tmp_path, capsys, date_args):
+    """The issue's repro through the CLI. Before the fix the description came
+    back cut to 119 characters and Findings moved below Open threads."""
+    from memshelf_mcp.cli import main
+
+    root = _init_shelf(tmp_path)
+    episode = _older_episode(root)
+    before = episode.read_text(encoding="utf-8")
+    assert _headings(before) == ["Digest", "Decisions", "Timeline", "Findings", "Open threads"]
+
+    sections = [a for name, body in PROBE_SECTIONS.items() for a in ("--section", f"{name}={body}")]
+    code = main(
+        [
+            "shelve",
+            "--shelf",
+            str(root),
+            "--slug",
+            PROBE_SLUG,
+            "--kind",
+            "session",
+            "--digest",
+            PROBE_DIGEST,
+            "--amend",
+            "--no-commit",
+            *sections,
+            "--description",
+            LONG_DESCRIPTION,
+            "--approx-tokens",
+            "100",
+            *date_args,
+        ]
+    )
+
+    out = capsys.readouterr()
+    assert code == 0, out.err
+    assert episode.read_text(encoding="utf-8") == before
+    # Kept, and the caller is told what the INDEX line will show instead.
+    warnings = json.loads(out.out)["warnings"]
+    assert any("kept as stored" in w and "cut to 119" in w for w in warnings), warnings
+
+
+def test_amend_keeps_a_stored_description_the_cap_would_balance(tmp_path):
+    """Since #190 the cap changes values within it too: it closes a single
+    backtick left open. Keeping only what is past the cap would still rewrite
+    this one, so the value passed back unchanged bypasses the whole cap."""
+    root = _init_shelf(tmp_path)
+    stored = "Re-ran `memshelf doctor on the probe shelf"
+    assert len(stored) <= MAX_DESCRIPTION_CHARS
+    episode = _older_episode(root, description=stored)
+    before = episode.read_text(encoding="utf-8")
+    assert parse_frontmatter(before)[0]["description"] == stored
+
+    result = shelve(
+        root,
+        slug=PROBE_SLUG,
+        kind="session",
+        digest=PROBE_DIGEST,
+        sections=PROBE_SECTIONS,
+        description=stored,
+        approx_tokens=100,
+        date="2026-10-08",
+        amend=True,
+        autocommit=False,
+    )
+
+    assert episode.read_text(encoding="utf-8") == before
+    assert any("kept as stored" in w and "unpaired" in w for w in result.warnings)
+
+
+def test_amend_caps_a_description_that_changed(tmp_path):
+    """Only the value passed back unchanged is kept; a new one is capped as on
+    any shelve."""
+    root = _init_shelf(tmp_path)
+    episode = _older_episode(root)
+
+    result = shelve(
+        root,
+        slug=PROBE_SLUG,
+        kind="session",
+        digest=PROBE_DIGEST,
+        sections=PROBE_SECTIONS,
+        description=LONG_DESCRIPTION.replace("Long", "Longer"),
+        approx_tokens=100,
+        date="2026-10-08",
+        amend=True,
+        autocommit=False,
+    )
+
+    written = parse_frontmatter(episode.read_text(encoding="utf-8"))[0]["description"]
+    assert len(written) <= MAX_DESCRIPTION_CHARS
+    assert written.startswith("Longer description") and written.endswith("…")
+    assert any("cut to" in w for w in result.warnings)
+    assert not any("kept as stored" in w for w in result.warnings)
+
+
+def test_amend_keeps_the_stored_section_order_and_slots_a_new_one_in(tmp_path):
+    """The stored order wins over the canonical one and over the order passed.
+    A section the episode does not have yet goes before the first section the
+    canonical order puts after it: Artifacts after Timeline, before Findings."""
+    root = _init_shelf(tmp_path)
+    episode = _older_episode(root)
+
+    shelve(
+        root,
+        slug=PROBE_SLUG,
+        kind="session",
+        digest=PROBE_DIGEST,
+        sections={
+            "Open threads": "- o",
+            "Decisions": "- d",
+            "Artifacts": "- a",
+            "Timeline": "- t, amended",
+            "Findings": "- f",
+        },
+        description=LONG_DESCRIPTION,
+        approx_tokens=100,
+        date="2026-10-08",
+        amend=True,
+        autocommit=False,
+    )
+
+    text = episode.read_text(encoding="utf-8")
+    assert _headings(text) == [
+        "Digest",
+        "Decisions",
+        "Timeline",
+        "Artifacts",
+        "Findings",
+        "Open threads",
+    ]
+    assert "- t, amended" in text

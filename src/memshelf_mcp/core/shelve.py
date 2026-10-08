@@ -109,6 +109,10 @@ class DigestContractError(ValueError):
 #: shelf's natural sort chronological.
 _DATED_SLUG = re.compile(r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])-")
 
+#: An H2 heading of an episode body, read the way doctor (`_sections`) and
+#: recall (`_slice_section`) read it, so an amend sees the sections they see.
+_H2_HEADING = re.compile(r"^\#\#[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+
 
 class SlugContractError(ValueError):
     """Raised when a *new* episode's slug has no date prefix (#101).
@@ -558,11 +562,19 @@ def shelve(
     # new name) rather than the machine's clock, so a session that crosses
     # midnight keeps id and date on the same day; only a legacy, undated slug
     # (grandfathered into `--amend` above) falls back to today().
-    existing_fields: dict[str, str] = {}
-    if amend and date is None:
+    #
+    # The episode an amend rewrites is read whatever `--date` says: #205
+    # compares the description and the section order against it below, and
+    # the repro behind #205 passed `--date`. Only the #170 inheritance of date
+    # and span stays gated on its absence.
+    stored_fields: dict[str, str] = {}
+    stored_headings: list[str] = []
+    if amend:
         existing_episode = found_at if found_at is not None else archived_at
         assert existing_episode is not None  # the amend guard above already required one
-        existing_fields, _ = parse_frontmatter(existing_episode.read_text(encoding="utf-8"))
+        stored_fields, stored_body = parse_frontmatter(existing_episode.read_text(encoding="utf-8"))
+        stored_headings = _H2_HEADING.findall(stored_body)
+    existing_fields = stored_fields if date is None else {}
 
     if date is not None:
         shelved_on = date
@@ -584,11 +596,28 @@ def shelve(
     # `_first_sentence`, which runs only when the caller supplies no
     # description — so the path callers actually take wrote whatever they were
     # given, straight into a line every future session reads.
-    desc, desc_warning = clamp_description(
-        description if description is not None else _first_sentence(digest)
-    )
-    if desc_warning:
-        warnings.append(desc_warning)
+    #
+    # Not applied to the description an amend passes back unchanged (#205).
+    # The cap decides what a shelve writes, and that value is written already:
+    # capping it again cut a stored description past the cap to 119 characters
+    # and left the caller no way to amend the digest and keep it. The episode
+    # keeps the value; `rebuild` caps the INDEX line it renders from it, as it
+    # does for every description on disk, and the warning says what that line
+    # gets.
+    if amend and description is not None and description == stored_fields.get("description"):
+        desc = description
+        _, rendered = clamp_description(description)
+        if rendered:
+            warnings.append(
+                "description kept as stored, since --amend passed it back unchanged "
+                f"(#205); rebuild renders its INDEX line through the cap: {rendered}"
+            )
+    else:
+        desc, desc_warning = clamp_description(
+            description if description is not None else _first_sentence(digest)
+        )
+        if desc_warning:
+            warnings.append(desc_warning)
     ledger_notes, notes_warning = _flatten_notes(notes)
     if notes_warning:
         warnings.append(notes_warning)
@@ -611,7 +640,7 @@ def shelve(
         notes=ledger_notes,
         retain_until=retain_until,
     )
-    markdown = compose_episode(frontmatter, digest, sections)
+    markdown = compose_episode(frontmatter, digest, sections, order=stored_headings)
 
     # The kind change decided above is performed here, after everything that can
     # still refuse this shelve — redaction, the digest contract, and the section

@@ -63,6 +63,13 @@ installs, there is no error: `shelve` exits 0 and docshelf deletes the
 directory and everything in it.** The refusal takes a docshelf release with
 `SplitDirConflictError` and a floor raised to it.
 
+`amend=true` leaves what the call passes back unchanged as it was (#205). A
+`description` equal to the stored one is written as stored, past the
+120-character cap included: `rebuild` caps the INDEX line it renders from it,
+and a warning says what that line gets. The sections keep the order the
+episode has, and one it does not have yet goes before the first section the
+canonical order puts after it.
+
 `push` sends HEAD to the branch's upstream — and only to an upstream of the
 same name. `git checkout -B claude/x origin/main`, how agent sessions start,
 makes `origin/main` the upstream of `claude/x`; from such a branch the push is

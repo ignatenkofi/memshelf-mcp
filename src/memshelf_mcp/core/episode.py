@@ -9,6 +9,7 @@ concern, added when those tools land. See ``docs/ARCHITECTURE.md`` → Layer 2.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 CATEGORY_BY_KIND = {"topic": "topics", "research": "research", "session": "sessions"}
@@ -23,7 +24,8 @@ _REQUIRED_SECTIONS: dict[str, tuple[str, ...]] = {
 }
 
 # Canonical order for known sections when present; unknown sections keep their
-# insertion order after these.
+# insertion order after these. A new episode's order; an amend keeps the order
+# the episode already has (#205, `compose_episode`).
 _SECTION_ORDER = ("Decisions", "Timeline", "Artifacts", "Open threads", "Raw excerpts")
 
 
@@ -357,6 +359,21 @@ def flatten(text: str) -> str:
     return " ".join(text.split())
 
 
+def _spaces_kept(text: str) -> str:
+    """``text`` as it is when its only whitespace is plain spaces, else ``flatten``-ed.
+
+    For ``description``, which reaches the frontmatter already flat on every
+    path but one: ``clamp_description`` flattens what it returns. The one is
+    the stored value an amend passes back unchanged and keeps (#205), and
+    flattening it would rewrite a leading, trailing or doubled space the caller
+    passed back. Any other whitespace is flattened as before, a line break
+    above all, since it would end the field.
+    """
+    if all(ch == " " or not ch.isspace() for ch in text):
+        return text
+    return flatten(text)
+
+
 def yaml_scalar(text: str) -> str:
     """Quote a free-text value so the block stays valid **YAML**.
 
@@ -436,7 +453,7 @@ class Frontmatter:
         if self.display_title:
             lines.append(f"display_title: {yaml_scalar(flatten(self.display_title))}")
         if self.description:
-            lines.append(f"description: {yaml_scalar(flatten(self.description))}")
+            lines.append(f"description: {yaml_scalar(_spaces_kept(self.description))}")
         lines.append(f"tags: [{', '.join(self.tags)}]")
         if self.keywords:
             lines.append(f"keywords: [{', '.join(self.keywords)}]")
@@ -462,9 +479,41 @@ def _check_contract(kind: str, digest: str, sections: dict[str, str]) -> None:
         raise EpisodeError("kind=research requires Digest plus at least one body section.")
 
 
-def compose_episode(frontmatter: Frontmatter, digest: str, sections: dict[str, str]) -> str:
+def _section_order(sections: dict[str, str], stored: Sequence[str]) -> list[str]:
+    """The non-empty ``sections`` in the order they are written.
+
+    A new episode (no ``stored``) takes the canonical order: known sections in
+    ``_SECTION_ORDER``, then the rest in the order passed. An amend passes the
+    headings of the episode it rewrites, in file order (#205): the sections
+    still there keep that order, and a section the episode does not have yet
+    goes before the first one the canonical order puts after it. An episode
+    already in canonical order therefore comes out as a new one would.
+    """
+    present = [name for name in sections if sections[name].strip()]
+    fresh = [s for s in _SECTION_ORDER if s in present]
+    fresh += [s for s in present if s not in _SECTION_ORDER]
+    rank = {name: i for i, name in enumerate(fresh)}
+    ordered = [name for name in dict.fromkeys(stored) if name in rank]
+    for name in fresh:
+        if name not in ordered:
+            later = (i for i, kept in enumerate(ordered) if rank[kept] > rank[name])
+            ordered.insert(next(later, len(ordered)), name)
+    return ordered
+
+
+def compose_episode(
+    frontmatter: Frontmatter,
+    digest: str,
+    sections: dict[str, str],
+    *,
+    order: Sequence[str] = (),
+) -> str:
     """Return the episode Markdown: H1 slug, ``---``-fenced frontmatter, Digest,
     then ordered body sections. Empty sections are omitted.
+
+    ``order`` is for an amend: the H2 headings of the episode being rewritten,
+    in file order, so its sections keep their places (#205) instead of moving
+    to the canonical order a new episode gets (see ``_section_order``).
 
     Raises ``EpisodeError`` on a contract miss (unknown kind, missing Digest or
     a required section). The H1-first layout matches how docshelf's
@@ -481,8 +530,6 @@ def compose_episode(frontmatter: Frontmatter, digest: str, sections: dict[str, s
         "## Digest",
         digest.strip(),
     ]
-    known = [s for s in _SECTION_ORDER if sections.get(s, "").strip()]
-    extras = [s for s in sections if s not in _SECTION_ORDER and sections[s].strip()]
-    for name in known + extras:
+    for name in _section_order(sections, order):
         parts += ["", f"## {name}", sections[name].strip()]
     return "\n".join(parts) + "\n"

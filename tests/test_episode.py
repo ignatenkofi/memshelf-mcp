@@ -66,6 +66,72 @@ def test_missing_digest_rejected():
         compose_episode(_fm("topic"), "   ", {"Decisions": "d"})
 
 
+# --- an amend keeps the order of the episode it rewrites (#205) -------------
+
+
+def _headings(md):
+    return re.findall(r"^## (.+)$", md, re.MULTILINE)
+
+
+def test_order_keeps_the_sections_an_episode_has_where_they_are():
+    md = compose_episode(
+        _fm("session"),
+        "A decided thing.",
+        {"Decisions": "d", "Timeline": "t", "Open threads": "o", "Findings": "f", "Notes": "n"},
+        order=["Digest", "Decisions", "Timeline", "Findings", "Open threads"],
+    )
+    # Notes is new, and nothing the canonical order puts after it is there.
+    assert _headings(md) == ["Digest", "Decisions", "Timeline", "Findings", "Open threads", "Notes"]
+
+
+def test_a_canonical_order_composes_as_a_new_episode_would():
+    """An episode the tool wrote is in canonical order already, so a known
+    section an amend adds goes where a new episode has it, not to the end."""
+    sections = {"Decisions": "d", "Timeline": "t", "Artifacts": "a", "Open threads": "o"}
+    fresh = compose_episode(_fm("session"), "A decided thing.", sections)
+
+    amended = compose_episode(
+        _fm("session"),
+        "A decided thing.",
+        sections,
+        order=["Digest", "Decisions", "Timeline", "Open threads"],
+    )
+
+    assert amended == fresh
+    assert _headings(amended) == ["Digest", "Decisions", "Timeline", "Artifacts", "Open threads"]
+
+
+def test_order_drops_what_was_not_passed_and_keeps_the_rest_in_place():
+    md = compose_episode(
+        _fm("session"),
+        "A decided thing.",
+        {"Timeline": "t", "Open threads": "o", "Findings": "f", "Artifacts": ""},
+        order=["Findings", "Decisions", "Open threads", "Artifacts", "Timeline"],
+    )
+    assert _headings(md) == ["Digest", "Findings", "Open threads", "Timeline"]
+
+
+@pytest.mark.parametrize(
+    "stored,written",
+    [
+        ("Long  description ", '"Long  description "'),
+        (" leading", '" leading"'),
+        ("two\nlines", '"two lines"'),
+        ("a\ttab", '"a tab"'),
+    ],
+)
+def test_description_keeps_its_spaces_and_flattens_other_whitespace(stored, written):
+    """An amend keeps the stored description as it is (#205), a trailing or
+    doubled space included. Other whitespace is flattened as before: a line
+    break would end the field."""
+    from memshelf_mcp.core.frontmatter import parse_frontmatter
+
+    md = compose_episode(_fm(description=stored), "A decided thing.", {"Decisions": "d"})
+
+    assert f"description: {written}" in md.splitlines()
+    assert parse_frontmatter(md)[0]["description"] == written[1:-1]
+
+
 # --- frontmatter must be valid YAML, not just parseable by us ---------------
 
 

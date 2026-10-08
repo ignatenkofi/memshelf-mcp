@@ -127,6 +127,25 @@ once code ships.
   upstream at all is now read by its full ref too: with a tag of the same name,
   `--abbrev-ref HEAD` gave `heads/main`, and preflight skipped the sync
   because the remote had no `heads/main`.
+- **`shelve --amend` leaves what the call passes back unchanged as it was
+  (#205).** An amend applied the rules for a new episode to content that was
+  already written. A stored `description` past the 120-character cap came
+  back cut to 119 characters, the `…` included, so a caller could not amend
+  the digest and keep the description; since #190 the cap also closes a
+  single backtick left open, so a shorter one could change as well. A
+  description equal to the stored one now bypasses the cap and is written as
+  stored, its spaces included. `rebuild` still caps the INDEX line it renders
+  from it, as for every description on disk, and the amend warns what that
+  line gets. A changed description is capped as before. The sections went to
+  the canonical order (`Decisions`, `Timeline`, `Artifacts`, `Open threads`,
+  `Raw excerpts`, then the rest as passed) whatever the file and the call
+  said, with no warning. An amend now keeps the order the episode has; a
+  section it does not have yet goes before the first one the canonical order
+  puts after it, so an episode in canonical order comes out as before. The
+  amend reads the stored episode whatever `--date` says: the read was gated
+  on its absence for #170, and the issue's repro passed `--date`. In the
+  issue's repro, run with and without `--date`, `git diff` after the amend
+  is empty.
 
 ## [0.4.0] — 2026-10-06
 

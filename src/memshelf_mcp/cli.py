@@ -649,7 +649,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Rewrite an episode already on the shelf under the same slug: redaction "
         "and the digest contract re-run, and only the episode file is written and "
         "committed — derived files are rendered by `memshelf rebuild` or the shelf "
-        "bot. Fails if the slug is not there.",
+        "bot. Fails if the slug is not there. A --description passed back unchanged "
+        "is kept as stored, and the sections keep the episode's order (#205).",
     )
     sh.set_defaults(func=_cmd_shelve)
 

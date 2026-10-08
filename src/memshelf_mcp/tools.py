@@ -181,7 +181,9 @@ class ShelveInput(ShelfScopedInput):
         description="Rewrite an episode already on the shelf, under the same slug (#71): "
         "redaction and the digest contract re-run, and only the episode file is written "
         "and committed — derived files are rendered by memshelf_rebuild or the shelf's "
-        "bot. Errors if the slug is not there — that is a typo, not a create.",
+        "bot. Errors if the slug is not there — that is a typo, not a create. A "
+        "description passed back unchanged is kept as stored, and the sections keep "
+        "the episode's order (#205).",
     )
 
 
