@@ -4,6 +4,7 @@ Agent memory shelf (memshelf). Recall rule: check this index before answering an
 
 ## Topics
 
+- **memshelf-mcp: SessionStart-хук и лимит хоста 10 000 символов (#208 → PR #209)** — SessionStart-хук укладывается в лимит хоста 10 000 символов: короткая форма INDEX, новейшие первыми (#208, PR #209). — `2026-10-09-session-start-hook-host-cap.md`
 - **memshelf-mcp: shelve --date fix (#170) and M2 exit-criterion measurements (#166)** — Ночная смена (night-2026-09-27-b) закрыла issue #170 и продвинула #166 (M2) в memshelf-mcp. — `2026-09-28-shelve-date-fix-and-m2-measurements.md`
 
 ## Sessions
