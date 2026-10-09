@@ -49,7 +49,14 @@ the `/shelve` skill plus two hooks:
   from the first turn (`hooks/session-start-index.sh`). No matcher is set, so
   this fires on **every** session start — including the restart after an
   auto-compaction, the one moment context is known to have been lost (#112).
-  Reading stops being a choice the agent has to remember to make.
+  Reading stops being a choice the agent has to remember to make. The context
+  stays within Claude Code's 10,000-character cap on hook output; a longer
+  string would reach the model as a file path and a 2,000-character preview it
+  is not asked to open. An `INDEX.md` that fits goes in verbatim. A larger one
+  goes in as a short form: the newest entries by the date in their id, listed
+  under their kinds newest first, the newest with titles and the rest by id
+  alone, and a last line naming how many older entries are not shown and their
+  date range (#208).
 - **`SessionEnd` + `PreCompact`** → push the shelf so committed episodes survive
   an ephemeral container (`hooks/autopush.sh`) — **opt-in** via
   `MEMSHELF_AUTOPUSH=1`.
@@ -64,6 +71,9 @@ Configure via env:
 
 - `MEMSHELF_ROOT` — path to the shelf (else the hooks fall back to the cwd when
   it looks like a shelf: `INDEX.md` + `ledger.tsv`).
+- `MEMSHELF_INDEX_BUDGET` — characters of context the `SessionStart` hook may
+  emit: 9,800 by default, 1,000 at least, and never more than the host's
+  10,000. Lower it to spend less context at each session start.
 - `MEMSHELF_AUTOPUSH=1` — enable the durability push. Set it in ephemeral cloud
   sessions; leave it unset on a persistent host, where you push manually.
 - `MEMSHELF_AUTOPUSH_MODE=branch` — publish to a rescue branch
@@ -76,10 +86,12 @@ Configure via env:
 **Rollout order for the reading habit (#112).** The write side of a shelf
 enforces itself (the digest contract refuses); the read side has no trigger,
 so it needs a mechanism, in this order: (1) keep INDEX small — the linear
-budget in `doctor` and the shelf's rollup policy own that; (2) the
-`SessionStart` hook above makes the first read free; (3) recall now logs by
-default (`recall-log.tsv`), so (4) whether the habit took is *measurable* —
-sessions that begin with a read, recalls per compaction — instead of assumed.
+budget in `doctor` and the shelf's rollup policy own that, though neither keeps
+it under the hook's 10,000 characters, which is why the hook has a short form
+(#208); (2) the `SessionStart` hook above makes the first read free; (3) recall
+now logs by default (`recall-log.tsv`), so (4) whether the habit took is
+*measurable* — sessions that begin with a read, recalls per compaction —
+instead of assumed.
 
 **What the hooks deliberately do NOT do.** A hook is a shell command — it can't
 run the model. So "shelve closed topics before compaction" and "write a session

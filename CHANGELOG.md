@@ -10,6 +10,22 @@ once code ships.
 
 ### Changed
 
+- **The `SessionStart` hook fits Claude Code's 10,000-character cap on hook
+  output** (#208). It cut `INDEX.md` at 20,000 characters, and the host
+  replaces a longer hook output with a file path and a 2,000-character preview
+  that the model is not asked to open: on a 56,301-character INDEX of 216
+  entries, the preview held 7 of them. The cut was also a prefix of an INDEX
+  that docshelf sorts by title, so even under the cap it kept an arbitrary
+  subset. Now an INDEX that fits goes in verbatim, and a larger one goes in as
+  a short form: the newest entries by the date in their id, listed under their
+  kinds newest first, with titles while titles take a quarter of the budget and
+  by id alone after that, and a last line naming how many older entries are
+  left out and their date range.
+  On the same INDEX that is 155 of the 216 entries, back to 2026-08-20.
+  Lengths are counted in UTF-16 code units, as the host counts them;
+  `MEMSHELF_INDEX_BUDGET` lowers the budget (9,800 by default, 10,000 at
+  most).
+
 - **docshelf-mcp floor raised to 0.5.0** (`>=0.5.0,<1`). The suite ran
   green against the published 0.5.0; the lock drops `pymupdf4llm` and its
   tree, which 0.5.0 moved into its `pdf` extra.
