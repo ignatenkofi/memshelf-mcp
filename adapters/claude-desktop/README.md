@@ -81,8 +81,9 @@ rebuild is quick). `--variant uv|standalone|both` and `--target` narrow the job.
 
 Two things the builder does that are worth knowing:
 
-- **docshelf is installed without its dependency tree.** It declares
-  `pymupdf4llm`, which drags in pymupdf, onnxruntime, numpy and sympy — roughly
+- **docshelf is installed without its dependency tree.** Up to 0.4.x it
+  declares `pymupdf4llm` (0.5.0, the current floor, moved it into its `pdf`
+  extra), which drags in pymupdf, onnxruntime, numpy and sympy — roughly
   200 MB of PDF ingestion that a memory shelf never calls. memshelf touches one
   docshelf module, `core.shelf`, which imports none of it. The uv bundle does
   the same thing through a `[tool.uv] override-dependencies` marker that cannot

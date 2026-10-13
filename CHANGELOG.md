@@ -13,9 +13,58 @@ once code ships.
 - **docshelf-mcp floor raised to 0.5.0** (`>=0.5.0,<1`). The suite ran
   green against the published 0.5.0; the lock drops `pymupdf4llm` and its
   tree, which 0.5.0 moved into its `pdf` extra.
+- **The release tools are pinned, and the registry path runs on every PR
+  (#194).** `release.yml` piped whatever `releases/latest` served into `tar`
+  and published with `pypa/gh-action-pypi-publish@release/v1`, a moving
+  branch, in jobs that hold an OIDC token. mcp-publisher now comes from a
+  composite action (`.github/actions/install-mcp-publisher`): release 1.8.1,
+  downloaded to a file and checked with `sha256sum -c` against the hash in
+  upstream's `registry_1.8.1_checksums.txt` before `tar` reads it. The PyPI
+  action is pinned to `dc37677` (`# v1.14.2`), the commit its tag points
+  at. These are the versions the v0.4.0 release ran with. A new ci job,
+  `registry-manifest`, runs the same install and `mcp-publisher validate` on
+  every PR and push. It also fails on a deprecated `$schema`, which the
+  registry only warns about (`validate` exits 0). `validate` asks the live
+  registry, so the job also turns red with nothing changed here when the
+  registry is down or moves its current schema. `server.json` moves to the
+  2025-12-11 schema.
+- **CI tests Python 3.14, and the classifiers say so (#199).** The test
+  matrix keeps testing the two ends of the declared range, now 3.10 and
+  3.14 (was 3.10 and 3.13), and `pyproject.toml` gains the
+  `Programming Language :: Python :: 3.14` classifier.
+- **The security scan also runs weekly on main, and a failed weekly run
+  opens an issue (#196).** `security.yml` ran only on PRs and pushes, so an
+  advisory against a package already in `uv.lock` stayed silent until the
+  next one (pyjwt, 2026-09-29/30, first red on a PR on 2026-10-01). It now
+  also runs on Mondays (`cron: "17 6 * * 1"`) and on `workflow_dispatch`. A
+  `health` job runs after scheduled runs only. Its
+  `devsecops-pipeline-public/actions/health-issue@v1` step, under
+  `if: always()`, opens or comments on one issue when the scan fails, and the
+  next green scheduled run closes it. The workflow token is now
+  `contents: read`, and only `health` adds `issues: write`. The pipeline's
+  `assert-schedule-liveness.py` lint passes on the file.
+- **The shelf-repo templates retry the memshelf install, and a test holds
+  their pin (#195).** `shelf-derived.yml` and `shelf-pr-guard.yml` installed
+  memshelf with one bare `pip install`, so a single network or GitHub failure
+  failed the bot or the guard before its first real step. Both now use the
+  3-attempt bash loop a production shelf already runs: a growing pause, a
+  `::warning::` per failed attempt, then `::error::` and exit 1.
+  `tests/test_shelf_repo_templates.py` checks that each template has exactly
+  one install line, that both pin the same `vX.Y.Z` tag, and that the tag is
+  not newer than `__version__`. It also runs each install step under
+  `bash -e` against a stub pip.
 
 ### Fixed
 
+- **The desktop bundle declares the package's own dependency floors again
+  (#198).** `adapters/claude-desktop/build.py` still had `docshelf-mcp>=0.4.1`,
+  `mcp>=2.0.0` and `pydantic>=2.6` after `pyproject.toml` had moved to 0.5.0,
+  2.1.1 and 2.13.5, so both bundles declared wider ranges than the package.
+  The lists now carry `pyproject.toml`'s specifiers, and
+  `tests/test_bundle_floors.py` compares them package by package (pyyaml,
+  which only the bundle installs, is exempt by name). It fails when only one
+  side moves, and when `pyproject.toml` gains a dependency the bundle does
+  not install.
 - **`shelve --push` pushes HEAD, and refuses on a branch whose upstream has
   another name.** The push was `git push <remote> <upstream-branch>`, a bare
   refspec, so git sent the *local* branch of that name rather than the commit
