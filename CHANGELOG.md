@@ -26,9 +26,58 @@ once code ships.
 - **docshelf-mcp floor raised to 0.5.0** (`>=0.5.0,<1`). The suite ran
   green against the published 0.5.0; the lock drops `pymupdf4llm` and its
   tree, which 0.5.0 moved into its `pdf` extra.
+- **The release tools are pinned, and the registry path runs on every PR
+  (#194).** `release.yml` piped whatever `releases/latest` served into `tar`
+  and published with `pypa/gh-action-pypi-publish@release/v1`, a moving
+  branch, in jobs that hold an OIDC token. mcp-publisher now comes from a
+  composite action (`.github/actions/install-mcp-publisher`): release 1.8.1,
+  downloaded to a file and checked with `sha256sum -c` against the hash in
+  upstream's `registry_1.8.1_checksums.txt` before `tar` reads it. The PyPI
+  action is pinned to `dc37677` (`# v1.14.2`), the commit its tag points
+  at. These are the versions the v0.4.0 release ran with. A new ci job,
+  `registry-manifest`, runs the same install and `mcp-publisher validate` on
+  every PR and push. It also fails on a deprecated `$schema`, which the
+  registry only warns about (`validate` exits 0). `validate` asks the live
+  registry, so the job also turns red with nothing changed here when the
+  registry is down or moves its current schema. `server.json` moves to the
+  2025-12-11 schema.
+- **CI tests Python 3.14, and the classifiers say so (#199).** The test
+  matrix keeps testing the two ends of the declared range, now 3.10 and
+  3.14 (was 3.10 and 3.13), and `pyproject.toml` gains the
+  `Programming Language :: Python :: 3.14` classifier.
+- **The security scan also runs weekly on main, and a failed weekly run
+  opens an issue (#196).** `security.yml` ran only on PRs and pushes, so an
+  advisory against a package already in `uv.lock` stayed silent until the
+  next one (pyjwt, 2026-09-29/30, first red on a PR on 2026-10-01). It now
+  also runs on Mondays (`cron: "17 6 * * 1"`) and on `workflow_dispatch`. A
+  `health` job runs after scheduled runs only. Its
+  `devsecops-pipeline-public/actions/health-issue@v1` step, under
+  `if: always()`, opens or comments on one issue when the scan fails, and the
+  next green scheduled run closes it. The workflow token is now
+  `contents: read`, and only `health` adds `issues: write`. The pipeline's
+  `assert-schedule-liveness.py` lint passes on the file.
+- **The shelf-repo templates retry the memshelf install, and a test holds
+  their pin (#195).** `shelf-derived.yml` and `shelf-pr-guard.yml` installed
+  memshelf with one bare `pip install`, so a single network or GitHub failure
+  failed the bot or the guard before its first real step. Both now use the
+  3-attempt bash loop a production shelf already runs: a growing pause, a
+  `::warning::` per failed attempt, then `::error::` and exit 1.
+  `tests/test_shelf_repo_templates.py` checks that each template has exactly
+  one install line, that both pin the same `vX.Y.Z` tag, and that the tag is
+  not newer than `__version__`. It also runs each install step under
+  `bash -e` against a stub pip.
 
 ### Fixed
 
+- **The desktop bundle declares the package's own dependency floors again
+  (#198).** `adapters/claude-desktop/build.py` still had `docshelf-mcp>=0.4.1`,
+  `mcp>=2.0.0` and `pydantic>=2.6` after `pyproject.toml` had moved to 0.5.0,
+  2.1.1 and 2.13.5, so both bundles declared wider ranges than the package.
+  The lists now carry `pyproject.toml`'s specifiers, and
+  `tests/test_bundle_floors.py` compares them package by package (pyyaml,
+  which only the bundle installs, is exempt by name). It fails when only one
+  side moves, and when `pyproject.toml` gains a dependency the bundle does
+  not install.
 - **`--amend` no longer promises a ledger row, and the packaged `/shelve`
   skill writes the episode alone (#192).** Since #58 an amend rewrites and
   commits only the episode file, but the `--amend` help, the `amend` field of
@@ -127,6 +176,66 @@ once code ships.
   upstream at all is now read by its full ref too: with a tag of the same name,
   `--abbrev-ref HEAD` gave `heads/main`, and preflight skipped the sync
   because the remote had no `heads/main`.
+- **`shelve`'s `next` names the PR on a branch the bot does not render
+  (#191).** After a push to a session or PR branch with its own upstream
+  (`origin/claude/…`), `next` said «pushed — the shelf bot renders derived
+  files on main; nothing else to do», while the episode can reach `main`
+  only through a merge. `next` now resolves the render branch the way
+  `doctor` does (`origin/HEAD`, else `origin/main`, else `origin/master`).
+  Off that branch it says where the episode is and that the next step is a
+  PR into the render branch; on a bot shelf it adds that derived files
+  arrive after the merge and that `memshelf rebuild` must not be run by hand.
+  Committed but not pushed on such a branch (`checkout -B claude/x
+  origin/main` included), it names `git push -u <remote> HEAD`, then the PR.
+  On a detached HEAD it said «push it» with no branch to push; it now names
+  `git switch -c shelve/<slug>`, `git push -u <remote> HEAD` and the PR, the
+  way out `doctor`'s `upstream-unknown` gives. Messages on the render branch
+  itself are unchanged.
+- **`doctor` matches ledger rows by the frontmatter `id`, the key `rebuild`
+  writes them under (#189).** It matched them by the filename stem, so a
+  renamed episode, rendered in the same commit, got `no-ledger-row`, its own
+  row became `orphan-ledger-row` («remove the stale row» — the next render
+  writes it back), and past the threshold `derived-stale` called a healthy
+  renderer stopped. Now the episode is matched by its `id`, and only
+  `id-mismatch` remains. An episode without an `id` (missing or empty) is
+  skipped by `rebuild`, so it is kept out of `no-ledger-row` and out of the
+  renderer verdicts; its stem still matches an old row, so that row is not
+  reported as an orphan. An empty `id:` used to pass with only
+  `no-ledger-row` and is now `frontmatter-missing-field`, like a missing one.
+  Both details now say the ledger row is keyed by the `id`.
+- **`upstream-unknown` advises a way out that keeps the episode commit
+  (#186, part 2).** doctor meets this warning right after a shelve, with the
+  episode already committed on the checkout. The fix said `git checkout -B
+  main origin/main`, which on a detached HEAD moves off that commit (git:
+  «you are leaving 1 commit behind»). The fix now depends on the checkout.
+  On a session branch with no upstream it is `git push -u <remote> HEAD`,
+  then a draft PR into the render branch. On the render branch itself it is
+  `git branch -u <remote>/<branch>`, then `git pull --rebase <remote>
+  <branch>` before the push: a `push -u` from there is rejected once the bot
+  has committed to it. On a detached HEAD it is a session branch (`git switch
+  -c <branch>`, `git push -u <remote> HEAD`, a draft PR), or, to land on the
+  render branch itself, `git fetch . HEAD:main && git switch main && git
+  branch -u origin/main` — a fast-forward, which git refuses when local
+  `main` has commits HEAD lacks.
+- **`rebuild --check` compares INDEX.md and stats.svg, and a derived file
+  that fails to render fails the run (#186, part 1).** `--check` skipped
+  both writers, so it answered `ok: true` over a tampered INDEX.md or
+  stats.svg. Outside `--check`, a failed INDEX write (INDEX.md turned into a
+  directory) was one more warning — `warnings[51]` on a shelf with ~50
+  description-clamp warnings — and the CLI exited 0. Now `--check` compares
+  INDEX.md through docshelf's `stale-index` and stats.svg with a chart drawn
+  in memory. When their input (`.meta.json`, `ledger.tsv`) drifted in the
+  same run, the comparison is skipped and the warnings say so. A derived
+  file that cannot be written or compared — including INDEX while docshelf
+  skips its comparison over uncommitted split directories — is named in the
+  new `errors` field: `ok` is false and the CLI exits 1. Each message also
+  stays in `warnings`. rollup, purge and resolve, which run the same rebuild,
+  forwarded only its warnings and exited 0 over a failed render; they now
+  carry its `errors` too, with `ok` false (`status: attention` for resolve)
+  and exit 1. Not compared: each split document's `SUBINDEX.md` (docshelf's
+  `stale-index` covers INDEX.md only), and INDEX on a shelf without `docs/`,
+  which was counted unchanged and is now a warning saying it was not
+  compared.
 - **`shelve --amend` keeps a description and a section order passed back
   unchanged (#205).** An amend applied the rules for a new episode to content
   that was already written. A stored `description` past the 120-character cap

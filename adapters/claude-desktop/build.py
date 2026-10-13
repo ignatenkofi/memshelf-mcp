@@ -47,16 +47,20 @@ SRC = REPO / "src"
 
 # Third-party runtime requirements. Deliberately not read from pyproject.toml:
 # `docshelf-mcp` is installed WITHOUT its dependency tree here (see below), so
-# the two lists cannot be one list.
-DEPENDENCIES = ["mcp>=2.0.0,<3", "pydantic>=2.6,<3", "pyyaml>=6.0,<7"]
+# the two lists cannot be one list. Each specifier is still the one
+# pyproject.toml declares for that package; tests/test_bundle_floors.py fails
+# when only one side moves (#198: a floor raise or a dependabot bump edits
+# pyproject.toml alone, and these lists fell behind twice that way).
+DEPENDENCIES = ["mcp>=2.1.1,<3", "pydantic>=2.13.5,<3", "pyyaml>=6.0,<7"]
 
-# docshelf drags in pymupdf4llm -> pymupdf, onnxruntime, numpy, sympy: ~200 MB
-# of PDF ingestion that a memory shelf never reaches. memshelf touches exactly
-# one docshelf module (`core.shelf`), which imports none of it, so the package
-# is installed with --no-deps and the three shared deps above cover it. The
-# floor is the one pyproject.toml declares (#109): below 0.4.1 the same shelf
-# renders differently on the machine that holds an H2 split.
-DEPENDENCIES_NO_DEPS = ["docshelf-mcp>=0.4.1,<1"]
+# docshelf up to 0.4.x drags in pymupdf4llm -> pymupdf, onnxruntime, numpy,
+# sympy: ~200 MB of PDF ingestion that a memory shelf never reaches (0.5.0
+# moved it into its `pdf` extra). memshelf touches exactly one docshelf module
+# (`core.shelf`), which imports none of it, so the package is installed with
+# --no-deps and the three shared deps above cover it. The floor is the one
+# pyproject.toml declares (#109: below 0.4.1 the same shelf renders
+# differently on the machine that holds an H2 split).
+DEPENDENCIES_NO_DEPS = ["docshelf-mcp>=0.5.0,<1"]
 
 # The same amputation for the uv bundle, where resolution happens on the user's
 # machine: an override with an unsatisfiable marker removes the requirement
@@ -435,9 +439,10 @@ dependencies = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/memshelf_mcp"]
 
-# docshelf declares pymupdf4llm, which pulls ~200 MB of PDF machinery that a
-# memory shelf never calls. An override with an unsatisfiable marker drops the
-# requirement wherever it is declared.
+# docshelf up to 0.4.x declares pymupdf4llm (0.5.0 moved it into its `pdf`
+# extra), which pulls ~200 MB of PDF machinery that a memory shelf never
+# calls. An override with an unsatisfiable marker drops the requirement
+# wherever it is declared.
 [tool.uv]
 override-dependencies = [
 {overrides},
