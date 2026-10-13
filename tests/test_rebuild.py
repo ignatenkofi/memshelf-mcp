@@ -417,3 +417,186 @@ def test_rebuild_does_not_claim_a_chart_it_did_not_draw(tmp_path):
 
     for name in report.written:
         assert (tmp_path / name).exists(), f"report claims {name}, which is not on disk"
+
+
+# --- #186 part 1: `--check` covers INDEX.md and stats.svg; a failed render fails
+
+
+def _rendered(root):
+    """A shelf with one episode and every derived file rendered."""
+    _shelve(root, "2026-07-22-auth", title="Первый")
+    rebuild(root)
+    return root
+
+
+def test_a_clean_check_compares_the_index_and_the_chart(tmp_path):
+    """Right after a rebuild both are compared and match — not skipped."""
+    report = rebuild(_rendered(_init(tmp_path)), check=True)
+
+    assert report.ok is True
+    assert "INDEX.md" in report.unchanged
+    assert "stats.svg" in report.unchanged
+    assert report.errors == []
+
+
+@pytest.mark.parametrize("path", ["INDEX.md", "stats.svg"])
+def test_check_sees_a_tampered_index_or_chart(tmp_path, path):
+    """The #186 repro: after `echo x >> INDEX.md`, `--check` said ok."""
+    root = _rendered(_init(tmp_path))
+    with (root / path).open("a", encoding="utf-8") as f:
+        f.write("x\n")
+    tampered = (root / path).read_text(encoding="utf-8")
+
+    report = rebuild(root, check=True)
+
+    assert report.ok is False
+    assert path in report.drifted
+    assert (root / path).read_text(encoding="utf-8") == tampered  # check writes nothing
+
+
+@pytest.mark.parametrize(
+    ("source", "content", "derived"),
+    [
+        ("docs/topics/.meta.json", "{}\n", "INDEX.md"),
+        ("ledger.tsv", "date\tepisode_id\n", "stats.svg"),
+    ],
+)
+def test_check_does_not_judge_a_render_by_a_drifted_source(tmp_path, source, content, derived):
+    """INDEX is rendered from .meta.json and the chart from ledger.tsv. With
+    the source drifted, a comparison would judge the render by input the
+    rebuild is about to replace: skipped and said so, the verdict is already
+    "drifted"."""
+    root = _rendered(_init(tmp_path))
+    (root / source).write_text(content, encoding="utf-8")
+
+    report = rebuild(root, check=True)
+
+    assert report.ok is False
+    assert source in report.drifted
+    assert derived not in report.drifted + report.unchanged
+    assert any(w.startswith(f"{derived} not compared:") for w in report.warnings)
+
+
+def test_check_with_an_uncommitted_split_dir_does_not_pass_the_index(tmp_path):
+    """docshelf skips its INDEX comparison while split directories are
+    uncommitted (docshelf#97): INDEX is then unverified, not unchanged."""
+    root = _rendered(_init(tmp_path))
+    split = root / "docs" / "topics" / "2026-07-22-auth"
+    split.mkdir()
+    (split / "001-decisions.md").write_text("## Decisions\n\nRecorded.\n", encoding="utf-8")
+
+    report = rebuild(root, check=True)
+
+    assert report.ok is False
+    assert "INDEX.md" not in report.unchanged
+    assert any("split directories are uncommitted" in e for e in report.errors)
+
+
+def test_check_without_docs_names_the_index_not_compared(tmp_path):
+    """Without docs/ docshelf's doctor compares nothing, and a tampered INDEX
+    was counted unchanged. git keeps no empty directory, so an episode-less
+    clone has no docs/ and its `rebuild` passes: a warning, not an error."""
+    import shutil
+
+    root = _init(tmp_path)
+    shutil.rmtree(root / "docs")
+    assert rebuild(root).ok is True
+    (root / "INDEX.md").write_text("tampered\n", encoding="utf-8")
+
+    report = rebuild(root, check=True)
+
+    assert "INDEX.md" not in report.unchanged
+    assert "INDEX.md" not in report.drifted
+    assert any(w.startswith("INDEX.md not compared: there is no docs/") for w in report.warnings)
+    assert report.errors == []
+
+
+@pytest.mark.parametrize(
+    ("check", "target", "prefix"),
+    [
+        (True, "docshelf_mcp.core.shelf.Shelf.doctor", "INDEX.md not checked"),
+        (True, "memshelf_mcp.core.chart.render_chart_svg", "stats.svg not checked"),
+        (False, "docshelf_mcp.core.shelf.Shelf.rebuild_index", "INDEX.md not rebuilt"),
+        (False, "memshelf_mcp.core.chart.write_chart", "stats.svg not redrawn"),
+    ],
+)
+def test_a_render_that_fails_is_an_error_not_a_warning(
+    tmp_path, monkeypatch, check, target, prefix
+):
+    root = _rendered(_init(tmp_path))
+
+    def blow_up(*args, **kwargs):
+        raise RuntimeError("blew up")
+
+    monkeypatch.setattr(target, blow_up)
+    report = rebuild(root, check=check)
+
+    assert report.ok is False
+    assert f"{prefix}: blew up" in report.errors
+    # rollup, purge and resolve forward `warnings` into their own reports
+    assert f"{prefix}: blew up" in report.warnings
+
+
+def test_index_md_as_a_directory_fails_the_rebuild_and_the_cli(tmp_path, capsys):
+    """The #186 repro: after `rm INDEX.md && mkdir INDEX.md`, `rebuild` exited
+    0 with `written: ['stats.svg']`, the failure only in `warnings[51]` behind
+    ~50 clamp warnings."""
+    from memshelf_mcp.cli import main
+
+    root = _rendered(_init(tmp_path))
+    (root / "INDEX.md").unlink()
+    (root / "INDEX.md").mkdir()
+    (root / "ledger.tsv").write_text("date\tepisode_id\n", encoding="utf-8")
+
+    rc = main(["rebuild", "--shelf", str(root)])
+    out = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert out["ok"] is False
+    assert [e for e in out["errors"] if e.startswith("INDEX.md not rebuilt:")]
+    assert "INDEX.md" not in out["written"]
+    assert "ledger.tsv" in out["written"]  # the rest is still rebuilt
+    assert main(["rebuild", "--shelf", str(root), "--check"]) == 1
+
+
+ROLLUP_DIGEST = (
+    "Первый квартал свёрнут: разбор авторизации закрыт, выбранный подход остался "
+    "в силе, отвергнутые варианты перечислены в исходных эпизодах. Открытым "
+    "остаётся ротация общего секрета."
+)
+
+
+@pytest.mark.parametrize("command", ["resolve", "rollup", "purge"])
+def test_the_commands_that_run_rebuild_fail_with_it(tmp_path, capsys, command):
+    """resolve, rollup and purge run rebuild() and forwarded only its
+    warnings: with INDEX.md turned into a directory each reported success and
+    the CLI exited 0. They now carry rebuild's errors, and the CLI exits 1."""
+    from memshelf_mcp.cli import main
+
+    root = _init(tmp_path)
+    for slug in ("2026-01-05-old-a", "2026-01-06-old-b", "2026-07-20-new"):
+        _shelve(root, slug)
+    rebuild(root)
+    args = {
+        "resolve": [],
+        "rollup": ["--slug", "2026-q1-rollup", "--digest", ROLLUP_DIGEST, "--until", "2026-06-30"],
+        "purge": ["--apply", "--today", "2026-07-31"],
+    }[command]
+    if command == "purge":
+        old_a = root / "docs" / "topics" / "2026-01-05-old-a.md"
+        text = old_a.read_text(encoding="utf-8")
+        old_a.write_text(
+            text.replace("mode: live", "retain_until: 2026-02-01\nmode: live"), "utf-8"
+        )
+    (root / "INDEX.md").unlink()
+    (root / "INDEX.md").mkdir()
+
+    rc = main([command, "--shelf", str(root), *args])
+    out = json.loads(capsys.readouterr().out)
+
+    assert [e for e in out["errors"] if e.startswith("INDEX.md not rebuilt:")]
+    if command == "resolve":
+        assert out["status"] == "attention"
+    else:
+        assert out["ok"] is False
+    assert rc == 1

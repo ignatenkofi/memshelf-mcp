@@ -65,6 +65,7 @@ class ResolveResult:
     regenerated: list[str] = field(default_factory=list)  # derived files rebuilt
     unresolved: list[str] = field(default_factory=list)  # left for a human/agent
     notes: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)  # derived files rebuild could not render
     in_merge: bool = False
     committed: bool = False
     commit: str | None = None
@@ -73,7 +74,7 @@ class ResolveResult:
     @property
     def ok(self) -> bool:
         doctor_errors = (self.doctor or {}).get("errors", 0)
-        return not self.unresolved and doctor_errors == 0
+        return not self.unresolved and not self.errors and doctor_errors == 0
 
     def as_dict(self) -> dict:
         return {
@@ -81,6 +82,7 @@ class ResolveResult:
             "resolved": self.resolved,
             "regenerated": self.regenerated,
             "unresolved": self.unresolved,
+            "errors": self.errors,
             "notes": self.notes,
             "in_merge": self.in_merge,
             "committed": self.committed,
@@ -330,6 +332,7 @@ def resolve_shelf(shelf_root: str | Path, *, commit: bool = False) -> ResolveRes
             rel for rel in conflicted_derived if rel not in result.regenerated
         )
         result.notes.extend(report.warnings)
+        result.errors.extend(report.errors)
         # The archive sub-shelf keeps its own INDEX, which `rebuild` does not
         # touch — forgetting it leaves a rolled-up shelf's archive index right
         # only because a human last committed it (#64).
