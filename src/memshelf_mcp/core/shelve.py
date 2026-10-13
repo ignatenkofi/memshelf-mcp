@@ -34,6 +34,7 @@ from memshelf_mcp.core.episode import (
     Frontmatter,
     clamp_description,
     compose_episode,
+    flatten,
 )
 from memshelf_mcp.core.frontmatter import parse_frontmatter
 from memshelf_mcp.core.gitsync import (
@@ -108,6 +109,52 @@ class DigestContractError(ValueError):
 #: transposed «2026-31-08-…» must not pass a check that exists to keep the
 #: shelf's natural sort chronological.
 _DATED_SLUG = re.compile(r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])-")
+
+#: An H2 heading line of an episode body, the pattern doctor (`_sections`)
+#: and recall (`_slice_section`) read sections by.
+_H2_LINE = re.compile(r"^\#\#[ \t]+(.+?)[ \t]*$")
+
+#: A fenced code block's fence (CommonMark: up to three spaces of indent,
+#: three or more backticks or tildes), and what follows it on the line.
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _closes(line: str, fence: str) -> bool:
+    """Whether ``line`` closes the block ``fence`` opened: the same character,
+    a run at least as long, and nothing else on the line."""
+    m = _FENCE.match(line)
+    return bool(
+        m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip()
+    )
+
+
+def _h2_headings(body: str) -> list[str]:
+    """The H2 headings of an episode body, in file order (#205).
+
+    A ``## …`` line inside a fenced code block is code, not a section: an
+    episode quoting a template in its Decisions would otherwise move its own
+    sections around on the next amend. A fence nothing closes is read as no
+    fence at all: CommonMark runs it to the end of the body, but the headings
+    after it are the episode's own sections, and the amend keeps them in
+    place. doctor and recall have no fence rule and still count a fenced
+    heading; only the order an amend keeps reads past it.
+    """
+    lines = body.splitlines()
+    headings: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = _FENCE.match(lines[i])
+        # A backtick fence's info string cannot hold a backtick (CommonMark).
+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            end = next((j for j in range(i + 1, len(lines)) if _closes(lines[j], m.group(1))), None)
+            if end is not None:
+                i = end + 1
+                continue
+        heading = _H2_LINE.match(lines[i])
+        if heading:
+            headings.append(heading.group(1))
+        i += 1
+    return headings
 
 
 class SlugContractError(ValueError):
@@ -532,15 +579,29 @@ def shelve(
     # (shelf-spec v0 § 4.4); the field rides in the frontmatter, which is
     # where rebuild renders the ledger from — data first, column when the
     # spec gets one.
+    #
+    # `unmeasured` is accepted from the caller too (#205): it is what an
+    # episode shelved without a number carries, so a caller passing every
+    # stored field back passes it — with no number or with the stored 0. With
+    # any other number it is the mirror contradiction. Both are EpisodeErrors
+    # (a ValueError), so the CLI refuses with the message instead of a
+    # traceback.
     if approx_tokens is None:
         if approx_tokens_source not in (None, "", "unmeasured"):
-            raise ValueError(
+            raise EpisodeError(
                 f"approx_tokens_source={approx_tokens_source!r} without approx_tokens "
                 "is a contradiction: a source asserts where a number came from, "
                 "and there is no number"
             )
         approx_tokens = 0
         approx_tokens_source = "unmeasured"
+    elif approx_tokens_source == "unmeasured" and approx_tokens != 0:
+        raise EpisodeError(
+            f"approx_tokens_source='unmeasured' with approx_tokens={approx_tokens} "
+            "is a contradiction: 'unmeasured' marks the placeholder 0 of an episode "
+            "shelved without a number. Pass the number with 'estimate' or "
+            "'measured', or no number at all"
+        )
     else:
         approx_tokens_source = approx_tokens_source or "estimate"
     if approx_tokens_source not in APPROX_TOKENS_SOURCES:
@@ -558,11 +619,24 @@ def shelve(
     # new name) rather than the machine's clock, so a session that crosses
     # midnight keeps id and date on the same day; only a legacy, undated slug
     # (grandfathered into `--amend` above) falls back to today().
-    existing_fields: dict[str, str] = {}
-    if amend and date is None:
+    #
+    # The episode an amend rewrites is read whatever `--date` says: #205
+    # compares the description and the section order against it below, and
+    # the repro behind #205 passed `--date`. Only the #170 inheritance of date
+    # and span stays gated on its absence. The read is best effort: a byte
+    # that is not UTF-8 reads as U+FFFD, not as a traceback, so an episode an
+    # amend with `--date` used to overwrite without reading it still gets
+    # rewritten from the call.
+    stored_fields: dict[str, str] = {}
+    stored_headings: list[str] = []
+    if amend:
         existing_episode = found_at if found_at is not None else archived_at
         assert existing_episode is not None  # the amend guard above already required one
-        existing_fields, _ = parse_frontmatter(existing_episode.read_text(encoding="utf-8"))
+        stored_fields, stored_body = parse_frontmatter(
+            existing_episode.read_text(encoding="utf-8", errors="replace")
+        )
+        stored_headings = _h2_headings(stored_body)
+    existing_fields = stored_fields if date is None else {}
 
     if date is not None:
         shelved_on = date
@@ -584,11 +658,37 @@ def shelve(
     # `_first_sentence`, which runs only when the caller supplies no
     # description — so the path callers actually take wrote whatever they were
     # given, straight into a line every future session reads.
-    desc, desc_warning = clamp_description(
-        description if description is not None else _first_sentence(digest)
-    )
-    if desc_warning:
-        warnings.append(desc_warning)
+    #
+    # Not applied to the description an amend passes back unchanged (#205).
+    # The cap decides what a shelve writes, and that value is written already:
+    # capping it again cut a stored description past the cap to 119 characters
+    # and left the caller no way to amend the digest and keep it. The episode
+    # keeps the value; `rebuild` caps the INDEX line it renders from it, as it
+    # does for every description on disk, and the warning says what that line
+    # gets. "Unchanged" is judged with whitespace collapsed on both sides, and
+    # the stored value is what gets written: a wrapper that trims what it read
+    # (the issue's own description ends in a space) passes back the same
+    # description, and it must not be cut for that.
+    stored_description = stored_fields.get("description")
+    if (
+        amend
+        and description is not None
+        and stored_description is not None
+        and flatten(description) == flatten(stored_description)
+    ):
+        desc = stored_description
+        _, rendered = clamp_description(stored_description)
+        if rendered:
+            warnings.append(
+                "description kept as stored, since --amend passed it back unchanged "
+                f"(#205); rebuild renders its INDEX line through the cap: {rendered}"
+            )
+    else:
+        desc, desc_warning = clamp_description(
+            description if description is not None else _first_sentence(digest)
+        )
+        if desc_warning:
+            warnings.append(desc_warning)
     ledger_notes, notes_warning = _flatten_notes(notes)
     if notes_warning:
         warnings.append(notes_warning)
@@ -611,7 +711,7 @@ def shelve(
         notes=ledger_notes,
         retain_until=retain_until,
     )
-    markdown = compose_episode(frontmatter, digest, sections)
+    markdown = compose_episode(frontmatter, digest, sections, order=stored_headings)
 
     # The kind change decided above is performed here, after everything that can
     # still refuse this shelve — redaction, the digest contract, and the section

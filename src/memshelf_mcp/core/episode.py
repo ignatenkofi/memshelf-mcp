@@ -9,6 +9,7 @@ concern, added when those tools land. See ``docs/ARCHITECTURE.md`` → Layer 2.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 CATEGORY_BY_KIND = {"topic": "topics", "research": "research", "session": "sessions"}
@@ -23,7 +24,8 @@ _REQUIRED_SECTIONS: dict[str, tuple[str, ...]] = {
 }
 
 # Canonical order for known sections when present; unknown sections keep their
-# insertion order after these.
+# insertion order after these. A new episode's order; an amend keeps the order
+# the episode already has (#205, `compose_episode`).
 _SECTION_ORDER = ("Decisions", "Timeline", "Artifacts", "Open threads", "Raw excerpts")
 
 
@@ -357,6 +359,31 @@ def flatten(text: str) -> str:
     return " ".join(text.split())
 
 
+#: What one frontmatter line cannot hold: the C0 and C1 control characters (a
+#: line break and a tab among them; a raw tab or control character also fails
+#: the strict ``json.loads`` that reads a quoted value back) and the line and
+#: paragraph separators, where ``str.splitlines`` ends the line.
+_NOT_ON_ONE_LINE = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+
+
+def _one_line(text: str) -> str:
+    """``text`` as it is, unless it holds what one line cannot: then each such
+    character becomes a space and the whole value is ``flatten``-ed.
+
+    For ``description``, which reaches the frontmatter already flat on every
+    path but one: ``clamp_description`` flattens what it returns. The one is
+    the stored value an amend keeps (#205), and flattening it would rewrite a
+    leading, trailing or doubled space, or a no-break space, the episode
+    carries. Only a line break or another control character (see
+    ``_NOT_ON_ONE_LINE``) still changes it, since it would end the field or
+    fail to read back; ``flatten`` alone would keep one that is not
+    whitespace, such as an escape character.
+    """
+    if _NOT_ON_ONE_LINE.search(text) is None:
+        return text
+    return flatten(_NOT_ON_ONE_LINE.sub(" ", text))
+
+
 def yaml_scalar(text: str) -> str:
     """Quote a free-text value so the block stays valid **YAML**.
 
@@ -436,7 +463,7 @@ class Frontmatter:
         if self.display_title:
             lines.append(f"display_title: {yaml_scalar(flatten(self.display_title))}")
         if self.description:
-            lines.append(f"description: {yaml_scalar(flatten(self.description))}")
+            lines.append(f"description: {yaml_scalar(_one_line(self.description))}")
         lines.append(f"tags: [{', '.join(self.tags)}]")
         if self.keywords:
             lines.append(f"keywords: [{', '.join(self.keywords)}]")
@@ -462,9 +489,45 @@ def _check_contract(kind: str, digest: str, sections: dict[str, str]) -> None:
         raise EpisodeError("kind=research requires Digest plus at least one body section.")
 
 
-def compose_episode(frontmatter: Frontmatter, digest: str, sections: dict[str, str]) -> str:
+def _section_order(sections: dict[str, str], stored: Sequence[str]) -> list[str]:
+    """The non-empty ``sections`` in the order they are written.
+
+    A new episode (no ``stored``) takes the canonical order: known sections in
+    ``_SECTION_ORDER``, then the rest in the order passed. An amend passes the
+    headings of the episode it rewrites, in file order (#205): the sections
+    still there keep that order, a heading the file repeats counts once, at
+    its first place, and a section the episode does not have yet goes right
+    after the last one the canonical order puts before it (first, if none
+    does). After, not before the first one ranked later: a section the
+    canonical order does not know ranks after every known one, so an episode
+    that opens with one (`Context`, say) would get a new `Artifacts` above it.
+    An episode already in canonical order comes out as a new one would.
+    """
+    present = [name for name in sections if sections[name].strip()]
+    fresh = [s for s in _SECTION_ORDER if s in present]
+    fresh += [s for s in present if s not in _SECTION_ORDER]
+    rank = {name: i for i, name in enumerate(fresh)}
+    ordered = [name for name in dict.fromkeys(stored) if name in rank]
+    for name in fresh:
+        if name not in ordered:
+            earlier = [i for i, kept in enumerate(ordered) if rank[kept] < rank[name]]
+            ordered.insert(earlier[-1] + 1 if earlier else 0, name)
+    return ordered
+
+
+def compose_episode(
+    frontmatter: Frontmatter,
+    digest: str,
+    sections: dict[str, str],
+    *,
+    order: Sequence[str] = (),
+) -> str:
     """Return the episode Markdown: H1 slug, ``---``-fenced frontmatter, Digest,
     then ordered body sections. Empty sections are omitted.
+
+    ``order`` is for an amend: the H2 headings of the episode being rewritten,
+    in file order, so its sections keep their places (#205) instead of moving
+    to the canonical order a new episode gets (see ``_section_order``).
 
     Raises ``EpisodeError`` on a contract miss (unknown kind, missing Digest or
     a required section). The H1-first layout matches how docshelf's
@@ -481,8 +544,6 @@ def compose_episode(frontmatter: Frontmatter, digest: str, sections: dict[str, s
         "## Digest",
         digest.strip(),
     ]
-    known = [s for s in _SECTION_ORDER if sections.get(s, "").strip()]
-    extras = [s for s in sections if s not in _SECTION_ORDER and sections[s].strip()]
-    for name in known + extras:
+    for name in _section_order(sections, order):
         parts += ["", f"## {name}", sections[name].strip()]
     return "\n".join(parts) + "\n"

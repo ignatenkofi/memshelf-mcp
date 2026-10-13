@@ -66,6 +66,121 @@ def test_missing_digest_rejected():
         compose_episode(_fm("topic"), "   ", {"Decisions": "d"})
 
 
+# --- an amend keeps the order of the episode it rewrites (#205) -------------
+
+
+def _headings(md):
+    return re.findall(r"^## (.+)$", md, re.MULTILINE)
+
+
+def test_order_keeps_the_sections_an_episode_has_where_they_are():
+    md = compose_episode(
+        _fm("session"),
+        "A decided thing.",
+        {"Decisions": "d", "Timeline": "t", "Open threads": "o", "Findings": "f", "Notes": "n"},
+        order=["Digest", "Decisions", "Timeline", "Findings", "Open threads"],
+    )
+    # Notes is new, and every section there ranks before it.
+    assert _headings(md) == ["Digest", "Decisions", "Timeline", "Findings", "Open threads", "Notes"]
+
+
+def test_a_canonical_order_composes_as_a_new_episode_would():
+    """An episode the tool wrote is in canonical order already, so a known
+    section an amend adds goes where a new episode has it, not to the end."""
+    sections = {"Decisions": "d", "Timeline": "t", "Artifacts": "a", "Open threads": "o"}
+    fresh = compose_episode(_fm("session"), "A decided thing.", sections)
+
+    amended = compose_episode(
+        _fm("session"),
+        "A decided thing.",
+        sections,
+        order=["Digest", "Decisions", "Timeline", "Open threads"],
+    )
+
+    assert amended == fresh
+    assert _headings(amended) == ["Digest", "Decisions", "Timeline", "Artifacts", "Open threads"]
+
+
+@pytest.mark.parametrize(
+    "sections,stored,expected",
+    [
+        # A section the canonical order does not know ranks after every known
+        # one: inserted before the first section ranked after it, Artifacts
+        # went above Context, to the top.
+        (
+            ["Context", "Decisions", "Timeline", "Open threads", "Artifacts"],
+            ["Digest", "Context", "Decisions", "Timeline", "Open threads"],
+            ["Digest", "Context", "Decisions", "Timeline", "Artifacts", "Open threads"],
+        ),
+        # The issue's layout, Findings moved above Open threads: Raw excerpts
+        # went above Findings.
+        (
+            ["Decisions", "Timeline", "Findings", "Open threads", "Raw excerpts"],
+            ["Digest", "Decisions", "Timeline", "Findings", "Open threads"],
+            ["Digest", "Decisions", "Timeline", "Findings", "Open threads", "Raw excerpts"],
+        ),
+    ],
+    ids=["context-first", "issue-layout"],
+)
+def test_a_new_section_goes_after_the_last_one_ranked_before_it(sections, stored, expected):
+    md = compose_episode(
+        _fm("session"),
+        "A decided thing.",
+        {name: name.lower() for name in sections},
+        order=stored,
+    )
+    assert _headings(md) == expected
+
+
+def test_a_heading_the_file_repeats_is_written_once_at_its_first_place():
+    """A hand-edit can leave a heading twice; the section is one entry of the
+    call, so it is written once, where the file has it first."""
+    md = compose_episode(
+        _fm("session"),
+        "A decided thing.",
+        {"Decisions": "d", "Timeline": "t", "Open threads": "o"},
+        order=["Digest", "Timeline", "Decisions", "Open threads", "Timeline"],
+    )
+    assert _headings(md) == ["Digest", "Timeline", "Decisions", "Open threads"]
+
+
+def test_order_drops_what_was_not_passed_and_keeps_the_rest_in_place():
+    md = compose_episode(
+        _fm("session"),
+        "A decided thing.",
+        {"Timeline": "t", "Open threads": "o", "Findings": "f", "Artifacts": ""},
+        order=["Findings", "Decisions", "Open threads", "Artifacts", "Timeline"],
+    )
+    assert _headings(md) == ["Digest", "Findings", "Open threads", "Timeline"]
+
+
+@pytest.mark.parametrize(
+    "stored,written",
+    [
+        ("Long  description ", '"Long  description "'),
+        (" leading", '" leading"'),
+        ("no\u00a0break, narrow\u202fno-break", '"no\u00a0break, narrow\u202fno-break"'),
+        ("two\nlines", '"two lines"'),
+        ("a\ttab", '"a tab"'),
+        ("line\u2028separator", '"line separator"'),
+        ("an \x1b[1mescape", '"an [1mescape"'),
+        ("no\u00a0break, then\na line break", '"no break, then a line break"'),
+    ],
+    ids=["doubled", "leading", "no-break", "newline", "tab", "u2028", "escape", "both"],
+)
+def test_description_keeps_what_one_line_holds_and_flattens_the_rest(stored, written):
+    """An amend keeps the stored description as it is (#205): a trailing,
+    doubled or no-break space included. A line break or another control
+    character flattens the value as before: it would end the field, or not
+    read back."""
+    from memshelf_mcp.core.frontmatter import parse_frontmatter
+
+    md = compose_episode(_fm(description=stored), "A decided thing.", {"Decisions": "d"})
+
+    assert f"description: {written}" in md.splitlines()
+    assert parse_frontmatter(md)[0]["description"] == written[1:-1]
+
+
 # --- frontmatter must be valid YAML, not just parseable by us ---------------
 
 
