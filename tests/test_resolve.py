@@ -21,6 +21,7 @@ from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 from memshelf_mcp.core.archive import rollup  # noqa: E402
 from memshelf_mcp.core.doctor import check_shelf  # noqa: E402
 from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
+from memshelf_mcp.core.recall import RECALL_LOG_HEADER, recall  # noqa: E402
 from memshelf_mcp.core.resolve import (  # noqa: E402
     _split_marker_sides,
     _union_tsv,
@@ -236,6 +237,95 @@ def test_marker_fallback_without_stages(tmp_path):
     assert ours_row in text and theirs_row in text
     assert "<<<<<<<" not in text
     assert "recall-log.tsv" in result.resolved
+
+
+LEGACY_RECALL_HEADER = "episode_id\tsection\tfetched_tokens"
+RECALL_EPISODE = "2026-07-29-auth-refactor"
+
+
+def _header_lines(text):
+    return [line for line in text.splitlines() if line.startswith("episode_id\t")]
+
+
+def _is_timestamped_decisions_row(row):
+    cells = row.split("\t")
+    return len(cells) == 4 and cells[:2] == [RECALL_EPISODE, "Decisions"] and cells[3].endswith("Z")
+
+
+def test_resolve_merges_an_old_recall_log_with_timestamped_rows(tmp_path):
+    """#193, the common case: a log from before the ``ts`` column, appended to
+    on both branches — by an older memshelf on one (three cells), by this one on
+    the other (four). Every row survives exactly once, and the old header is
+    neither repeated nor counted as a recall.
+
+    Driven through ``resolve_shelf`` on a real conflict, not through the union
+    helper: a helper-level test is green while the path a conflict actually
+    takes is broken.
+    """
+    root = _init_shelf(tmp_path)
+    _shelve(root, RECALL_EPISODE, DIGEST_A, "Рефактор авторизации")
+    log = root / "recall-log.tsv"
+    log.write_text(f"{LEGACY_RECALL_HEADER}\n{RECALL_EPISODE}\tDigest\t50\n", encoding="utf-8")
+    _git(root, "add", "recall-log.tsv")
+    _git(root, "commit", "-qm", "seed: a recall log from before #193")
+
+    _git(root, "checkout", "-q", "-b", "session-a")
+    with log.open("a", encoding="utf-8") as fh:  # an older memshelf: no ts
+        fh.write(f"{RECALL_EPISODE}\tDecisions\t60\n")
+    _git(root, "commit", "-qam", "a: recall")
+    _git(root, "checkout", "-q", "main")
+    recall(root, RECALL_EPISODE, section="Decisions", log_path=log)
+    _git(root, "commit", "-qam", "main: recall")
+    merge = _git(root, "merge", "session-a", check=False)
+    assert merge.returncode != 0, "expected the recall-log conflict"
+
+    result = resolve_shelf(root)
+
+    assert result.unresolved == []
+    assert "recall-log.tsv" in result.resolved
+    text = log.read_text(encoding="utf-8")
+    assert _header_lines(text) == [LEGACY_RECALL_HEADER], text
+    lines = text.splitlines()
+    assert lines[0] == LEGACY_RECALL_HEADER
+    rows = lines[1:]
+    assert len(rows) == 3, rows
+    assert rows[0] == f"{RECALL_EPISODE}\tDigest\t50"
+    assert _is_timestamped_decisions_row(rows[1]), rows
+    assert rows[2] == f"{RECALL_EPISODE}\tDecisions\t60"
+
+
+def test_resolve_merges_recall_logs_created_under_different_headers(tmp_path):
+    """#193, the add/add case: the log was created on both branches — under the
+    three-column header by an older memshelf, under the four-column one by
+    this. One header comes out, the newer (a side already on it is not
+    narrowed back), and every row of both sides."""
+    root = _init_shelf(tmp_path)
+    _shelve(root, RECALL_EPISODE, DIGEST_A, "Рефактор авторизации")
+    log = root / "recall-log.tsv"
+
+    _git(root, "checkout", "-q", "-b", "session-a")
+    log.write_text(f"{LEGACY_RECALL_HEADER}\n{RECALL_EPISODE}\tDigest\t50\n", encoding="utf-8")
+    _git(root, "add", "recall-log.tsv")
+    _git(root, "commit", "-qm", "a: first recall, older memshelf")
+    _git(root, "checkout", "-q", "main")
+    assert not log.exists()
+    recall(root, RECALL_EPISODE, section="Decisions", log_path=log)
+    _git(root, "add", "recall-log.tsv")
+    _git(root, "commit", "-qm", "main: first recall")
+    merge = _git(root, "merge", "session-a", check=False)
+    assert merge.returncode != 0, "expected the add/add conflict"
+
+    result = resolve_shelf(root)
+
+    assert result.unresolved == []
+    assert "recall-log.tsv" in result.resolved
+    text = log.read_text(encoding="utf-8")
+    assert _header_lines(text) == [RECALL_LOG_HEADER.strip("\n")], text
+    lines = text.splitlines()
+    assert lines[0] == RECALL_LOG_HEADER.strip("\n")
+    assert len(lines) == 3, lines
+    assert _is_timestamped_decisions_row(lines[1]), lines
+    assert lines[2] == f"{RECALL_EPISODE}\tDigest\t50"
 
 
 def test_marker_in_derived_file_is_regenerated_not_merged(tmp_path):
