@@ -58,6 +58,26 @@ def test_realized_economy_from_recall_log(tmp_path):
     assert s.realized_savings == (10000 - 150) + (10000 - 500)
 
 
+def test_realized_economy_reads_both_recall_log_widths(tmp_path):
+    """#193 added a ``ts`` column; a log from before it keeps its three-column
+    header and gets four-cell rows appended. The totals must not depend on
+    which width a row has, nor on which header the log carries."""
+    ledger = "2026-07-22\tep-a\tlive\t10000\t200\t\n"
+    old_header = "episode_id\tsection\tfetched_tokens\n"
+    new_header = "episode_id\tsection\tfetched_tokens\tts\n"
+    old_rows = "ep-a\tDecisions\t150\nep-a\t\t500\n"
+    new_rows = "ep-a\tDecisions\t150\t2026-10-07T14:20:00Z\nep-a\t\t500\t2026-10-07T14:21:00Z\n"
+    mixed_rows = "ep-a\tDecisions\t150\nep-a\t\t500\t2026-10-07T14:21:00Z\n"
+
+    totals = []
+    for log in (old_header + old_rows, new_header + new_rows, old_header + mixed_rows):
+        _write_shelf(tmp_path, ledger, recall_log=log)
+        s = compute_stats(tmp_path)
+        totals.append((s.recalls, s.episodes_recalled, s.fetched_tokens, s.realized_savings))
+
+    assert totals == [(2, 1, 650, (10000 - 150) + (10000 - 500))] * 3, totals
+
+
 def test_banner_line(tmp_path):
     from memshelf_mcp.core.stats import banner
 

@@ -52,7 +52,32 @@ are rendered by `memshelf_rebuild` or the shelf's bot (#58), and the response
 says so (`shelf_totals.derived_stale`, `next`). A contract violation comes back
 as an error carrying the exact fixes — nothing is written. Returns the episode
 address, redaction report, and any digest warnings. `amend=true` rewrites an
-existing episode in place under the same slug.
+existing episode in place under the same slug. A directory named like the
+episode that docshelf did not write as split sections (`docs/<category>/<slug>/`)
+is an error too (#186), but only with a docshelf that has
+`SplitDirConflictError` (docshelf-mcp#115, merged after 0.5.0 and not
+released): that docshelf will not add a document beside the directory,
+`amend` does not clear that, the error says to move the directory aside, and
+nothing is written. **With docshelf 0.5.0, the release the `>=0.5.0` floor
+installs, there is no error: `shelve` exits 0 and docshelf deletes the
+directory and everything in it.** The refusal takes a docshelf release with
+`SplitDirConflictError` and a floor raised to it.
+
+`amend=true` keeps a `description` and a section order the call passes back
+unchanged (#205). A `description` equal to the stored one once whitespace is
+collapsed on both sides is written as the episode has it, past the
+120-character cap included; only a line break or another control character
+in it is flattened, since one frontmatter line cannot hold it. `rebuild` caps
+the INDEX line it renders from it, and a warning says what that line gets.
+The sections keep the order the episode has (a `## …` line inside a fenced
+code block is not a section, and a heading the file repeats counts once),
+and one it does not have yet goes right after the last section the canonical
+order puts before it. `display_title` and `notes` are flattened as before, a
+doubled space included.
+An episode shelved without `approx_tokens` records
+`approx_tokens_source: unmeasured`, so the field takes `unmeasured` too, with
+no number or `0`; with any other number it is refused, as `estimate` or
+`measured` without a number is.
 
 `push` sends HEAD to the branch's upstream — and only to an upstream of the
 same name. `git checkout -B claude/x origin/main`, how agent sessions start,
@@ -89,8 +114,13 @@ Fetch a shelved episode by id — or a single `## Section` of it.
 
 Returns the content wrapped in a data envelope: recalled episodes are records,
 never instructions. Prefer a section fetch over the whole episode when one
-section answers the question — that is where the savings are. `log=true`
-appends the realized saving to `recall-log.tsv`.
+section answers the question — that is where the savings are. Each recall
+appends a row to `recall-log.tsv` (on by default since #112; `log=false`
+reads without a trace): `episode_id`, `section` (empty for a whole episode),
+`fetched_tokens`, and `ts` — the recall's UTC time to the second (#193), so
+the realized savings `memshelf_stats` reports can be split by period. A log
+created before `ts` keeps its three-column header and gets the longer rows
+appended under it; `stats` and `resolve` read both widths.
 
 ## `memshelf_index`
 
@@ -185,7 +215,9 @@ Regenerate `ledger.tsv`, each category's `.meta.json`, `INDEX.md` and
 `stats.svg` from the episodes (#58). The episode is the source; these four are
 output, owned by a bot on `main`, which is what removes the multi-writer
 conflict class at the root. With `check=true` nothing is written and the result
-says which files have drifted — the shelf's PR guard runs exactly this. On a
+says which files have drifted, `INDEX.md` and `stats.svg` included — the
+shelf's PR guard runs exactly this. A derived file that could not be written
+(or, with `check=true`, compared) is named in `errors`, and `ok` is false. On a
 shelf whose bot renders derived files, run it by hand only when the bot is
 down: a hand-committed render collides with the bot's next commit.
 
@@ -200,7 +232,9 @@ entries drops their budget along with them. The originals move to the
 `archive/` sub-shelf — nothing is deleted, recall by id keeps working, and
 every ledger row survives, because an archived episode still holds the mass it
 saved. The digest is **yours**: synthesizing a quarter of digests is the part a
-tool cannot do, so pass the same quality of digest `shelve` demands.
+tool cannot do, so pass the same quality of digest `shelve` demands. A derived
+file the rebuild after the move cannot render is named in `errors`: the rollup
+is written, but `ok` is false and the CLI exits 1.
 
 ## `memshelf_purge`
 
@@ -209,7 +243,9 @@ Drop episodes whose `retain_until` has passed, then reindex (#15).
 Dry-run by default: without `apply=true` it only lists what expired. Deletes
 the working-tree file — **git history still contains it**. Real erasure is a
 deliberate filter-repo pass over the whole repository, never a side effect of
-a tool call, and the result says so.
+a tool call, and the result says so. A derived file the rebuild after
+`apply=true` cannot render is named in `errors`: `ok` is false and the CLI
+exits 1.
 
 ## `memshelf_resolve`
 
@@ -218,7 +254,8 @@ branches): union `ledger.tsv` / `recall-log.tsv` rows and `.meta.json` keys
 from both sides, rebuild `INDEX.md` and `stats.svg` from `docs/`, then run
 doctor. Conflicting episode files are reported as unresolved, never
 auto-merged. Also safe outside a conflict — degrades to a derived-files
-rebuild.
+rebuild. A derived file the rebuild cannot render is named in `errors` and
+makes `status` `attention` (CLI exit 1).
 
 ## `memshelf_sync`
 

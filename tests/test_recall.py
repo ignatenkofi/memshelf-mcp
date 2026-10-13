@@ -1,4 +1,7 @@
+import re
 import subprocess
+import time
+from datetime import datetime, timezone
 
 import pytest
 
@@ -100,3 +103,69 @@ def test_cli_recall_missing_exits_1(tmp_path, capsys):
     code = main(["recall", "--shelf", str(root), "--id", "2026-07-22-nope"])
     assert code == 1
     assert "no episode" in capsys.readouterr().err
+
+
+_UTC_SECOND = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+
+
+def _utc_now_to_the_second():
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+@pytest.fixture
+def local_clock_far_from_utc(monkeypatch):
+    """Local time 14 hours ahead of UTC for the test, whatever the machine's zone.
+
+    A UTC check run where local time *is* UTC (CI runners) cannot tell a
+    local stamp from a UTC one: ``datetime.now()`` in place of
+    ``datetime.now(timezone.utc)`` passed there.
+    """
+    if not hasattr(time, "tzset"):
+        pytest.skip("time.tzset is POSIX-only")
+    monkeypatch.setenv("TZ", "Pacific/Kiritimati")
+    time.tzset()
+    assert time.localtime().tm_gmtoff == 14 * 3600, "the zone did not take"
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_recall_log_row_carries_the_recall_time(tmp_path, local_clock_far_from_utc):
+    """#193: without a time column the realized savings cannot be split by
+    period, and a commit time is not a recall time — rows are committed in
+    batches."""
+    root = _shelf_with_episode(tmp_path)
+    log = root / "recall-log.tsv"
+    assert not log.exists()
+
+    before = _utc_now_to_the_second()
+    run_recall(RecallInput(shelf_path=str(root), episode_id="2026-07-22-auth", section="Decisions"))
+    after = _utc_now_to_the_second()
+
+    header, row = log.read_text(encoding="utf-8").splitlines()
+    assert header == "episode_id\tsection\tfetched_tokens\tts"
+    episode_id, section, fetched, ts = row.split("\t")
+    assert (episode_id, section) == ("2026-07-22-auth", "Decisions")
+    assert int(fetched) > 0
+    assert _UTC_SECOND.fullmatch(ts), ts
+    stamp = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    assert before <= stamp <= after, (before, ts, after)
+
+
+def test_recall_appends_to_a_log_from_before_the_time_column(tmp_path):
+    """An existing three-column log keeps its header and takes the longer
+    rows; nothing already in it is rewritten."""
+    root = _shelf_with_episode(tmp_path)
+    log = root / "recall-log.tsv"
+    old = "episode_id\tsection\tfetched_tokens\n2026-07-22-auth\t\t500\n"
+    log.write_text(old, encoding="utf-8")
+
+    run_recall(RecallInput(shelf_path=str(root), episode_id="2026-07-22-auth"))
+
+    text = log.read_text(encoding="utf-8")
+    assert text.startswith(old)
+    new_rows = text[len(old) :].splitlines()
+    assert len(new_rows) == 1
+    cells = new_rows[0].split("\t")
+    assert cells[:2] == ["2026-07-22-auth", ""]
+    assert _UTC_SECOND.fullmatch(cells[3]), new_rows

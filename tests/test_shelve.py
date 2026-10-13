@@ -1,5 +1,8 @@
 import json
+import re
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -8,13 +11,16 @@ pytest.importorskip("docshelf_mcp")
 from docshelf_mcp.core.shelf import Shelf  # noqa: E402
 
 from memshelf_mcp.core.episode import (  # noqa: E402
+    APPROX_TOKENS_SOURCES,
     MAX_DESCRIPTION_CHARS,
     EpisodeError,
 )
+from memshelf_mcp.core.frontmatter import parse_frontmatter  # noqa: E402
 from memshelf_mcp.core.rebuild import rebuild  # noqa: E402
 from memshelf_mcp.core.shelve import (  # noqa: E402
     AmendTargetMissing,
     DigestContractError,
+    EpisodePathBlocked,
     SlugContractError,
     shelve,
 )
@@ -476,6 +482,38 @@ def test_amend_rewrites_the_episode_in_place(tmp_path):
     assert "first pass" not in episode
     assert "approx_tokens: 2000" in episode
     assert result.amended is True
+
+
+def test_amend_help_schema_and_hint_promise_no_ledger_write(tmp_path, capsys):
+    """#192: since #58 `--amend` writes and commits the episode alone — the
+    ledger is rendered later. The CLI help, the tool schema and the same-slug
+    hint still said "one recomputed ledger row", a write that never happens."""
+    from memshelf_mcp.cli import main
+    from memshelf_mcp.core.shelve import EpisodeExists
+    from memshelf_mcp.tools import ShelveInput
+
+    with pytest.raises(SystemExit):
+        main(["shelve", "--help"])
+    help_text = " ".join(capsys.readouterr().out.split())
+    amend_help = help_text[help_text.rindex("--amend") :]
+    schema = ShelveInput.model_json_schema()["properties"]["amend"]["description"]
+
+    root = _amend_setup(tmp_path)
+    with pytest.raises(EpisodeExists) as err:
+        shelve(
+            root,
+            slug="2026-08-02-thin",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "a second write, no --amend"},
+            date="2026-08-02",
+        )
+    hint = " ".join(str(err.value).split())
+
+    for text in (amend_help, schema, hint):
+        assert "ledger row" not in text.lower(), text
+        assert "only the episode file" in text, text
+        assert "rebuild" in text, text
 
 
 def test_amend_leaves_exactly_one_episode_and_one_ledger_row(tmp_path):
@@ -1292,7 +1330,7 @@ def test_measured_is_an_explicit_claim(tmp_path):
 
 def test_a_source_without_a_number_is_a_contradiction(tmp_path):
     root = _init_shelf(tmp_path)
-    with pytest.raises(ValueError, match="contradiction"):
+    with pytest.raises(EpisodeError, match="contradiction"):
         shelve(
             root,
             slug="2026-09-01-contradiction",
@@ -1318,3 +1356,635 @@ def test_an_unknown_source_value_is_refused(tmp_path):
             approx_tokens_source="vibes",
             date="2026-09-01",
         )
+
+
+# ── #186 part 3: a directory in the episode's way is a refusal ────────────
+#
+# docshelf-mcp#115 (merged after 0.5.0) makes `add_document` refuse to write
+# beside a directory named like the document that is not a split it wrote:
+# `SplitDirConflictError`, a FileExistsError, raised with split=False too and
+# whatever `overwrite` says. `shelve` caught only DocumentExistsError, so the
+# refusal escaped as a traceback. CI installs docshelf 0.5.0, which has
+# neither the guard nor the name, so the tests below stand the guard in with
+# a FileExistsError subclass. The last one drives the real guard and runs only
+# where the installed docshelf has it.
+
+
+class _SplitDirConflict(FileExistsError):
+    """Stands in for docshelf's SplitDirConflictError, which 0.5.0 does not have."""
+
+
+def _guard_split_dirs_like_docshelf_main(monkeypatch):
+    """Give `Shelf.add_document` the #115 pre-flight: a directory named like the
+    document refuses the write before anything is written."""
+    original = Shelf.add_document
+
+    def add_document(self, source, *, category, title, **kwargs):
+        if (self.root / "docs" / category / title).is_dir():
+            raise _SplitDirConflict(
+                f"docs/{category}/{title} exists and is not a docshelf split directory"
+            )
+        return original(self, source, category=category, title=title, **kwargs)
+
+    monkeypatch.setattr(Shelf, "add_document", add_document)
+
+
+def _commit_count(root):
+    return subprocess.run(
+        ["git", "-C", str(root), "rev-list", "--all", "--count"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def test_a_split_dir_in_the_way_of_a_new_episode_is_a_refusal(tmp_path, monkeypatch):
+    root = _init_shelf(tmp_path)
+    topics = root / "docs" / "topics"
+    foreign = topics / "2026-10-07-probe"
+    foreign.mkdir()
+    (foreign / "diagram.png").write_bytes(b"not a section")
+    before = sorted(p.name for p in topics.iterdir())
+    _guard_split_dirs_like_docshelf_main(monkeypatch)
+
+    with pytest.raises(EpisodePathBlocked) as err:
+        shelve(
+            root,
+            slug="2026-10-07-probe",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "JWT chosen."},
+            date="2026-10-07",
+        )
+
+    message = " ".join(str(err.value).split())
+    assert "docs/topics/2026-10-07-probe/ is a directory" in message, message
+    assert "Move it aside" in message, message
+    assert "--amend (CLI) / amend=True does not clear this" in message, message
+    assert isinstance(err.value.__cause__, _SplitDirConflict)
+    # Nothing was written: no episode, no sidecar, no commit, the directory intact.
+    assert sorted(p.name for p in topics.iterdir()) == before
+    assert sorted(p.name for p in foreign.iterdir()) == ["diagram.png"]
+    assert _commit_count(root) == "0"
+
+
+def test_a_split_dir_refusal_of_a_kind_change_moves_the_episode_back(tmp_path, monkeypatch):
+    """A kind change moves the file before the write (#90), and the guard
+    refuses at the write; the refusal must not strand the episode in the new
+    category with its old text."""
+    root = _init_shelf(tmp_path)
+    was = _session_episode(root)
+    before = was.read_text(encoding="utf-8")
+    (root / "docs" / "topics" / "2026-08-13-recount").mkdir()
+    _guard_split_dirs_like_docshelf_main(monkeypatch)
+
+    with pytest.raises(EpisodePathBlocked):
+        shelve(
+            root,
+            slug="2026-08-13-recount",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "kind corrected"},
+            date="2026-08-13",
+            amend=True,
+        )
+
+    assert was.is_file(), "the refused kind change left the episode moved"
+    assert was.read_text(encoding="utf-8") == before
+    assert not (root / "docs" / "topics" / "2026-08-13-recount.md").exists()
+
+
+@pytest.mark.parametrize(
+    "writes_first", [False, True], ids=["fails-before-writing", "fails-after-writing"]
+)
+def test_any_failed_write_of_a_kind_change_moves_the_episode_back(
+    tmp_path, monkeypatch, writes_first
+):
+    """Not only docshelf's refusal: whatever stops the write after the move —
+    here a permission error, before or after docshelf wrote the new text —
+    leaves the old episode where it was, byte for byte."""
+    root = _init_shelf(tmp_path)
+    was = _session_episode(root)
+    before = was.read_bytes()
+    status_before = _porcelain(root)
+
+    def add_document(self, source, *, category, title, **kwargs):
+        if writes_first:
+            target = self.root / "docs" / category / f"{title}.md"
+            target.write_text(Path(source).read_text(encoding="utf-8"), encoding="utf-8")
+        raise PermissionError(f"docs/{category} is not writable")
+
+    monkeypatch.setattr(Shelf, "add_document", add_document)
+
+    with pytest.raises(PermissionError):
+        shelve(
+            root,
+            slug="2026-08-13-recount",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "kind corrected"},
+            date="2026-08-13",
+            amend=True,
+        )
+
+    assert was.is_file(), "the failed kind change left the episode moved"
+    assert was.read_bytes() == before
+    assert not (root / "docs" / "topics" / "2026-08-13-recount.md").exists()
+    assert _porcelain(root) == status_before
+
+
+def _porcelain(root):
+    return subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def test_cli_split_dir_refusal_exits_1_with_the_fix_not_a_traceback(tmp_path, monkeypatch, capsys):
+    from memshelf_mcp.cli import main
+
+    root = _init_shelf(tmp_path)
+    (root / "docs" / "topics" / "2026-10-07-probe").mkdir()
+    _guard_split_dirs_like_docshelf_main(monkeypatch)
+
+    code = main(
+        [
+            "shelve",
+            "--shelf",
+            str(root),
+            "--slug",
+            "2026-10-07-probe",
+            "--kind",
+            "topic",
+            "--digest",
+            GOOD_DIGEST,
+            "--section",
+            "Decisions=JWT chosen.",
+            "--date",
+            "2026-10-07",
+        ]
+    )
+
+    assert code == 1
+    err = " ".join(capsys.readouterr().err.split())
+    assert "docs/topics/2026-10-07-probe/ is a directory" in err, err
+    assert "Move it aside" in err, err
+
+
+def test_the_real_split_dir_guard_ends_in_the_same_refusal(tmp_path):
+    """The guard itself, not a stand-in. Skipped until the installed docshelf
+    has it (0.5.0 does not); it runs by itself once the floor moves past it."""
+    splitter = pytest.importorskip("docshelf_mcp.core.splitter")
+    if not hasattr(splitter, "SplitDirConflictError"):
+        pytest.skip("the installed docshelf has no SplitDirConflictError (0.5.0 and older)")
+    root = _init_shelf(tmp_path)
+    foreign = root / "docs" / "topics" / "2026-10-07-probe"
+    foreign.mkdir()
+    (foreign / "diagram.png").write_bytes(b"not a section")
+
+    with pytest.raises(EpisodePathBlocked) as err:
+        shelve(
+            root,
+            slug="2026-10-07-probe",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "JWT chosen."},
+            date="2026-10-07",
+        )
+
+    assert isinstance(err.value.__cause__, splitter.SplitDirConflictError)
+    assert not (root / "docs" / "topics" / "2026-10-07-probe.md").exists()
+    assert sorted(p.name for p in foreign.iterdir()) == ["diagram.png"]
+
+
+# ── #205: an amend keeps what is passed back unchanged ────────────────────
+#
+# `--amend` applied create-time rules to content that already existed: a
+# description past the cap came back cut to 119 characters, and the sections
+# moved to the canonical order, so a caller that passed every field and
+# section back as stored got a diff it had not made. The issue's repro passes
+# `--date`, and the amend read the stored episode only without one (#170), so
+# the repro runs both ways.
+
+#: The issue's description, as `$(printf 'Long description %.0s' $(seq 20))`
+#: builds it: 340 characters, the trailing space included.
+LONG_DESCRIPTION = "Long description " * 20
+PROBE_SLUG = "2026-10-08-amend-probe"
+PROBE_DIGEST = (
+    "The amend probe checks what memshelf shelve --amend rewrites. "
+    "Decided: probe only. Open: nothing."
+)
+PROBE_SECTIONS = {"Decisions": "- d", "Timeline": "- t", "Findings": "- f", "Open threads": "- o"}
+
+
+def _older_episode(root, description=LONG_DESCRIPTION, sections=PROBE_SECTIONS):
+    """The issue's repro up to the amend: an episode the way a hand-edit or an
+    older memshelf leaves it (the description stored whole, Findings before
+    Open threads), committed."""
+    shelve(
+        root,
+        slug=PROBE_SLUG,
+        kind="session",
+        digest=PROBE_DIGEST,
+        sections=sections,
+        description=description,
+        approx_tokens=100,
+    )
+    episode = root / "docs" / "sessions" / f"{PROBE_SLUG}.md"
+    text = episode.read_text(encoding="utf-8")
+    text = re.sub(
+        r"^description: .*$",
+        lambda _: "description: " + json.dumps(description, ensure_ascii=False),
+        text,
+        count=1,
+        flags=re.M,
+    )
+    # The last `## Open threads`: a Decisions body may quote one in a fence.
+    op, fi = text.rindex("## Open threads\n"), text.index("## Findings\n")
+    text = text[:op] + text[fi:].rstrip("\n") + "\n\n" + text[op:fi].rstrip("\n") + "\n"
+    episode.write_text(text, encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "commit", "-qam", "older episode"], check=True)
+    return episode
+
+
+def _headings(text):
+    return re.findall(r"^## (.+)$", text, re.M)
+
+
+@pytest.mark.parametrize(
+    "date_args", [["--date", "2026-10-08"], []], ids=["with-date", "without-date"]
+)
+def test_amend_passing_everything_back_rewrites_nothing(tmp_path, capsys, date_args):
+    """The issue's repro through the CLI. Before the fix the description came
+    back cut to 119 characters and Findings moved below Open threads."""
+    from memshelf_mcp.cli import main
+
+    root = _init_shelf(tmp_path)
+    episode = _older_episode(root)
+    before = episode.read_text(encoding="utf-8")
+    assert _headings(before) == ["Digest", "Decisions", "Timeline", "Findings", "Open threads"]
+
+    sections = [a for name, body in PROBE_SECTIONS.items() for a in ("--section", f"{name}={body}")]
+    code = main(
+        [
+            "shelve",
+            "--shelf",
+            str(root),
+            "--slug",
+            PROBE_SLUG,
+            "--kind",
+            "session",
+            "--digest",
+            PROBE_DIGEST,
+            "--amend",
+            "--no-commit",
+            *sections,
+            "--description",
+            LONG_DESCRIPTION,
+            "--approx-tokens",
+            "100",
+            *date_args,
+        ]
+    )
+
+    out = capsys.readouterr()
+    assert code == 0, out.err
+    assert episode.read_text(encoding="utf-8") == before
+    # Kept, and the caller is told what the INDEX line will show instead.
+    warnings = json.loads(out.out)["warnings"]
+    assert any("kept as stored" in w and "cut to 119" in w for w in warnings), warnings
+
+
+def test_amend_keeps_a_stored_description_the_cap_would_balance(tmp_path):
+    """Since #190 the cap changes values within it too: it closes a single
+    backtick left open. Keeping only what is past the cap would still rewrite
+    this one, so the value passed back unchanged bypasses the whole cap."""
+    root = _init_shelf(tmp_path)
+    stored = "Re-ran `memshelf doctor on the probe shelf"
+    assert len(stored) <= MAX_DESCRIPTION_CHARS
+    episode = _older_episode(root, description=stored)
+    before = episode.read_text(encoding="utf-8")
+    assert parse_frontmatter(before)[0]["description"] == stored
+
+    result = shelve(
+        root,
+        slug=PROBE_SLUG,
+        kind="session",
+        digest=PROBE_DIGEST,
+        sections=PROBE_SECTIONS,
+        description=stored,
+        approx_tokens=100,
+        date="2026-10-08",
+        amend=True,
+        autocommit=False,
+    )
+
+    assert episode.read_text(encoding="utf-8") == before
+    assert any("kept as stored" in w and "unpaired" in w for w in result.warnings)
+
+
+@pytest.mark.parametrize(
+    "stored,passed",
+    [
+        (LONG_DESCRIPTION, LONG_DESCRIPTION),
+        (LONG_DESCRIPTION, LONG_DESCRIPTION.rstrip()),
+        (LONG_DESCRIPTION, " ".join(LONG_DESCRIPTION.split())),
+        ("Kept as stored,  spaces and all", "Kept as stored, spaces and all"),
+    ],
+    ids=["exact", "trimmed", "collapsed", "no-break"],
+)
+def test_amend_keeps_a_description_passed_back_whitespace_aside(tmp_path, stored, passed):
+    """A wrapper that trims or collapses what it read passes back the same
+    description; the issue's own ends in a space. It is kept as stored: not
+    cut to 119 characters, and not rewritten to the value passed either."""
+    root = _init_shelf(tmp_path)
+    episode = _older_episode(root, description=stored)
+    before = episode.read_text(encoding="utf-8")
+    assert parse_frontmatter(before)[0]["description"] == stored
+
+    shelve(
+        root,
+        slug=PROBE_SLUG,
+        kind="session",
+        digest=PROBE_DIGEST,
+        sections=PROBE_SECTIONS,
+        description=passed,
+        approx_tokens=100,
+        date="2026-10-08",
+        amend=True,
+        autocommit=False,
+    )
+
+    assert episode.read_text(encoding="utf-8") == before
+
+
+def test_amend_caps_a_description_that_changed(tmp_path):
+    """Only the value passed back unchanged is kept; a new one is capped as on
+    any shelve."""
+    root = _init_shelf(tmp_path)
+    episode = _older_episode(root)
+
+    result = shelve(
+        root,
+        slug=PROBE_SLUG,
+        kind="session",
+        digest=PROBE_DIGEST,
+        sections=PROBE_SECTIONS,
+        description=LONG_DESCRIPTION.replace("Long", "Longer"),
+        approx_tokens=100,
+        date="2026-10-08",
+        amend=True,
+        autocommit=False,
+    )
+
+    written = parse_frontmatter(episode.read_text(encoding="utf-8"))[0]["description"]
+    assert len(written) <= MAX_DESCRIPTION_CHARS
+    assert written.startswith("Longer description") and written.endswith("…")
+    assert any("cut to" in w for w in result.warnings)
+    assert not any("kept as stored" in w for w in result.warnings)
+
+
+def test_amend_keeps_the_stored_section_order_and_slots_a_new_one_in(tmp_path):
+    """The stored order wins over the canonical one and over the order passed.
+    A section the episode does not have yet goes before the first section the
+    canonical order puts after it: Artifacts after Timeline, before Findings."""
+    root = _init_shelf(tmp_path)
+    episode = _older_episode(root)
+
+    shelve(
+        root,
+        slug=PROBE_SLUG,
+        kind="session",
+        digest=PROBE_DIGEST,
+        sections={
+            "Open threads": "- o",
+            "Decisions": "- d",
+            "Artifacts": "- a",
+            "Timeline": "- t, amended",
+            "Findings": "- f",
+        },
+        description=LONG_DESCRIPTION,
+        approx_tokens=100,
+        date="2026-10-08",
+        amend=True,
+        autocommit=False,
+    )
+
+    text = episode.read_text(encoding="utf-8")
+    assert _headings(text) == [
+        "Digest",
+        "Decisions",
+        "Timeline",
+        "Artifacts",
+        "Findings",
+        "Open threads",
+    ]
+    assert "- t, amended" in text
+
+
+@pytest.mark.parametrize("date", ["2026-10-08", None], ids=["with-date", "without-date"])
+def test_amend_reads_a_stored_episode_that_is_not_utf8(tmp_path, date):
+    """The amend reads the episode on every run now, and a byte that is not
+    UTF-8 reads as U+FFFD instead of ending it in a UnicodeDecodeError: with
+    `--date`, the amend before #205 wrote over such a file without reading
+    it. The rest is kept as for any other episode."""
+    root = _init_shelf(tmp_path)
+    episode = _older_episode(root)
+    raw = episode.read_bytes().replace(b"- f\n", b"- f\xff\n", 1)
+    episode.write_bytes(raw)
+    subprocess.run(["git", "-C", str(root), "commit", "-qam", "a stray byte"], check=True)
+
+    shelve(
+        root,
+        slug=PROBE_SLUG,
+        kind="session",
+        digest=PROBE_DIGEST,
+        sections=PROBE_SECTIONS,
+        description=LONG_DESCRIPTION,
+        approx_tokens=100,
+        date=date,
+        amend=True,
+        autocommit=False,
+    )
+
+    expected = raw.decode("utf-8", errors="replace").replace("�", "")
+    assert episode.read_text(encoding="utf-8") == expected
+
+
+@pytest.mark.parametrize(
+    "decisions",
+    [
+        "- Kept the template:\n\n```markdown\n## Open threads\n- none\n```",
+        "- Kept the template:\n\n~~~~\n## Open threads\n- none\n~~~~",
+        "- Kept the template:\n\n````\n```\n## Open threads\n```\n````",
+        "- Kept the template:\n\n~~~\n````\n## Open threads\n````\n~~~",
+        "- Kept the template:\n\n```\n```text\n## Open threads\n```",
+        "```x` opens no fence: its info string holds a backtick\n```\n## Open threads\n```",
+        "- Quoted a template and never closed it:\n\n```markdown\n- none",
+    ],
+    ids=["backticks", "tildes", "shorter-run", "other-char", "info-string", "no-fence", "unclosed"],
+)
+def test_amend_reads_past_a_heading_inside_a_fenced_block(tmp_path, decisions):
+    """A `## Open threads` line quoted in a fenced block is code. Read as a
+    heading, it moved Open threads above Timeline on an amend that passed
+    everything back unchanged. A line that only looks like a fence, or a fence
+    nothing closes, must not hide the sections after it either."""
+    root = _init_shelf(tmp_path)
+    sections = {**PROBE_SECTIONS, "Decisions": decisions}
+    episode = _older_episode(root, sections=sections)
+    before = episode.read_text(encoding="utf-8")
+    assert _headings(before)[-3:] == ["Timeline", "Findings", "Open threads"]
+
+    shelve(
+        root,
+        slug=PROBE_SLUG,
+        kind="session",
+        digest=PROBE_DIGEST,
+        sections=sections,
+        description=LONG_DESCRIPTION,
+        approx_tokens=100,
+        date="2026-10-08",
+        amend=True,
+        autocommit=False,
+    )
+
+    assert episode.read_text(encoding="utf-8") == before
+
+
+def test_cli_and_schema_take_every_source_an_episode_can_carry(tmp_path, capsys):
+    """`--approx-tokens-source` offered estimate|measured while the tool itself
+    writes `unmeasured` when no number is passed: a wrapper passing every
+    stored field back failed with «invalid choice: 'unmeasured'», and
+    `--approx-tokens 0` alone records `estimate` instead."""
+    from memshelf_mcp.cli import main
+    from memshelf_mcp.tools import ShelveInput
+
+    schema = ShelveInput.model_json_schema()["properties"]["approx_tokens_source"]
+    assert tuple(schema["anyOf"][0]["enum"]) == APPROX_TOKENS_SOURCES
+
+    root = _init_shelf(tmp_path)
+    shelve(
+        root,
+        slug="2026-09-01-no-number",
+        kind="topic",
+        digest=GOOD_DIGEST,
+        sections={"Decisions": "JWT chosen."},
+        date="2026-09-01",
+    )
+    episode = tmp_path / "docs" / "topics" / "2026-09-01-no-number.md"
+    before = episode.read_text(encoding="utf-8")
+    assert "approx_tokens_source: unmeasured" in before
+
+    code = main(
+        [
+            "shelve",
+            "--shelf",
+            str(root),
+            "--slug",
+            "2026-09-01-no-number",
+            "--kind",
+            "topic",
+            "--digest",
+            GOOD_DIGEST,
+            "--section",
+            "Decisions=JWT chosen.",
+            "--approx-tokens",
+            "0",
+            "--approx-tokens-source",
+            "unmeasured",
+            "--amend",
+        ]
+    )
+
+    assert code == 0, capsys.readouterr().err
+    assert episode.read_text(encoding="utf-8") == before
+
+
+def test_unmeasured_with_a_number_is_a_contradiction(tmp_path, capsys):
+    """The mirror of a source without a number, refused before any write; the
+    CLI says so and exits 1 rather than ending in a traceback."""
+    from memshelf_mcp.cli import main
+
+    root = _init_shelf(tmp_path)
+    with pytest.raises(EpisodeError, match="contradiction"):
+        shelve(
+            root,
+            slug="2026-09-01-contradiction",
+            kind="topic",
+            digest=GOOD_DIGEST,
+            sections={"Decisions": "JWT chosen."},
+            approx_tokens=500,
+            approx_tokens_source="unmeasured",
+            date="2026-09-01",
+        )
+    assert list((tmp_path / "docs" / "topics").iterdir()) == []
+
+    code = main(
+        [
+            "shelve",
+            "--shelf",
+            str(root),
+            "--slug",
+            "2026-09-01-contradiction",
+            "--kind",
+            "topic",
+            "--digest",
+            GOOD_DIGEST,
+            "--section",
+            "Decisions=JWT chosen.",
+            "--approx-tokens",
+            "500",
+            "--approx-tokens-source",
+            "unmeasured",
+        ]
+    )
+
+    assert code == 1
+    assert "contradiction" in capsys.readouterr().err
+    assert list((tmp_path / "docs" / "topics").iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "number_args,source",
+    [([], "measured"), (["--approx-tokens", "500"], "unmeasured")],
+    ids=["source-without-number", "unmeasured-with-number"],
+)
+def test_cli_refuses_a_contradiction_with_the_message_not_a_traceback(
+    tmp_path, number_args, source
+):
+    """Run as a user runs it, in a process of its own: the first case was a
+    plain ValueError, which the CLI does not catch, and ended in a traceback."""
+    root = _init_shelf(tmp_path)
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "memshelf_mcp.cli",
+            "shelve",
+            "--shelf",
+            str(root),
+            "--slug",
+            "2026-09-01-contradiction",
+            "--kind",
+            "topic",
+            "--digest",
+            GOOD_DIGEST,
+            "--section",
+            "Decisions=JWT chosen.",
+            *number_args,
+            "--approx-tokens-source",
+            source,
+            "--no-commit",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 1, proc.stderr
+    assert "contradiction" in proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert list((root / "docs" / "topics").iterdir()) == []

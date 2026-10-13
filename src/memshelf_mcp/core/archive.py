@@ -81,6 +81,9 @@ class RollupReport:
     # other field: the episode is written, the count is right. Without this the
     # caller has no way to learn that the thing it points readers at is stale.
     warnings: list[str] = field(default_factory=list)
+    #: Derived files rebuild() could not render (#186): the rollup is written,
+    #: but ``ok`` is false and the CLI exits 1.
+    errors: list[str] = field(default_factory=list)
     #: The keywords carried forward from what this rollup absorbed (#172) —
     #: same list written into the episode's own `keywords` frontmatter,
     #: folded into its digest and its `description`. Surfaced here too so a
@@ -96,6 +99,8 @@ class RollupReport:
             "count": len(self.archived),
             "index_tokens_before": self.index_tokens_before,
             "index_tokens_after": self.index_tokens_after,
+            "ok": not self.errors,
+            "errors": self.errors,
             "warnings": self.warnings,
             "keywords": self.keywords,
         }
@@ -107,6 +112,8 @@ class PurgeReport:
     deleted: list[str] = field(default_factory=list)
     applied: bool = False
     warnings: list[str] = field(default_factory=list)
+    #: Derived files rebuild() could not render after the delete (#186).
+    errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -114,6 +121,8 @@ class PurgeReport:
             "deleted": self.deleted,
             "count": len(self.expired),
             "applied": self.applied,
+            "ok": not self.errors,
+            "errors": self.errors,
             "warnings": self.warnings,
             "note": (
                 "purge removes the working-tree file only — git history still "
@@ -339,7 +348,9 @@ def rollup(
     # рендера РОДИТЕЛЬСКОГО INDEX.md в свой report.warnings, и выбросить его
     # здесь значило бы оставить ровно ту тишину, ради которой соседняя строка
     # и появилась. Родительский INDEX важнее архивного — он в каждой сессии.
-    report.warnings.extend(rebuild(root).warnings)
+    rebuilt = rebuild(root)
+    report.warnings.extend(rebuilt.warnings)
+    report.errors.extend(rebuilt.errors)
     report.warnings.extend(rebuild_archive_index(root))
     report.index_tokens_after = _index_tokens(root)
     return report
@@ -433,6 +444,8 @@ def purge(shelf_root: str | Path, *, today: str | None = None, apply: bool = Fal
         # См. rollup: предупреждения обоих ребилдов, иначе удалённый эпизод
         # исчезает с диска, но остаётся в непересобранном INDEX — и отчёт
         # purge об этом молчит.
-        report.warnings.extend(rebuild(root).warnings)
+        rebuilt = rebuild(root)
+        report.warnings.extend(rebuilt.warnings)
+        report.errors.extend(rebuilt.errors)
         report.warnings.extend(rebuild_archive_index(root))
     return report
