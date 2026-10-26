@@ -71,7 +71,7 @@ jobs:
         # one for the commit and none for the tag object (checked 2026-10-07).
         # The trailing version comment is what dependabot updates along with
         # the sha.
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           # Делает релиз ВОЗОБНОВЛЯЕМЫМ. Джобы идут pypi → mcp-registry, и если
           # второй упал (у v0.1.0 — реестр отверг description длиннее 100), то
