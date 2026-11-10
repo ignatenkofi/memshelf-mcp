@@ -10,6 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-ignatenkofi.github.io%2Fmemshelf--mcp-blue.svg)](https://ignatenkofi.github.io/memshelf-mcp/)
 [![Sibling: docshelf](https://img.shields.io/badge/sibling-docshelf--mcp-green.svg)](https://github.com/ignatenkofi/docshelf-mcp)
+[![Memshelf MCP on StartupScores](https://startupscores.com/badge/memshelf-mcp.svg?style=shield&v=combo&theme=dark)](https://startupscores.com/open-source/memshelf-mcp)
 
 ```text
                               _          _  __
